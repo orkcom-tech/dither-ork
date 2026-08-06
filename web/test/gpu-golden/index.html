@@ -3,6 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <title>dither-ork GPU golden harness</title>
+    <!--
+      An empty inline icon, so the browser does not ask for /favicon.ico and the
+      static server does not have to answer 404. The harness forwards failed
+      loads to stderr now, and a 404 that is always there teaches a reader to
+      skip the line that will one day say the module is missing.
+    -->
+    <link rel="icon" href="data:," />
   </head>
   <body>
     <!--

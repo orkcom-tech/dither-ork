@@ -324,10 +324,38 @@ async function awaitAdapter(): Promise<GPUAdapter> {
 }
 
 async function initialise(): Promise<HarnessInfo> {
-  await init();
+  // First, because the failure it catches surfaces deep inside `init()` as
+  // something that does not mention it: the core is compiled with `+atomics`,
+  // so its linear memory is shared, so `WebAssembly.instantiate` refuses it
+  // without `SharedArrayBuffer`, which a document that is not cross-origin
+  // isolated does not have. `run.mjs` asserts the same thing from the outside;
+  // this one names it for anyone who opens the page by hand.
+  if (globalThis.crossOriginIsolated !== true) {
+    throw new Error(
+      "the harness document is not cross-origin isolated, so SharedArrayBuffer is unavailable " +
+        "and the WASM core (built with +atomics — shared memory) cannot instantiate. The server " +
+        "must send Cross-Origin-Opener-Policy: same-origin and Cross-Origin-Embedder-Policy: " +
+        "require-corp on every response, including the .wasm.",
+    );
+  }
+
+  try {
+    await init();
+  } catch (error) {
+    throw new Error(
+      `the WASM core failed to instantiate: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`,
+      { cause: error },
+    );
+  }
 
   const adapter = await awaitAdapter();
   const report = await checkCapabilities();
+  if (report.fatalFailures.length > 0) {
+    throw new Error(
+      `the browser cannot run the renderer: ` +
+        report.fatalFailures.map((c) => `${c.label} — ${c.detail}`).join("; "),
+    );
+  }
   layer = await GpuLayer.create({ report });
 
   const registry: EffectRegistry = loadEffectRegistry();

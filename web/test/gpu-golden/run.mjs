@@ -75,7 +75,7 @@ import {
 import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { launch, PINNED_VERSION } from "./chrome.mjs";
+import { describeContext, launch, PINNED_VERSION } from "./chrome.mjs";
 import { decodePng, encodePng } from "./png.mjs";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -100,6 +100,17 @@ const ARTIFACT_VAR = "DITHER_ORK_GOLDEN_ARTIFACTS";
 
 /** Largest per-channel difference an image may carry and still pass. */
 const MAX_CHANNEL_DELTA = 1;
+
+/**
+ * How long to wait for the harness module to finish its top-level execution.
+ *
+ * The page's `load` event has already fired by the time this is waited on, so
+ * under any normal outcome the global is there on the first poll. The budget is
+ * generous because the alternative — assuming — is what produced the failure
+ * this exists to prevent, and a slow runner must not be diagnosed as a broken
+ * module.
+ */
+const HARNESS_READY_TIMEOUT_MS = 30_000;
 
 /**
  * The adapter the reference set is valid for.
@@ -335,24 +346,87 @@ async function main() {
   let checked = 0;
   let written = 0;
 
+  /**
+   * Everything the page has said, laid out for a failure message.
+   *
+   * Called from every startup failure path rather than composed at each one, so
+   * there is no path that reports less than another. `run.mjs` used to print an
+   * anonymous `TypeError` and nothing else; the cost of that was measured in
+   * hours.
+   */
+  const pageReport = async (headline) => {
+    const context = await browser.page.context().catch((error) => {
+      process.stderr.write(`could not read the page context: ${String(error)}\n`);
+      return null;
+    });
+    const recorded = await browser.page
+      .evaluate("window.__ditherOrkGoldenError ?? null")
+      .catch(() => null);
+    const diagnostics = browser.page.diagnostics;
+    return new Error(
+      `${headline}\n\n` +
+        `page:\n${describeContext(context)
+          .split("\n")
+          .map((l) => `  ${l}`)
+          .join("\n")}\n\n` +
+        (recorded === null ? "" : `the harness recorded:\n  ${recorded.split("\n").join("\n  ")}\n\n`) +
+        (diagnostics.length === 0
+          ? "the page produced no console output, no exceptions and no failed loads at all — " +
+            "which usually means the module never ran.\n"
+          : `everything the page said, in order:\n  ${diagnostics.join("\n").split("\n").join("\n  ")}\n`),
+    );
+  };
+
   try {
     console.log(`browser: ${browser.version.Browser} (pinned ${PINNED_VERSION})`);
+
+    // Asserted before anything is asked of the harness, because the failure it
+    // catches — the WASM core's shared memory refusing to instantiate without
+    // SharedArrayBuffer — surfaces deep inside `init()` as something else
+    // entirely. `serve()` above sends both headers; this is the page confirming
+    // it actually got them.
+    const context = await browser.page.context();
+    console.log(
+      `page: ${context.href} readyState=${context.readyState} ` +
+        `crossOriginIsolated=${context.crossOriginIsolated} ` +
+        `SharedArrayBuffer=${context.sharedArrayBuffer} navigator.gpu=${context.webgpu}`,
+    );
+    if (context.crossOriginIsolated !== true || context.sharedArrayBuffer !== true) {
+      throw await pageReport(
+        `the harness page is not cross-origin isolated, so SharedArrayBuffer is unavailable and ` +
+          `the WASM core — built with +atomics, so its memory is shared — cannot instantiate. ` +
+          `Every response must carry Cross-Origin-Opener-Policy: same-origin and ` +
+          `Cross-Origin-Embedder-Policy: require-corp.`,
+      );
+    }
+
+    // The module is deferred, so `load` has fired and it has either finished or
+    // thrown. Waiting a little past that covers nothing but a slow machine; the
+    // failure below is the one that used to read "Cannot read properties of
+    // undefined (reading 'init')".
+    try {
+      await browser.page.waitFor("window.__ditherOrkGolden", {
+        timeoutMs: HARNESS_READY_TIMEOUT_MS,
+        what: "window.__ditherOrkGolden",
+      });
+    } catch (error) {
+      throw await pageReport(
+        `the harness module never assigned window.__ditherOrkGolden — it threw during top-level ` +
+          `execution, or it never loaded. ${String(error)}`,
+      );
+    }
 
     let info;
     try {
       info = await browser.page.evaluate("window.__ditherOrkGolden.init()");
     } catch (error) {
-      const recorded = await browser.page
-        .evaluate("window.__ditherOrkGoldenError ?? null")
-        .catch(() => null);
-      throw new Error(
-        `the harness page failed to start: ${String(error)}\n` +
-          (recorded === null ? "" : `page reported:\n${recorded}\n`) +
-          (browser.page.consoleLines.length === 0
-            ? ""
-            : `console:\n${browser.page.consoleLines.join("\n")}`),
-      );
+      throw await pageReport(`the harness page failed to start: ${String(error)}`);
     }
+
+    // Startup is over and it is the only phase whose failures were invisible.
+    // From here the page logs three debug lines per render; keeping them all on
+    // stderr would bury the one that matters. Nothing stops being recorded.
+    browser.page.setEcho("problems");
 
     const architecture = String(info.adapter.architecture ?? "");
     if (!architecture.includes(REQUIRED_ADAPTER_ARCHITECTURE)) {
