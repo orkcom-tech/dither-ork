@@ -23,7 +23,7 @@
  * code they govern.
  */
 
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import type {
   ComputePass,
   GpuEffect,
@@ -249,3 +249,6 @@ export default defineEffect({
   producesIndexMap: true,
   requiresIndexMap: true,
 });
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("outline", () => OUTLINE_GPU);

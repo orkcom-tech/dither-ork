@@ -16,6 +16,24 @@
  * fabricates one.
  */
 
-import { orderedDitherDescriptor, orderedDitherSpec } from "../gpu/effects/ordered";
+import {
+  orderedDitherDescriptor,
+  orderedDitherEffect,
+  orderedDitherSpec,
+} from "../gpu/effects/ordered";
+import { thresholdMatrixGpuEffect } from "../types/registry";
 
-export default orderedDitherDescriptor(orderedDitherSpec("bayer-8"));
+const spec = orderedDitherSpec("bayer-8");
+
+export default orderedDitherDescriptor(spec);
+
+/**
+ * Resolves this effect's id to its passes; see `registry/gpu-effects.ts`.
+ *
+ * The tile is a build-time input rather than something this module fetches: it
+ * comes from `dither-core`, and an ordered dither has no passes until it has
+ * one. That is the case the source contract exists for.
+ */
+export const gpu = thresholdMatrixGpuEffect(spec.effectId, spec.tile, (matrix) =>
+  orderedDitherEffect(spec, matrix),
+);

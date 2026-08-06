@@ -10,9 +10,12 @@ in its descriptor.
 | --- | --- |
 | `discovery.ts` | Finds effect modules with `import.meta.glob` |
 | `registry.ts` | Builds, validates, seals; lookup by id, slot, kind, family |
+| `load.ts` | `loadEffectRegistry()` — discover, validate, seal, once |
+| `gpu-effects.ts` | `loadGpuEffects()` — from an effect id to its compute passes |
+| `stack.ts` | `validateStack()` — the grammar rules that are about a combination |
 | `search.ts` | Ranked search and structural filtering (F-ST-08) |
 | `params.ts` | Defaults, validation and coercion for parameter sets |
-| `index.ts` | `loadEffectRegistry()` — the one call startup makes |
+| `index.ts` | The barrel; `loadEffectRegistry()` and `loadGpuEffects()` are the two calls startup makes |
 
 ## Adding an effect
 
@@ -50,6 +53,68 @@ Rules the glob enforces:
   startup error naming the file, not a silently missing effect.
 - The **file name is not the id.** The id lives in the descriptor and is what
   documents reference.
+
+### A parallel effect exports one more thing
+
+An effect that declares `execution: "gpu"` also exports its compute passes under
+**one name, `gpu`**:
+
+```ts
+import { defineEffect, staticGpuEffect } from "../types/registry";
+
+const PIXEL_SORT_GPU: GpuEffect = { effect: "pixel-sort", passes: [ /* ... */ ] };
+
+export default defineEffect({ id: "pixel-sort", execution: "gpu", /* ... */ });
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("pixel-sort", () => PIXEL_SORT_GPU);
+```
+
+That export is what turns an effect id out of a `.dork` file into something the
+pass compiler can schedule. Without it the effect is listed in the stack panel,
+validates, and cannot be rendered — so `loadGpuEffects()` refuses the whole
+catalogue and names the module, exactly as a missing surprise range does.
+
+**`build` is a thunk, not a value.** Several effects assemble a table before they
+can name their passes — the glyph sheet (F-PT-08), the clustered-dot screens
+(F-PT-03) — and building those at import time makes every effect in the
+catalogue cost something whether or not the document uses it. It also means the
+export can sit anywhere in the file instead of after everything it mentions.
+
+**Some effects cannot be built from nothing.** The five ordered dithers carry a
+threshold tile from `dither-core` as a `table` binding, and nothing on this side
+fabricates one, so they declare what they are waiting for:
+
+```ts
+export const gpu = thresholdMatrixGpuEffect(spec.effectId, spec.tile, (matrix) =>
+  orderedDitherEffect(spec, matrix),
+);
+```
+
+A caller asks `resolver.requirementOf(id)` first, fetches what it names, and only
+then asks for passes. `GpuBuildRequirement` is a closed union — `none` and
+`threshold-matrix` today — so an effect that needs a new kind of build-time data
+adds a member to it in `web/src/types/registry.ts` rather than improvising.
+
+### Stack rules are not descriptor rules
+
+`validateEffect` checks one effect. Some of the grammar is only about a
+*combination*, and that is `validateStack(registry, stack)`:
+
+- **the index map** — `requiresIndexMap` nodes (outline F-SP-10, dilate/erode
+  F-SP-11, and later hue-targeted recolour F-CO-09, index remap F-CO-10, the SVG
+  tracer F-EX-08) need a live quantizer in front of them. CMYK halftone (F-PT-02)
+  is the one dither-slot node that emits no index map, because its output colours
+  are ink overprints rather than palette entries, so it is the one that can leave
+  a stack unrenderable. That combination is refused up front, naming both nodes,
+  instead of throwing a `ScheduleError` after the user has built it.
+- **exclusions** — `excludes` pairs are refused by the grammar rather than
+  filtered after generation (F-SM-03).
+
+Both the stack editor and Surprise Me call it, so neither keeps a copy of the
+rule. Disabled nodes are skipped by every rule, because a disabled node is not in
+the render (F-ST-02) and counting one either way describes a pipeline that does
+not run.
 
 **Read `web/src/effects/error-diffusion.ts` before writing a new descriptor.**
 The reasoning about *why* each surprise range is where it is matters far more

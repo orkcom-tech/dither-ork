@@ -19,7 +19,7 @@
  * grammar only; F-ST-01 lets the user drag the node anywhere.
  */
 
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import type { ComputePass, GpuEffect, PassBinding, UniformLayout } from "../types/gpu";
 
 import wgsl from "../shaders/emboss.wgsl?raw";
@@ -142,3 +142,6 @@ export const EMBOSS_PARAM_TYPES: ReadonlyMap<string, ParamDescriptor> =
     [ANGLE.key, ANGLE],
     [DEPTH.key, DEPTH],
   ]);
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("emboss", () => embossGpuEffect);

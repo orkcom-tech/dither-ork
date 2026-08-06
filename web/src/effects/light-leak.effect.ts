@@ -27,7 +27,7 @@
  * support, are in `../shaders/light-leak.wgsl` next to the code that does it.
  */
 
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import type {
   ComputePass,
   GpuEffect,
@@ -281,3 +281,6 @@ export default defineEffect({
   producesIndexMap: false,
   requiresIndexMap: false,
 });
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("light-leak", () => LIGHT_LEAK_GPU);

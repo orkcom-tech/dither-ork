@@ -20,7 +20,7 @@
  * anywhere.
  */
 
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import type { ComputePass, GpuEffect, PassBinding, UniformLayout } from "../types/gpu";
 
 import wgsl from "../shaders/epsilon-glow.wgsl?raw";
@@ -236,3 +236,6 @@ export const EPSILON_GLOW_PARAM_TYPES: ReadonlyMap<string, ParamDescriptor> =
     [INTENSITY.key, INTENSITY],
     [BLEND.key, BLEND],
   ]);
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("epsilon-glow", () => epsilonGlowGpuEffect);

@@ -40,7 +40,7 @@
  * colour picker does.
  */
 
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import type {
   ComputePass,
   GpuEffect,
@@ -374,3 +374,6 @@ export default defineEffect({
 // saying exactly what the nine say now. A variable-length gradient needs one
 // thing more — an array-shaped parameter kind, or a small per-node storage
 // buffer role — and that is a bigger decision than this effect should force.
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("gradient-map", () => GRADIENT_MAP_GPU);

@@ -17,7 +17,7 @@
  * space the levels are even in* lives there, next to the code that decides it.
  */
 
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import type {
   ComputePass,
   GpuEffect,
@@ -188,3 +188,6 @@ export default defineEffect({
   producesIndexMap: false,
   requiresIndexMap: false,
 });
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("posterize", () => POSTERIZE_GPU);

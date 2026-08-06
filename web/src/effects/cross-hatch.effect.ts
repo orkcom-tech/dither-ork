@@ -20,7 +20,7 @@ import type {
   PassBinding,
   UniformLayout,
 } from "../types/gpu";
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import wgsl from "../shaders/cross-hatch.wgsl?raw";
 
 const log = logger("gpu");
@@ -256,3 +256,6 @@ export function crossHatchEffect(): GpuEffect {
 
   return { effect: descriptor.id, passes: [pass] };
 }
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("cross-hatch", () => crossHatchEffect());

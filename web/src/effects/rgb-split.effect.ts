@@ -20,6 +20,7 @@
  */
 
 import type { EffectDescriptor, ParamDescriptor } from "../types/registry";
+import { staticGpuEffect } from "../types/registry";
 import type { ComputePass, GpuEffect, UniformLayout } from "../types/gpu";
 
 import wgsl from "../shaders/rgb-split.wgsl?raw";
@@ -257,3 +258,6 @@ export const rgbSplitGpuEffect: GpuEffect = {
 export const RGB_SPLIT_PARAM_TYPES: ReadonlyMap<string, ParamDescriptor> = new Map(
   PARAMS.map((param) => [param.key, param]),
 );
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("rgb-split", () => rgbSplitGpuEffect);

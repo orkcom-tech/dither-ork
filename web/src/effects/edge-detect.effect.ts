@@ -18,7 +18,7 @@
  * Surprise Me's grammar only; F-ST-01 lets the user drag the node anywhere.
  */
 
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import type { ComputePass, GpuEffect, PassBinding, UniformLayout } from "../types/gpu";
 
 import wgsl from "../shaders/edge-detect.wgsl?raw";
@@ -174,3 +174,6 @@ export const EDGE_DETECT_PARAM_TYPES: ReadonlyMap<string, ParamDescriptor> =
     [STRENGTH.key, STRENGTH],
     [MIX.key, MIX],
   ]);
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("edge-detect", () => edgeDetectGpuEffect);

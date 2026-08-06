@@ -20,7 +20,7 @@
 
 import type { ParameterValue } from "../types/document";
 import type { ComputePass, GpuEffect, PassBinding, UniformLayout } from "../types/gpu";
-import { defineEffect } from "../types/registry";
+import { staticGpuEffect, defineEffect } from "../types/registry";
 import type { EffectDescriptor, ParamDescriptor } from "../types/registry";
 
 import wgsl from "../shaders/block-shuffle.wgsl?raw";
@@ -223,3 +223,6 @@ export function createBlockShuffle(): {
 } {
   return { descriptor: DESCRIPTOR, gpu: BLOCK_SHUFFLE_GPU };
 }
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("block-shuffle", () => BLOCK_SHUFFLE_GPU);

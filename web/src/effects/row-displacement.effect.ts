@@ -17,6 +17,7 @@
  */
 
 import type { EffectDescriptor, ParamDescriptor } from "../types/registry";
+import { staticGpuEffect } from "../types/registry";
 import type { ComputePass, GpuEffect, PassBinding, UniformLayout } from "../types/gpu";
 
 import wgsl from "../shaders/row-displacement.wgsl?raw";
@@ -263,3 +264,6 @@ export const rowDisplacementGpuEffect: GpuEffect = {
 export const ROW_DISPLACEMENT_PARAM_TYPES: ReadonlyMap<string, ParamDescriptor> = new Map(
   PARAMS.map((param) => [param.key, param]),
 );
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("row-displacement", () => rowDisplacementGpuEffect);

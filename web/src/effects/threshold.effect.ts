@@ -12,7 +12,7 @@
  * does it.
  */
 
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import type {
   ComputePass,
   GpuEffect,
@@ -145,3 +145,6 @@ export default defineEffect({
   producesIndexMap: false,
   requiresIndexMap: false,
 });
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("threshold", () => THRESHOLD_GPU);

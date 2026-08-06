@@ -29,6 +29,7 @@
  */
 
 import type { EffectDescriptor, ParamDescriptor } from "../types/registry";
+import { staticGpuEffect } from "../types/registry";
 import type { ComputePass, GpuEffect, UniformLayout } from "../types/gpu";
 
 import wgsl from "../shaders/chromatic-aberration.wgsl?raw";
@@ -296,3 +297,6 @@ export const chromaticAberrationGpuEffect: GpuEffect = {
 export const CHROMATIC_ABERRATION_PARAM_TYPES: ReadonlyMap<string, ParamDescriptor> = new Map(
   PARAMS.map((param) => [param.key, param]),
 );
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("chromatic-aberration", () => chromaticAberrationGpuEffect);

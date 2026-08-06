@@ -27,6 +27,7 @@
 import {
   defineEffect,
   type ParamDescriptor,
+  staticGpuEffect,
 } from "../types/registry";
 import type {
   ComputePass,
@@ -222,3 +223,6 @@ export function interlaceTearEffect(): GpuEffect {
 
   return { effect: "interlace-tear", passes: [pass] };
 }
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("interlace-tear", () => interlaceTearEffect());

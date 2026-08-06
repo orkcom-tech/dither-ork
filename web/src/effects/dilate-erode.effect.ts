@@ -19,7 +19,7 @@
  * in `../shaders/dilate-erode.wgsl`, next to the code they govern.
  */
 
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import type {
   ComputePass,
   GpuEffect,
@@ -226,3 +226,6 @@ export default defineEffect({
   producesIndexMap: true,
   requiresIndexMap: true,
 });
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("dilate-erode", () => DILATE_ERODE_GPU);

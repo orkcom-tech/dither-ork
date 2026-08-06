@@ -20,7 +20,51 @@ export type BlendMode =
 
 export type ColorMetric = "oklab" | "srgb";
 
-export type ParameterValue = number | boolean | string;
+/**
+ * Packed 8-bit sRGB, the same layout as {@link Palette.colors} and the WASM
+ * boundary.
+ *
+ * Defined here rather than in the registry because it is a **serialised** shape
+ * first: `.dork` has to be able to write one down, and the registry's `color`
+ * parameter kind then re-exports this rather than declaring a second triplet
+ * that has to be kept byte-compatible with it by hand.
+ */
+export type SrgbTriplet = readonly [r: number, g: number, b: number];
+
+/** One control point of a transfer curve, both coordinates in `[0, 1]`. */
+export interface CurvePoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * Everything a node parameter can be, and therefore everything `.dork` has to
+ * round-trip.
+ *
+ * The composite members are not decoration. The registry declares `color` and
+ * `curve` parameter kinds (`web/src/types/registry.ts`), so a schema of `number
+ * | boolean | string` meant a document containing either could be written and
+ * then not read back — the effect's own value would come back as the descriptor
+ * default with a coercion warning, which is a document that silently stopped
+ * being the one that was saved.
+ *
+ * Both are **JSON-native and match the shape the rest of the pipeline already
+ * uses**: a colour is the same three integers the palette is packed from, and a
+ * curve is the point list the editor draws. Neither is encoded as a string. A
+ * hex colour would need a parser on both sides and would not be the palette's
+ * layout; a comma-joined curve would need one too, and a parser between the
+ * document and the registry is where the two drift apart.
+ *
+ * The two are distinguishable without the descriptor — a colour is three
+ * numbers, a curve is objects — but nothing relies on that: the descriptor
+ * names the kind, and `registry/params.ts` checks the value against it.
+ */
+export type ParameterValue =
+  | number
+  | boolean
+  | string
+  | SrgbTriplet
+  | readonly CurvePoint[];
 
 /** One effect instance in the stack. */
 export interface StackNode {

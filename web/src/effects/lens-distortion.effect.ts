@@ -13,7 +13,7 @@
  * `./invert.effect.ts` for why.
  */
 
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import type {
   ComputePass,
   GpuEffect,
@@ -205,3 +205,6 @@ export default defineEffect({
   producesIndexMap: false,
   requiresIndexMap: false,
 });
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("lens-distortion", () => LENS_DISTORTION_GPU);

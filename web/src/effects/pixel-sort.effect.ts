@@ -31,6 +31,7 @@
  */
 
 import type { EffectDescriptor, ParamDescriptor } from "../types/registry";
+import { staticGpuEffect } from "../types/registry";
 import type { ComputePass, GpuEffect, PassBinding, UniformLayout } from "../types/gpu";
 
 import wgsl from "../shaders/pixel-sort.wgsl?raw";
@@ -314,3 +315,6 @@ export const pixelSortGpuEffect: GpuEffect = {
 export const PIXEL_SORT_PARAM_TYPES: ReadonlyMap<string, ParamDescriptor> = new Map(
   PARAMS.map((param) => [param.key, param]),
 );
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("pixel-sort", () => pixelSortGpuEffect);

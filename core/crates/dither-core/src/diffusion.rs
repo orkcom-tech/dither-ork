@@ -410,15 +410,238 @@ pub const SHIAU_FAN_2: Kernel = fixed!(
     ]
 );
 
-// F-ED-14, Ostromoukhov, is deliberately absent from KERNELS.
-//
-// The method is a 256-row table of (right, down-left, down) weights solved
-// numerically in the 2001 paper; there is no closed form to derive it from and
-// no part of it that can be inferred from the shape of the algorithm. The
-// machinery it needs is implemented and tested — `Rule::Variable`, the
-// per-level divisor and the level index — so registering it is one `const`
-// away, but writing 256 rows from memory would produce a kernel that renders
-// and is wrong, which is the single failure this catalogue cannot absorb.
+/// One published row of Ostromoukhov's table, in the paper's own column order.
+const fn lw(right: u32, down_left: u32, down: u32) -> LevelWeights {
+    LevelWeights {
+        right,
+        down_left,
+        down,
+    }
+}
+
+/// F-ED-14, as printed in Appendix I of Ostromoukhov's paper: the levels
+/// `[0..127]`, three integers each, `A_10 A_-11 A_01`.
+///
+/// The subscripts are the paper's own `(dx, dy)` offsets, so the columns are
+/// the weights for the pixel to the **right**, the pixel **down-left** and the
+/// pixel **below** — the three taps of Figure 1. There is no divisor column
+/// because the paper defines `M(i) = A_10(i) + A_-11(i) + A_01(i)` and
+/// `d(i) = A(i)/M(i)`: the row normalizes against its own sum. See
+/// [`LevelWeights`].
+///
+/// Only half the range is published. Fifteen levels — marked `key` — were
+/// optimized off-line against blue-noise spectra; everything between them is a
+/// linear interpolation of the *normalized* coefficients, which is why the
+/// integers look arbitrary and their sums do not. That structure is not
+/// decoration: it is what
+/// [`tests::the_published_table_interpolates_linearly_between_the_papers_key_levels`]
+/// checks, and it is a far sharper transcription test than any sum could be,
+/// because a single mistyped digit breaks the exact rational arithmetic of the
+/// segment it lands in.
+const PUBLISHED_HALF: [LevelWeights; LEVELS / 2] = [
+    lw(13, 0, 5),         //   0 key
+    lw(13, 0, 5),         //   1 key
+    lw(21, 0, 10),        //   2 key
+    lw(7, 0, 4),          //   3 key
+    lw(8, 0, 5),          //   4 key
+    lw(47, 3, 28),        //   5
+    lw(23, 3, 13),        //   6
+    lw(15, 3, 8),         //   7
+    lw(22, 6, 11),        //   8
+    lw(43, 15, 20),       //   9
+    lw(7, 3, 3),          //  10 key
+    lw(501, 224, 211),    //  11
+    lw(249, 116, 103),    //  12
+    lw(165, 80, 67),      //  13
+    lw(123, 62, 49),      //  14
+    lw(489, 256, 191),    //  15
+    lw(81, 44, 31),       //  16
+    lw(483, 272, 181),    //  17
+    lw(60, 35, 22),       //  18
+    lw(53, 32, 19),       //  19
+    lw(237, 148, 83),     //  20
+    lw(471, 304, 161),    //  21
+    lw(3, 2, 1),          //  22 key
+    lw(481, 314, 185),    //  23
+    lw(354, 226, 155),    //  24
+    lw(1389, 866, 685),   //  25
+    lw(227, 138, 125),    //  26
+    lw(267, 158, 163),    //  27
+    lw(327, 188, 220),    //  28
+    lw(61, 34, 45),       //  29
+    lw(627, 338, 505),    //  30
+    lw(1227, 638, 1075),  //  31
+    lw(20, 10, 19),       //  32 key
+    lw(1937, 1000, 1767), //  33
+    lw(977, 520, 855),    //  34
+    lw(657, 360, 551),    //  35
+    lw(71, 40, 57),       //  36
+    lw(2005, 1160, 1539), //  37
+    lw(337, 200, 247),    //  38
+    lw(2039, 1240, 1425), //  39
+    lw(257, 160, 171),    //  40
+    lw(691, 440, 437),    //  41
+    lw(1045, 680, 627),   //  42
+    lw(301, 200, 171),    //  43
+    lw(177, 120, 95),     //  44
+    lw(2141, 1480, 1083), //  45
+    lw(1079, 760, 513),   //  46
+    lw(725, 520, 323),    //  47
+    lw(137, 100, 57),     //  48
+    lw(2209, 1640, 855),  //  49
+    lw(53, 40, 19),       //  50
+    lw(2243, 1720, 741),  //  51
+    lw(565, 440, 171),    //  52
+    lw(759, 600, 209),    //  53
+    lw(1147, 920, 285),   //  54
+    lw(2311, 1880, 513),  //  55
+    lw(97, 80, 19),       //  56
+    lw(335, 280, 57),     //  57
+    lw(1181, 1000, 171),  //  58
+    lw(793, 680, 95),     //  59
+    lw(599, 520, 57),     //  60
+    lw(2413, 2120, 171),  //  61
+    lw(405, 360, 19),     //  62
+    lw(2447, 2200, 57),   //  63
+    lw(11, 10, 0),        //  64 key
+    lw(158, 151, 3),      //  65
+    lw(178, 179, 7),      //  66
+    lw(1030, 1091, 63),   //  67
+    lw(248, 277, 21),     //  68
+    lw(318, 375, 35),     //  69
+    lw(458, 571, 63),     //  70
+    lw(878, 1159, 147),   //  71
+    lw(5, 7, 1),          //  72 key
+    lw(172, 181, 37),     //  73
+    lw(97, 76, 22),       //  74
+    lw(72, 41, 17),       //  75
+    lw(119, 47, 29),      //  76
+    lw(4, 1, 1),          //  77 key
+    lw(4, 1, 1),          //  78
+    lw(4, 1, 1),          //  79
+    lw(4, 1, 1),          //  80
+    lw(4, 1, 1),          //  81
+    lw(4, 1, 1),          //  82
+    lw(4, 1, 1),          //  83
+    lw(4, 1, 1),          //  84
+    lw(4, 1, 1),          //  85 key
+    lw(65, 18, 17),       //  86
+    lw(95, 29, 26),       //  87
+    lw(185, 62, 53),      //  88
+    lw(30, 11, 9),        //  89
+    lw(35, 14, 11),       //  90
+    lw(85, 37, 28),       //  91
+    lw(55, 26, 19),       //  92
+    lw(80, 41, 29),       //  93
+    lw(155, 86, 59),      //  94
+    lw(5, 3, 2),          //  95 key
+    lw(5, 3, 2),          //  96
+    lw(5, 3, 2),          //  97
+    lw(5, 3, 2),          //  98
+    lw(5, 3, 2),          //  99
+    lw(5, 3, 2),          // 100
+    lw(5, 3, 2),          // 101
+    lw(5, 3, 2),          // 102
+    lw(5, 3, 2),          // 103
+    lw(5, 3, 2),          // 104
+    lw(5, 3, 2),          // 105
+    lw(5, 3, 2),          // 106
+    lw(5, 3, 2),          // 107 key
+    lw(305, 176, 119),    // 108
+    lw(155, 86, 59),      // 109
+    lw(105, 56, 39),      // 110
+    lw(80, 41, 29),       // 111
+    lw(65, 32, 23),       // 112
+    lw(55, 26, 19),       // 113
+    lw(335, 152, 113),    // 114
+    lw(85, 37, 28),       // 115
+    lw(115, 48, 37),      // 116
+    lw(35, 14, 11),       // 117
+    lw(355, 136, 109),    // 118
+    lw(30, 11, 9),        // 119
+    lw(365, 128, 107),    // 120
+    lw(185, 62, 53),      // 121
+    lw(25, 8, 7),         // 122
+    lw(95, 29, 26),       // 123
+    lw(385, 112, 103),    // 124
+    lw(65, 18, 17),       // 125
+    lw(395, 104, 101),    // 126
+    lw(4, 1, 1),          // 127 key
+];
+
+/// The levels the paper solved for rather than interpolated, as highlighted in
+/// Appendix I and repeated in the `key` comments above.
+///
+/// Test-only, because the running algorithm has no use for it: at render time
+/// a key level and an interpolated one are the same lookup. It exists so that
+/// the transcription can be checked against the table's own shape — see
+/// [`tests::the_published_table_interpolates_linearly_between_the_papers_key_levels`].
+#[cfg(test)]
+const KEY_LEVELS: [usize; 15] = [0, 1, 2, 3, 4, 10, 22, 32, 64, 72, 77, 85, 95, 107, 127];
+
+/// Both halves, mirrored the way the paper's Step 3 says to mirror them.
+///
+/// "We extend the half-range [0..127] symmetrically around 127.5", which is
+/// `D(i) = D(255 - i)` — level 128 takes level 127's row and level 255 takes
+/// level 0's. Built here rather than transcribed as 256 rows because the
+/// second half is not data: it is a rule, and a rule that is executed cannot
+/// disagree with the half it is derived from.
+const fn mirrored(half: &[LevelWeights; LEVELS / 2]) -> [LevelWeights; LEVELS] {
+    let mut out = [lw(1, 1, 1); LEVELS];
+    let mut i = 0;
+    while i < LEVELS {
+        out[i] = if i < LEVELS / 2 {
+            half[i]
+        } else {
+            half[LEVELS - 1 - i]
+        };
+        i += 1;
+    }
+    out
+}
+
+const OSTROMOUKHOV_LEVELS: [LevelWeights; LEVELS] = mirrored(&PUBLISHED_HALF);
+
+/// F-ED-14. Ostromoukhov, 2001.
+///
+/// The only kernel here whose coefficients depend on the pixel. Its shape is
+/// the cheapest one in the catalogue — three taps, the same three [`SIERRA_LITE`]
+/// uses, which is Floyd-Steinberg without the tap that lands diagonally ahead
+/// of the scan. What varies is the weights: they are looked up per input level
+/// from a table solved off-line so that the Fourier spectrum at each key level
+/// sits as close to blue noise as three coefficients can be made to sit. That
+/// is the whole method, and it is why it is both faster than Floyd-Steinberg
+/// and quieter than it.
+///
+/// ```text
+///          *     A_10
+///    A_-11 A_01         (1 / (A_10 + A_-11 + A_01))
+/// ```
+///
+/// Transcribed from Appendix I of Victor Ostromoukhov, "A Simple and Efficient
+/// Error-Diffusion Algorithm", Proceedings of SIGGRAPH 2001, pp. 567-572.
+///
+/// **These numbers are not the ones other implementations use, and that is
+/// deliberate.** Alongside the paper the author released C sample code
+/// (`varcoeffED.tar`), and its table differs from the paper's for input levels
+/// 23..=71 — it places a key level at 36 where the paper places one at 32, and
+/// it gives level 64 a different triple. Every third-party implementation
+/// traced during this transcription descends from that sample code, so the
+/// paper's own table is the minority reading in the wild. It is nonetheless
+/// what is registered here: the paper is the published record, it is what this
+/// kernel cites, and its table is self-consistent in a way that can be checked
+/// — the levels it highlights as key are exactly the levels at which its own
+/// numbers stop interpolating linearly. The sample-code table does not satisfy
+/// that against the paper's highlighting. Whoever revisits this should know
+/// that both tables are the author's and that switching to the other one is an
+/// edit to [`PUBLISHED_HALF`] and a re-bless of the golden set, nothing more.
+pub const OSTROMOUKHOV: Kernel = Kernel {
+    id: "ostromoukhov",
+    name: "Ostromoukhov",
+    rule: Rule::Variable {
+        levels: &OSTROMOUKHOV_LEVELS,
+    },
+};
 
 /// Riemersma's published defaults: sixteen errors of history, the newest
 /// weighted sixteen times the oldest.
@@ -458,6 +681,7 @@ pub const KERNELS: &[Kernel] = &[
     FAN,
     SHIAU_FAN,
     SHIAU_FAN_2,
+    OSTROMOUKHOV,
     RIEMERSMA,
 ];
 
@@ -1468,13 +1692,16 @@ mod tests {
         assert_ne!(per.indices, luma.indices);
     }
 
-    // ---- the variable-coefficient path (F-ED-14 machinery) -------------------
+    // ---- the variable-coefficient path (F-ED-14) -----------------------------
 
-    /// F-ED-14's coefficients are not in the tree, so the code path is proved
-    /// against a table that is: a table whose every row is the same triple must
-    /// behave exactly like the fixed kernel with those three taps. If the level
-    /// lookup, the per-row divisor or the serpentine mirroring were wrong, the
-    /// two would not agree.
+    /// The code path, proved independently of the table it will be given: a
+    /// table whose every row is the same triple must behave exactly like the
+    /// fixed kernel with those three taps. If the level lookup, the per-row
+    /// divisor or the serpentine mirroring were wrong, the two would not agree.
+    ///
+    /// Worth keeping now that F-ED-14's real coefficients are in the tree,
+    /// because it is the only test here that isolates the machinery from them —
+    /// everything below would also fail on a bad table.
     #[test]
     fn a_constant_level_table_matches_the_equivalent_fixed_kernel() {
         const CONSTANT: [LevelWeights; LEVELS] = [LevelWeights {
@@ -1506,6 +1733,145 @@ mod tests {
             let a = dither(&src, w, h, &pal, &VARIABLE, opts);
             let b = dither(&src, w, h, &pal, &EQUIVALENT, opts);
             assert_eq!(a.indices, b.indices, "serpentine {serpentine}");
+        }
+    }
+
+    fn triple(w: LevelWeights) -> (u32, u32, u32) {
+        (w.right, w.down_left, w.down)
+    }
+
+    /// The transcription check for F-ED-14, and the only one that could catch a
+    /// mistyped digit in it.
+    ///
+    /// `golden.rs` pins the fixed kernels by perturbing a tap table; F-ED-14
+    /// has no tap table to perturb, so it is skipped there, and a wrong digit
+    /// in 128 published rows would render a picture and pass every other test
+    /// in this file. What pins it instead is the paper's own construction:
+    /// fifteen key levels were solved off-line and every level between them is
+    /// a linear interpolation of the **normalized** coefficients. So for any
+    /// non-key level, `d(i-1) + d(i+1) == 2*d(i)`, and at a key level it does
+    /// not. One wrong digit breaks that in the segment it lands in.
+    ///
+    /// Cross-multiplied into `i128` rather than evaluated in floating point,
+    /// because the claim is exact equality of rationals — in `f32` this would
+    /// pass on a table that is merely close, which is precisely the table a
+    /// transcription error produces.
+    ///
+    /// What it is worth, measured rather than hoped for: of the 762 possible
+    /// off-by-one changes to a single number in the table this rejects 742, and
+    /// of the 415 possible adjacent-digit transpositions it rejects 411. Every
+    /// one it misses is in levels 0..=3, and for a structural reason worth
+    /// knowing — 0, 1, 2, 3 and 4 are all key levels, so those rows sit in no
+    /// interpolation segment and nothing here constrains them. They are four
+    /// two-digit triples (`13,0,5`, `13,0,5`, `21,0,10`, `7,0,4`) on which the
+    /// paper and every implementation traced during transcription agree, which
+    /// is the corroboration they have instead. The other 124 rows are pinned.
+    #[test]
+    fn the_published_table_interpolates_linearly_between_the_papers_key_levels() {
+        let sum = |w: LevelWeights| (w.right + w.down_left + w.down) as i128;
+        let part = |w: LevelWeights, c: usize| match c {
+            0 => w.right as i128,
+            1 => w.down_left as i128,
+            _ => w.down as i128,
+        };
+
+        for i in 1..PUBLISHED_HALF.len() - 1 {
+            let (a, b, c) = (
+                PUBLISHED_HALF[i - 1],
+                PUBLISHED_HALF[i],
+                PUBLISHED_HALF[i + 1],
+            );
+            let (sa, sb, sc) = (sum(a), sum(b), sum(c));
+            let linear = (0..3)
+                .all(|k| part(a, k) * sc * sb + part(c, k) * sa * sb == 2 * part(b, k) * sa * sc);
+            let key = KEY_LEVELS.contains(&i);
+            assert_eq!(
+                linear,
+                !key,
+                "level {i}: the coefficients {} interpolate linearly here, but \
+                 Appendix I {} highlight it as a key level — one of the two has \
+                 been mistranscribed",
+                if linear { "do" } else { "do not" },
+                if key { "does" } else { "does not" },
+            );
+        }
+    }
+
+    /// Every row has to have a divisor, because the row *is* the divisor.
+    /// `run_variable` panics on a row of zeroes rather than dividing by it; this
+    /// is the static form of that check, and the analogue of
+    /// [`fixed_tap_tables_sum_to_their_divisor`] for the variable family.
+    #[test]
+    fn every_published_row_carries_a_divisor() {
+        for (level, w) in PUBLISHED_HALF.iter().enumerate() {
+            assert!(
+                w.right + w.down_left + w.down > 0,
+                "published row {level} sums to zero"
+            );
+        }
+    }
+
+    /// The half the paper prints, and the half it only describes.
+    ///
+    /// Appendix I stops at 127; Step 3 extends it "symmetrically around 127.5",
+    /// which is `D(i) = D(255 - i)`. The derived half is built by
+    /// [`mirrored`], so this checks that the rule was applied the way the paper
+    /// states it and that the transcribed half survived into the table intact.
+    #[test]
+    fn the_variable_table_is_mirrored_around_the_papers_midpoint() {
+        let Rule::Variable { levels } = OSTROMOUKHOV.rule else {
+            panic!("F-ED-14 is no longer a variable-coefficient rule");
+        };
+
+        for (i, w) in PUBLISHED_HALF.iter().enumerate() {
+            assert_eq!(
+                triple(levels[i]),
+                triple(*w),
+                "level {i} is not as published"
+            );
+        }
+        for i in 0..LEVELS {
+            let j = LEVELS - 1 - i;
+            assert_eq!(
+                triple(levels[i]),
+                triple(levels[j]),
+                "levels {i} and {j} carry different weights"
+            );
+        }
+        // The seam. Mirroring around 127.5 rather than around 127 means the two
+        // middle rows are the same row, not that 128 is skipped.
+        assert_eq!(triple(levels[127]), triple(levels[128]));
+        assert_eq!(triple(levels[255]), triple(PUBLISHED_HALF[0]));
+    }
+
+    /// The linear-light claim, for F-ED-14 specifically.
+    ///
+    /// [`every_kernel_averages_a_flat_grey_back_to_itself`] already runs this
+    /// over the whole catalogue at two levels; this one exists because F-ED-14
+    /// is the only kernel whose coefficients change with the input, so it is
+    /// the only one where the *level* being tested chooses which rows of the
+    /// table are on trial. Three levels, deliberately spread across both halves
+    /// of the mirrored table.
+    #[test]
+    fn ostromoukhov_averages_a_flat_grey_back_to_its_own_luminance() {
+        let pal = Palette::from_srgb_rgb(builtin::MONO);
+        let (w, h) = (128usize, 96usize);
+
+        for encoded in [0.25f32, 0.5, 0.75] {
+            let level = srgb_to_linear(encoded);
+            let src = flat(w, h, Rgba::new(level, level, level, 1.0));
+            let res = dither(&src, w, h, &pal, &OSTROMOUKHOV, Options::default());
+            let mean: f32 = res.pixels.iter().map(|p| p.r).sum::<f32>() / (w * h) as f32;
+
+            assert!(
+                (mean - level).abs() < 0.02,
+                "at {encoded}: mean {mean} vs target {level}"
+            );
+            assert!(
+                (mean - level).abs() < (mean - encoded).abs(),
+                "at {encoded}: mean {mean} sits nearer the encoded value than the \
+                 linear one {level} — this is what diffusing in sRGB looks like"
+            );
         }
     }
 

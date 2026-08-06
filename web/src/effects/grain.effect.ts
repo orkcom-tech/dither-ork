@@ -18,7 +18,7 @@
  * hash per pixel — are in `../shaders/grain.wgsl`, next to the code they govern.
  */
 
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import type {
   ComputePass,
   GpuEffect,
@@ -209,3 +209,6 @@ export default defineEffect({
   producesIndexMap: false,
   requiresIndexMap: false,
 });
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("grain", () => GRAIN_GPU);

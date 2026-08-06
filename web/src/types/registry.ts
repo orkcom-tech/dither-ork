@@ -26,7 +26,20 @@
  * ```
  */
 
-import type { NodeSlot } from "./document";
+import type { CurvePoint, NodeSlot, SrgbTriplet } from "./document";
+import type { GpuEffect } from "./gpu";
+import type { ThresholdMatrix } from "../gpu/matrices";
+
+/**
+ * The two composite parameter values, re-exported from the schema that has to
+ * serialise them.
+ *
+ * They are declared in `./document` and not here because `.dork` is what has to
+ * write them down; a second declaration on this side would be one more thing to
+ * keep byte-compatible with the first. Descriptors go on importing them from
+ * the registry, which is where a parameter kind is described.
+ */
+export type { CurvePoint, SrgbTriplet };
 
 /**
  * Effect families, matching the spec's requirement groups.
@@ -185,9 +198,6 @@ export interface EnumParam extends ParamBase {
   readonly surprise: EnumSurprise;
 }
 
-/** Packed 8-bit sRGB, the same layout as the document palette and the WASM boundary. */
-export type SrgbTriplet = readonly [r: number, g: number, b: number];
-
 /**
  * Colour surprise, expressed in OKLab.
  *
@@ -249,12 +259,6 @@ export const SEED_RANGE: Range = [0, 0xffffffff];
 
 /** Upper bound accepted for an OKLab chroma range. sRGB cannot exceed ~0.33. */
 export const CHROMA_CEILING = 0.5;
-
-/** One control point of a curve, both coordinates in `[0, 1]`. */
-export interface CurvePoint {
-  readonly x: number;
-  readonly y: number;
-}
 
 /**
  * Named curve shapes.
@@ -361,9 +365,148 @@ export function defineEffect<const D extends EffectDescriptor>(descriptor: D): D
   return descriptor;
 }
 
-/** The shape of an effect module, as the glob loader sees it. */
+// --- from an effect id to its compute passes -----------------------------
+//
+// The registry globs *descriptors*, and a descriptor says an effect runs on the
+// GPU without saying where its passes are. Until this contract existed each
+// effect module exported its `GpuEffect` under a name of its own — `INVERT_GPU`,
+// `blurGpuEffect`, `halftoneEffect()` — and the only caller was a page that
+// imported all forty-four by hand. A document loader cannot do that: it has an
+// effect id out of a `.dork` file and nothing else.
+//
+// One convention, stated once: **an effect module that declares `execution:
+// "gpu"` exports `const gpu: GpuEffectSource` beside its default export.**
+// `registry/gpu-effects.ts` collects them with the same glob that collects the
+// descriptors, and refuses a catalogue where the two disagree.
+
+/**
+ * What an effect needs handed to it before its passes exist.
+ *
+ * A closed union with two members rather than a boolean, because the interesting
+ * case is the one the naive design gets wrong: the five ordered dithers cannot
+ * be built at all until the Rust core has produced a threshold tile, so
+ * "constructible from nothing" is a property some effects do not have and the
+ * lookup has to be able to say so *before* it tries. Today `threshold-matrix` is
+ * the only kind of build-time data any effect needs; a second kind is a
+ * deliberate edit here, not something a caller can improvise.
+ */
+export type GpuBuildRequirement =
+  /** Constructible from nothing. Thirty-nine of the forty-four. */
+  | { readonly kind: "none" }
+  /**
+   * Needs a validated tile of `size * size` ranks from `dither-core`
+   * (F-OD-01..05). Nothing on the web side fabricates one.
+   */
+  | { readonly kind: "threshold-matrix"; readonly size: number };
+
+/** The build-time data itself, in the same closed set as the requirement. */
+export type GpuBuildData =
+  | { readonly kind: "none" }
+  | { readonly kind: "threshold-matrix"; readonly matrix: ThresholdMatrix };
+
+/** The only value of {@link GpuBuildData} an effect requiring nothing accepts. */
+export const NO_GPU_BUILD_DATA: GpuBuildData = { kind: "none" };
+
+/** Thrown when {@link GpuEffectSource.build} is handed data of the wrong kind. */
+export class GpuBuildDataError extends Error {
+  readonly effect: string;
+
+  constructor(effect: string, message: string) {
+    super(message);
+    this.name = "GpuBuildDataError";
+    this.effect = effect;
+  }
+}
+
+/**
+ * An effect module's GPU side: how to get from its id to its compute passes.
+ *
+ * `build` is a function rather than a ready-made `GpuEffect` for two reasons,
+ * both of which bite in a catalogue this size. Several effects assemble a table
+ * before they can name their passes — the glyph sheet (F-PT-08), the clustered
+ * dot screens (F-PT-03) — and doing that at module-evaluation time makes every
+ * effect in the build cost something whether or not the document uses it. And a
+ * `const` evaluated at import time has to be declared after everything it
+ * mentions; a thunk can sit anywhere in the file, which is what makes the
+ * convention a mechanical addition to forty-four existing modules rather than a
+ * reordering of each of them.
+ */
+export interface GpuEffectSource {
+  /** Must equal the id of the descriptor the same module default-exports. */
+  readonly effect: string;
+  readonly requires: GpuBuildRequirement;
+  /** @throws GpuBuildDataError when `data.kind` is not `requires.kind`. */
+  build(data: GpuBuildData): GpuEffect;
+}
+
+/**
+ * Declare the GPU side of an effect whose passes are constant.
+ *
+ * ```ts
+ * export const gpu = staticGpuEffect("invert", () => INVERT_GPU);
+ * ```
+ */
+export function staticGpuEffect(
+  effect: string,
+  build: () => GpuEffect,
+): GpuEffectSource {
+  return {
+    effect,
+    requires: { kind: "none" },
+    build: (data) => {
+      if (data.kind !== "none") {
+        throw new GpuBuildDataError(
+          effect,
+          `${effect} needs no build-time data, but was handed ${data.kind}`,
+        );
+      }
+      return build();
+    },
+  };
+}
+
+/**
+ * Declare the GPU side of an effect whose passes need a threshold tile.
+ *
+ * ```ts
+ * export const gpu = thresholdMatrixGpuEffect(spec.effectId, spec.tile, (matrix) =>
+ *   orderedDitherEffect(spec, matrix),
+ * );
+ * ```
+ *
+ * The tile is not fetched here and it is not defaulted. `size` is declared so a
+ * caller can ask the core for the right tile *before* it has anything to build
+ * with; the matrix's own id and size are checked by the effect that consumes it.
+ */
+export function thresholdMatrixGpuEffect(
+  effect: string,
+  size: number,
+  build: (matrix: ThresholdMatrix) => GpuEffect,
+): GpuEffectSource {
+  return {
+    effect,
+    requires: { kind: "threshold-matrix", size },
+    build: (data) => {
+      if (data.kind !== "threshold-matrix") {
+        throw new GpuBuildDataError(
+          effect,
+          `${effect} needs a ${size}x${size} threshold matrix, but was handed ${data.kind}`,
+        );
+      }
+      return build(data.matrix);
+    },
+  };
+}
+
+/**
+ * The shape of an effect module, as the glob loader sees it.
+ *
+ * `gpu` is present exactly when the descriptor declares `execution: "gpu"`, and
+ * `registry/gpu-effects.ts` fails the catalogue when it is not.
+ */
 export interface EffectModule {
   readonly default: EffectDescriptor;
+  readonly gpu?: GpuEffectSource;
 }
 
 /** Everything {@link validateRegistry} can reject, as a closed set. */

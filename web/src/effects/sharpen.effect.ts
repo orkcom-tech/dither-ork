@@ -20,7 +20,7 @@
  * only — F-ST-01 lets the user drag the node anywhere.
  */
 
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import type { ComputePass, GpuEffect, PassBinding, UniformLayout } from "../types/gpu";
 
 import wgsl from "../shaders/sharpen.wgsl?raw";
@@ -193,3 +193,6 @@ export const SHARPEN_PARAM_TYPES: ReadonlyMap<string, ParamDescriptor> =
     [RADIUS.key, RADIUS],
     [THRESHOLD.key, THRESHOLD],
   ]);
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("sharpen", () => sharpenGpuEffect);

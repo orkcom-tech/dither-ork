@@ -25,6 +25,7 @@
 import {
   defineEffect,
   type ParamDescriptor,
+  staticGpuEffect,
 } from "../types/registry";
 import type {
   ComputePass,
@@ -238,3 +239,6 @@ export function channelSwapEffect(): GpuEffect {
 
   return { effect: "channel-swap", passes: [pass] };
 }
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("channel-swap", () => channelSwapEffect());

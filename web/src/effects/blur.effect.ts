@@ -18,7 +18,7 @@
  * the layout below is read by exactly one shader.
  */
 
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import type { ComputePass, GpuEffect, PassBinding, UniformLayout } from "../types/gpu";
 
 import wgsl from "../shaders/blur.wgsl?raw";
@@ -135,3 +135,6 @@ export const BLUR_PARAM_TYPES: ReadonlyMap<string, ParamDescriptor> =
   new Map<string, ParamDescriptor>([
     [RADIUS.key, RADIUS],
   ]);
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("blur", () => blurGpuEffect);

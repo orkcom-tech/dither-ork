@@ -19,7 +19,7 @@
  * adding an effect edits nothing central — see `web/src/registry/README.md`.
  */
 
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import type {
   ComputePass,
   GpuEffect,
@@ -323,3 +323,6 @@ export default defineEffect({
   // neither reads nor writes one.
   requiresIndexMap: false,
 });
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("crt-mask", () => crtMaskEffect());

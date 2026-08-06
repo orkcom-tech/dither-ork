@@ -21,7 +21,7 @@
  * one.
  */
 
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import type { ParameterValue } from "../types/document";
 import type {
   ComputePass,
@@ -223,3 +223,6 @@ export default defineEffect({
   producesIndexMap: true,
   requiresIndexMap: false,
 });
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("concentric-rings", () => concentricRingsGpuEffect());

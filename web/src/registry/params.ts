@@ -18,13 +18,11 @@
  */
 
 import { logger } from "../lib/log";
-import type { ParameterValue } from "../types/document";
+import type { CurvePoint, ParameterValue, SrgbTriplet } from "../types/document";
 import {
   SEED_RANGE,
-  type CurvePoint,
   type EffectDescriptor,
   type ParamDescriptor,
-  type SrgbTriplet,
 } from "../types/registry";
 
 const log = logger("app");
@@ -32,16 +30,14 @@ const log = logger("app");
 /**
  * A parameter value as the registry describes it.
  *
- * Wider than the document's `ParameterValue`, which is `number | boolean |
- * string` and therefore cannot carry the `color` and `curve` parameter kinds
- * the descriptor contract declares. Nothing is invented here to bridge that —
- * inventing a packing would put a serialisation decision in the wrong file. See
- * the note in the module that owns `.dork`.
+ * The same type the document carries, and deliberately not a wider one. It used
+ * to be wider: `.dork`'s `ParameterValue` was `number | boolean | string` and
+ * could not hold the `color` and `curve` kinds the descriptor contract declares,
+ * so a coerced set was expressible here and unsaveable there. The schema now
+ * carries both, which is what makes the round trip real rather than something
+ * this file papers over — see `web/src/types/document.ts`.
  */
-export type EffectParamValue =
-  | ParameterValue
-  | SrgbTriplet
-  | readonly CurvePoint[];
+export type EffectParamValue = ParameterValue;
 
 export type EffectParams = Readonly<Record<string, EffectParamValue>>;
 

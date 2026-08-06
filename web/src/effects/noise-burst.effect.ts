@@ -25,6 +25,7 @@
 import {
   defineEffect,
   type ParamDescriptor,
+  staticGpuEffect,
 } from "../types/registry";
 import type {
   ComputePass,
@@ -255,3 +256,6 @@ export function noiseBurstEffect(): GpuEffect {
 
   return { effect: "noise-burst", passes: [pass] };
 }
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("noise-burst", () => noiseBurstEffect());

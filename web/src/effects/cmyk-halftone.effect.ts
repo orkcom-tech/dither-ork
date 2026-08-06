@@ -27,7 +27,7 @@ import type {
   PassBinding,
   UniformLayout,
 } from "../types/gpu";
-import { defineEffect, type ParamDescriptor } from "../types/registry";
+import { staticGpuEffect, defineEffect, type ParamDescriptor } from "../types/registry";
 import wgsl from "../shaders/cmyk-halftone.wgsl?raw";
 
 const log = logger("gpu");
@@ -351,3 +351,6 @@ export function cmykHalftoneEffect(): GpuEffect {
 
   return { effect: descriptor.id, passes: [pass] };
 }
+
+/** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */
+export const gpu = staticGpuEffect("cmyk-halftone", () => cmykHalftoneEffect());
