@@ -187,6 +187,20 @@
     <div id="ordered-status" class="status">not run</div>
     <div class="row" id="ordered"></div>
 
+    <h2>Preprocessing — WebGPU compute path</h2>
+    <p class="note">
+      F-PP-02, 03, 04 and 06: the tone and noise front of the stack, which runs
+      before any kernel sees the frame. These are the nodes whose figures are
+      hardest to read by eye — a levels move that clips nothing and a hue
+      rotation of zero both look exactly like the source — so every caption
+      states how much of the frame changed and how bright the result came out.
+      F-PP-01 (internal resolution), F-PP-05 (curves), F-PP-07 (uploaded
+      threshold map) and F-PP-08 (masking) are not effect descriptors and are
+      not here.
+    </p>
+    <div id="preprocess-status" class="status">not run</div>
+    <div class="row" id="preprocess"></div>
+
     <h2>Pattern dithers — WebGPU compute path</h2>
     <p class="note">
       F-PT-01…08. Each one quantizes against the palette and emits the index

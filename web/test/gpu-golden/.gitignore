@@ -1,0 +1,15 @@
+# Build output of `vite build --config test/gpu-golden/vite.config.ts`.
+#
+# A nested ignore file rather than a line in the repository root one: the build
+# output belongs to this directory, and keeping the rule beside the thing it
+# describes means deleting the harness deletes its ignore rule too.
+dist/
+
+# Untouched copies of the shaders `perturb.mjs` is holding while it proves the
+# harness can fail. Present only between an `apply` and a `restore`; if you find
+# it committed, something went very wrong and `restore` is the fix.
+.perturb-backup/
+
+# Frames a failing run produced, beside their references. Written only when
+# DITHER_ORK_GOLDEN_ARTIFACTS points here, which CI does so it can upload them.
+failed/

@@ -371,7 +371,7 @@ export function defineEffect<const D extends EffectDescriptor>(descriptor: D): D
 // GPU without saying where its passes are. Until this contract existed each
 // effect module exported its `GpuEffect` under a name of its own — `INVERT_GPU`,
 // `blurGpuEffect`, `halftoneEffect()` — and the only caller was a page that
-// imported all forty-four by hand. A document loader cannot do that: it has an
+// imported them all by hand. A document loader cannot do that: it has an
 // effect id out of a `.dork` file and nothing else.
 //
 // One convention, stated once: **an effect module that declares `execution:
@@ -391,7 +391,7 @@ export function defineEffect<const D extends EffectDescriptor>(descriptor: D): D
  * deliberate edit here, not something a caller can improvise.
  */
 export type GpuBuildRequirement =
-  /** Constructible from nothing. Thirty-nine of the forty-four. */
+  /** Constructible from nothing. Forty-three of the forty-eight. */
   | { readonly kind: "none" }
   /**
    * Needs a validated tile of `size * size` ranks from `dither-core`
@@ -428,8 +428,8 @@ export class GpuBuildDataError extends Error {
  * effect in the build cost something whether or not the document uses it. And a
  * `const` evaluated at import time has to be declared after everything it
  * mentions; a thunk can sit anywhere in the file, which is what makes the
- * convention a mechanical addition to forty-four existing modules rather than a
- * reordering of each of them.
+ * convention a mechanical addition to each existing module rather than a
+ * reordering of it.
  */
 export interface GpuEffectSource {
   /** Must equal the id of the descriptor the same module default-exports. */

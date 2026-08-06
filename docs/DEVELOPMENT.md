@@ -32,6 +32,13 @@ Every toolchain version lives in `docker/wasm.Dockerfile` and nowhere else:
 | `wasm-pack` | `ARG WASM_PACK_VERSION` |
 | `cargo-watch` | `ARG CARGO_WATCH_VERSION` |
 
+One pin lives elsewhere, and has to: `web/test/gpu-golden/chrome-version.txt`
+holds the Chrome for Testing build the GPU reference images are valid for. It is
+not a toolchain — nothing builds with it — it is the environment a stored picture
+was produced in, and changing it means re-blessing the set. Its own Dockerfile
+and the CI job both read that file, so the same rule applies: local and CI cannot
+drift apart without the drift being a reviewable commit.
+
 Node's own pins live in `web/package-lock.json`, which is committed and installed
 with `npm ci`. `vitest` is pinned to an exact version rather than a range in
 `web/package.json`, because a test runner that resolves differently on two
@@ -89,11 +96,16 @@ Docker bind mount reliably on macOS and Windows hosts.
 
 ## Tests
 
-Two suites, one per language, each run inside the container that owns its
-toolchain. Neither needs a browser: the Rust core has no web dependencies, and
+Three suites. Two of them — Rust and web — run inside the container that owns
+their toolchain and need no browser: the Rust core has no web dependencies, and
 everything the web suite covers — the node registry, content hashing, the node
 cache — is deliberately free of `document`, `navigator` and `GPUDevice`. A test
 that starts needing a DOM is a signal that a layer has grown one.
+
+The third is the **GPU golden set**, and it needs a browser because a WGSL
+compute pass has nowhere else to run. It is documented under "GPU golden images"
+below, kept out of the two suites above on purpose: nothing in `vitest` should
+start depending on a browser being installed.
 
 ```bash
 # web — one shot, the form CI runs
@@ -133,6 +145,10 @@ What the web suite covers today:
 | `src/graph/hash.test.ts` | Content hashing: stable across key order and runs, changes for anything that changes pixels, changes for nothing else |
 | `src/graph/cache.test.ts` | The byte budget, LRU and transient eviction order, pinning, and the ownership rule that the cache frees each buffer once |
 | `src/graph/sha256.test.ts` | The published SHA-256 vectors, and both sides of every padding boundary |
+| `src/registry/catalogue.test.ts` | The **acceptance gate**: the real startup validator over the real shipped descriptors, plus the asserted counts by family, execution and slot |
+| `src/registry/gpu-effects.test.ts` | That every `gpu` effect resolves to passes and every source belongs to a registered effect |
+| `src/registry/stack.test.ts` | Stack grammar: slot order, and that an index-map reader sits downstream of a quantizer |
+| `src/registry/document-round-trip.test.ts` | A `.dork` parameter set survives save and load |
 
 `registry.test.ts` ends with a coverage assertion built on a
 `Record<RegistryIssueCode, true>`: adding a rejection code to the validator
@@ -140,9 +156,179 @@ without adding a test for it stops the file type-checking. Those codes are the
 guard rails the whole effect catalogue is written against, so an untested one is
 a rail that might not be there.
 
-> **Not yet wired into CI.** The `web` job in `.github/workflows/ci.yml` runs
-> `npm run typecheck` and `npm run build`; it needs an `npm test -- --run` step
-> between them. Until that lands, the web suite only runs where someone runs it.
+**The counts in `catalogue.test.ts` are the thing to update when the catalogue
+changes, and the thing never to delete.** They are asserted rather than reported
+because an effect that disappears is silent in every other way. Adding an effect
+means editing four numbers in that file and the matching table in docs/API.md;
+if the temptation is ever to remove the assertion instead, that is the moment it
+was doing its job.
+
+## GPU golden images
+
+Every effect the registry reports as `execution: "gpu"` is rendered through the
+real compute path against a generated fixture and compared to a stored PNG. The
+harness is `web/test/gpu-golden/`; the references are `web/fixtures/gpu/`. It is
+the parallel half of what `core/crates/dither-core/tests/golden.rs` does for the
+serial half, and it is deliberately the same shape: generated fixture, stored
+outputs, a stated tolerance, a loud re-bless mode, and orphan detection.
+
+Why it exists: a transposed coefficient in a halftone screen and an off-by-one in
+a displacement kernel both compile, both validate, and both produce a picture.
+Nothing but a stored reference catches either. Before this, the parallel
+catalogue was checked by a human reading `web/src/main.ts`.
+
+### Running it
+
+```bash
+# 1. build the harness page — from the container that owns node_modules
+docker compose exec -T web sh -c 'npx vite build --config test/gpu-golden/vite.config.ts'
+
+# 2. build the pinned browser image, once
+docker build -t dither-ork-gpu-golden web/test/gpu-golden
+
+# 3. compare against the reference set
+docker run --rm -v "$PWD/web:/app/web" dither-ork-gpu-golden
+```
+
+Around fifteen seconds for the whole catalogue. Step 2 is only needed again when
+`chrome-version.txt` changes.
+
+On an Apple Silicon host add `--platform linux/amd64` to both docker commands.
+The image declares that platform anyway — Chrome for Testing ships no
+linux-arm64 build, and one reference set is the point — so it runs under
+emulation and is still fast.
+
+### Re-blessing
+
+```bash
+docker run --rm -e DITHER_ORK_BLESS=1 -v "$PWD/web:/app/web" dither-ork-gpu-golden
+```
+
+Same environment variable as the Rust harness, and it prints the same kind of
+banner on the real stderr. It clears the tree first, so an effect that has been
+renamed does not leave a stale reference behind. **Look at the diff.** A
+re-bless is a statement that the new pictures are the right pictures.
+
+A bless run still refuses — non-zero exit, images written so you can look at
+them — if an effect returned its input unchanged at both its defaults *and* the
+far end of its surprise range, or rendered an almost black frame in both. Those
+are the two ways a reference can be blessed against a broken shader and pass
+forever afterwards.
+
+**Blessing from CI.** The browser is pinned, but SwiftShader's JIT emits code for
+whatever instruction set it finds, so a laptop and a CI runner are not guaranteed
+to agree in the last bit — and on an Apple Silicon host the emulated CPU exposes
+a narrower set than a native x86-64 runner does. CI is the machine the gate runs
+on, so it is the environment the set should ultimately be blessed in. Run the CI
+workflow manually with **`bless_gpu_goldens`** checked; it renders the set there
+and uploads it as the `gpu-golden-blessed` artifact. Nothing is committed from
+CI: you download it, put it in a commit, and review the pictures, because a
+reference changing has to be a decision somebody made.
+
+The set committed today was blessed locally on an emulated x86-64 container. If
+the first CI run disagrees, that is what the manual bless is for — and the size
+of the disagreement is itself worth reading before you replace anything.
+
+### The environment, and why it is this one
+
+The reference set is valid for **one Chrome for Testing build driven onto
+SwiftShader**. The version is `web/test/gpu-golden/chrome-version.txt` and
+nowhere else; the Dockerfile reads it, and the harness asserts at runtime that
+the adapter really is the software one and refuses to run otherwise. A set
+blessed on a real driver would encode that driver's behaviour — docs/ARCHITECTURE.md,
+"Determinism", records that WebGPU implementation variance across drivers is
+real, which is exactly why the goldens need a pinned environment.
+
+Two flags carry that: `--use-webgpu-adapter=swiftshader` picks the CPU
+rasteriser, and `--enable-unsafe-webgpu` is required with it, because Chromium
+reports `webgpu: unavailable_software` and hands back no adapter at all when the
+GPU stack is software-only. Measured, not guessed — without the second flag
+`requestAdapter()` resolves to `null` every time.
+
+The alternatives were real and were not taken:
+
+- **Deno's built-in WebGPU** runs on ubuntu-latest with no browser, but it is
+  `wgpu` rather than Dawn — a different implementation from the one the product
+  targets — and its software path is Mesa's Lavapipe, whose version comes from
+  whatever the runner image happens to ship. It also does not run Vite, and the
+  registry finds effects with `import.meta.glob` while every effect imports its
+  WGSL with `?raw`, so it would need a bundling step that made the test a test of
+  a different module graph.
+- **Node with Dawn bindings** is the right implementation and needs a prebuilt
+  native module pinned outside `package-lock.json`, which is a second pinning
+  mechanism for the one thing that must not drift.
+- **The runner's own Chrome** drifts with the GitHub Actions image, and a golden
+  set that silently re-means itself when a runner image updates is worse than
+  none.
+
+Building the image from the committed Dockerfile is what makes a local run and
+the CI job the same run.
+
+### The tolerance
+
+Every channel of every pixel must be within **1 of 255** of its reference.
+
+Not zero, unlike the CPU set, and the difference is not laziness. Every pixel the
+CPU harness compares is a palette colour, so the only thing that can differ there
+is a decision, and decisions do not differ by a little. Half of the parallel
+catalogue writes continuous colour through `exp`, `pow`, `sqrt` and trigonometry
+in `rgba16float`, and SwiftShader's JIT emits code for whatever instruction set
+it finds at runtime, so a runner with FMA and one without can legitimately land a
+smooth gradient one code value either side of a rounding boundary.
+
+Measured today: the whole set matches **byte for byte**, so the tolerance is pure
+headroom rather than something being spent. Any image that differs at all is
+printed even when it passes, so drift is visible in the log before it becomes a
+failure.
+
+### Proving it can fail
+
+A reference set that cannot fail is worse than none. `perturb.mjs` makes the
+proof reproducible rather than a claim:
+
+```bash
+docker compose exec -T web sh -c 'node test/gpu-golden/perturb.mjs list'
+docker compose exec -T web sh -c 'node test/gpu-golden/perturb.mjs apply halftone-screen-transpose'
+docker compose exec -T web sh -c 'npx vite build --config test/gpu-golden/vite.config.ts'
+docker run --rm -v "$PWD/web:/app/web" dither-ork-gpu-golden   # must fail
+docker compose exec -T web sh -c 'node test/gpu-golden/perturb.mjs restore'
+docker compose exec -T web sh -c 'npx vite build --config test/gpu-golden/vite.config.ts'
+```
+
+`apply` keeps an untouched copy of the shader in `.perturb-backup/` and refuses
+to run if one is already there, so a crashed run leaves a state a single
+`restore` fixes. Three perturbations are defined, each a mistake somebody could
+actually make; measured, they move 2.8%, 76% and 25% of the frame at deltas of
+170, 255 and 170 code values, against a tolerance of 1.
+
+### What it does *not* cover
+
+- **Only the defaults and one end of each surprise range.** Two parameter sets
+  per effect, both derived mechanically from the descriptor. The space between
+  them is not swept.
+- **No animation.** Every frame is rendered at normalized time 0. The loop seam
+  has its own test to be written.
+- **One fixture, one palette** (`cga-16`), one seed, one resolution.
+- **Multi-node stacks are not exercised.** Each effect renders alone, except the
+  two index-map consumers, which get a Bayer 4×4 quantizer upstream because they
+  have nothing to read otherwise.
+- **It cannot tell you an effect is not the effect it is named after.** A stored
+  reference pins what a shader does; it says nothing about whether that matches
+  the name on the node. A levels node that never touches the tone scale and a
+  hue control that rotates nothing would both be blessed and would both pass
+  forever. That reading is the proof page's job — `web/src/main.ts` states, per
+  effect, how much of the frame moved, what happened to mean luminance and to
+  its standard deviation, and how far hue rotated, so the question can be asked
+  against the name.
+- **A cyclic parameter's surprise end is its own identity, and nothing notices.**
+  Both this harness and the proof page take the end of a declared surprise range
+  furthest from the default. For HSL's hue that range is `[0, 1]` in *turns* with
+  a default of 0, so the far end is one full turn — exactly the default. The hue
+  rotation is therefore never exercised by either. The control does work
+  (measured directly: 0.1 turn → 37.6°, 0.25 → 85.3°, 0.75 → −87.8°, 1.0 → 0°),
+  but a hue control wired to nothing would pass every check in the repository.
+  The fix is a `cyclic` flag on `ParamDescriptor` so a caller can pick a half
+  turn instead of a whole one; it is not written.
 
 ### Adding a dependency to a running stack
 
@@ -173,6 +359,8 @@ docker compose up --build           # after changing a Dockerfile
 docker compose run --rm wasm cargo test --manifest-path /app/core/Cargo.toml
 docker compose run --rm web npm run typecheck
 docker compose exec -T web sh -c 'npm test -- --run'
+docker compose exec -T web sh -c 'npx tsc -p test/gpu-golden'   # harness types
+docker run --rm -v "$PWD/web:/app/web" dither-ork-gpu-golden    # GPU goldens
 docker compose down -v              # also drops the cargo and node_modules caches
 docker compose logs -f wasm         # watch the build
 ```
@@ -257,6 +445,24 @@ lines at the top of `docker compose logs web` to see which branch it took. If it
 reports "up to date" when it should not, the lockfile was not regenerated. Note
 that the check only runs at container *start*; to add a dependency to a stack
 that is already up, see "Adding a dependency to a running stack" above.
+
+**The GPU golden harness says "the harness is not built".**
+`web/test/gpu-golden/dist` is missing or stale. It is a build output and is not
+committed; rebuild it with step 1 above. The harness deliberately refuses rather
+than running against whatever was there last.
+
+**The GPU golden harness says the adapter is not `swiftshader`.**
+The browser found a real GPU. That is a refusal, not a failure: reference images
+are only reproducible on the software rasteriser. Either the flags in
+`chrome.mjs` were changed, or `DITHER_ORK_CHROME` points at a browser that does
+not honour them.
+
+**Every GPU reference fails after a browser bump.**
+Expected, and it is why the version is pinned in one file. Chrome's WGSL compiler
+and SwiftShader's code generation both move between releases. Look at a few of
+the uploaded pictures, satisfy yourself the change is a rendering difference and
+not a defect, then re-bless in the same commit as the version bump so the two are
+reviewed together.
 
 **`vitest: not found`, or a test run that cannot resolve an import.**
 The `node_modules` volume predates the dependency. Run the three steps in

@@ -5,6 +5,18 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      # The GPU reference set is only valid for the environment it was produced
+      # in, and this workflow *is* that environment — a pinned Chrome for Testing
+      # build on SwiftShader. Blessing from a developer machine works because the
+      # browser is pinned, but SwiftShader's JIT emits code for whatever
+      # instruction set it finds, so a laptop and a runner are not guaranteed to
+      # agree in the last bit. This makes the canonical environment reachable:
+      # run it, download the artifact, commit the tree, review the pictures.
+      bless_gpu_goldens:
+        description: "Re-bless the GPU reference set here and upload it, instead of comparing"
+        type: boolean
+        default: false
 
 # Toolchain versions are not repeated here. They are read out of
 # docker/wasm.Dockerfile, which is the single place they are pinned, so CI and
@@ -133,6 +145,16 @@ jobs:
       - run: npm run typecheck
         working-directory: web
 
+      # Before the build, so a red suite is not buried under bundler output.
+      # This is the job that runs the catalogue test, which is the acceptance
+      # gate for the effect registry: it puts the real startup validator over
+      # the shipped descriptors and asserts the per-family, per-execution and
+      # per-slot counts. An effect that stops being discovered because a file
+      # was renamed is invisible in every other way — nothing errors, the app
+      # starts, the stack panel is one row shorter.
+      - run: npm test -- --run
+        working-directory: web
+
       - run: npm run build
         working-directory: web
 
@@ -148,3 +170,83 @@ jobs:
           grep -q 'Cross-Origin-Embedder-Policy: require-corp' "$headers" \
             || { echo "::error::COEP header missing or malformed"; exit 1; }
           echo "both headers present in $headers"
+
+  gpu-golden:
+    name: gpu golden images
+    runs-on: ubuntu-latest
+    # The ordered dithers cannot build their passes without a threshold tile from
+    # the core, so the harness needs the generated WASM package for the same
+    # reason the web build does.
+    needs: wasm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm-pkg
+          path: web/src/wasm/pkg
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+
+      # The harness is held to the same strictness as the code it exercises.
+      # web/tsconfig.json includes only `src`, so nothing here would otherwise be
+      # type-checked at all.
+      - name: Typecheck the harness
+        run: npx tsc -p test/gpu-golden
+        working-directory: web
+
+      - name: Build the harness bundle
+        run: npx vite build --config test/gpu-golden/vite.config.ts
+        working-directory: web
+
+      # The reference images are valid for one environment and this is it: a
+      # pinned Chrome for Testing build driven onto SwiftShader, so the result is
+      # a property of that build and not of the machine. docs/ARCHITECTURE.md,
+      # "Determinism": the GPU goldens need a pinned environment, since WebGPU
+      # implementation variance across drivers is real. Building the image here
+      # rather than depending on whatever browser the runner ships is what makes
+      # a local run and this job the same run — the version is one line in
+      # web/test/gpu-golden/chrome-version.txt, read by the Dockerfile and
+      # asserted by the harness.
+      - name: Build the pinned browser image
+        run: docker build -t dither-ork-gpu-golden web/test/gpu-golden
+
+      - name: Compare against the reference set
+        if: ${{ !inputs.bless_gpu_goldens }}
+        run: |
+          docker run --rm \
+            -e DITHER_ORK_GOLDEN_ARTIFACTS=/app/web/test/gpu-golden/failed \
+            -v "$PWD/web:/app/web" \
+            dither-ork-gpu-golden
+
+      # Only on failure, and only what failed. A message saying a third of the
+      # frame moved cannot say the halftone screen came out rotated; the picture
+      # can.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: gpu-golden-failures
+          path: web/test/gpu-golden/failed
+          if-no-files-found: ignore
+
+      # The manual path. Nothing is committed from CI — the tree comes back as an
+      # artifact so a human puts it in a reviewed commit, which is the only way a
+      # picture changing is ever a decision somebody made.
+      - name: Re-bless the reference set
+        if: ${{ inputs.bless_gpu_goldens }}
+        run: |
+          docker run --rm -e DITHER_ORK_BLESS=1 -v "$PWD/web:/app/web" dither-ork-gpu-golden
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.bless_gpu_goldens }}
+        with:
+          name: gpu-golden-blessed
+          path: web/fixtures/gpu
+          if-no-files-found: error

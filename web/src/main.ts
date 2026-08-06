@@ -25,8 +25,10 @@ import { checkCapabilities, type Capability } from "./lib/capabilities";
 import { correlationId, logger } from "./lib/log";
 import {
   loadEffectRegistry,
+  loadGpuEffects,
   RegistryValidationError,
   type EffectRegistry,
+  type GpuEffectResolver,
 } from "./registry";
 import {
   createOrderedDither,
@@ -50,58 +52,8 @@ import {
 import type { Palette, ParameterValue } from "./types/document";
 import type { GpuEffect, ScheduledPass } from "./types/gpu";
 import type { CpuColorSurface } from "./types/graph";
+import { NO_GPU_BUILD_DATA } from "./types/registry";
 import type { EffectDescriptor, EffectFamily, ParamDescriptor } from "./types/registry";
-
-// --- the parallel catalogue ---------------------------------------------
-//
-// Thirty-nine imports, named one by one, because there is no way to ask for
-// them collectively: `registry/discovery.ts` globs the *descriptors*, and a
-// descriptor says an effect runs on the GPU without saying where its passes
-// are. Nothing in the repository resolves an effect id to its `GpuEffect` — the
-// renderer does not need it yet because there is no document loader, and this
-// page is the first caller that wants all of them at once. Listing them here
-// keeps that gap visible and in one place rather than inventing a convention
-// the effect files were not written against. See docs/API.md section 4.
-
-import { BIT_CRUSH_GPU } from "./effects/bit-crush.effect";
-import { BLOCK_SHUFFLE_GPU } from "./effects/block-shuffle.effect";
-import { DILATE_ERODE_GPU } from "./effects/dilate-erode.effect";
-import { GRADIENT_MAP_GPU } from "./effects/gradient-map.effect";
-import { GRAIN_GPU } from "./effects/grain.effect";
-import { INVERT_GPU } from "./effects/invert.effect";
-import { LENS_DISTORTION_GPU } from "./effects/lens-distortion.effect";
-import { LIGHT_LEAK_GPU } from "./effects/light-leak.effect";
-import { OUTLINE_GPU } from "./effects/outline.effect";
-import { POSTERIZE_GPU } from "./effects/posterize.effect";
-import { SLICE_REPEAT_GPU } from "./effects/slice-repeat.effect";
-import { THRESHOLD_GPU } from "./effects/threshold.effect";
-import { VIGNETTE_GPU } from "./effects/vignette.effect";
-import { WAVE_WARP_GPU } from "./effects/wave-warp.effect";
-import { blurGpuEffect } from "./effects/blur.effect";
-import { channelSwapEffect } from "./effects/channel-swap.effect";
-import { chromaticAberrationGpuEffect } from "./effects/chromatic-aberration.effect";
-import { clusteredDotGpuEffect } from "./effects/clustered-dot.effect";
-import { cmykHalftoneEffect } from "./effects/cmyk-halftone.effect";
-import { columnDisplacementGpuEffect } from "./effects/column-displacement.effect";
-import { concentricRingsGpuEffect } from "./effects/concentric-rings.effect";
-import { crossHatchEffect } from "./effects/cross-hatch.effect";
-import { crtMaskEffect } from "./effects/crt-mask.effect";
-import { datamoshSmearEffect } from "./effects/datamosh-smear.effect";
-import { edgeDetectGpuEffect } from "./effects/edge-detect.effect";
-import { embossGpuEffect } from "./effects/emboss.effect";
-import { epsilonGlowGpuEffect } from "./effects/epsilon-glow.effect";
-import { ghostEchoEffect } from "./effects/ghost-echo.effect";
-import { glyphTileGpuEffect } from "./effects/glyph-tile.effect";
-import { halftoneEffect } from "./effects/halftone.effect";
-import { interlaceTearEffect } from "./effects/interlace-tear.effect";
-import { lineScreenEffect } from "./effects/line-screen.effect";
-import { noiseBurstEffect } from "./effects/noise-burst.effect";
-import { pixelSortGpuEffect } from "./effects/pixel-sort.effect";
-import { rgbSplitGpuEffect } from "./effects/rgb-split.effect";
-import { rowDisplacementGpuEffect } from "./effects/row-displacement.effect";
-import { scanlinesEffect } from "./effects/scanlines.effect";
-import { sharpenGpuEffect } from "./effects/sharpen.effect";
-import { spiralGpuEffect } from "./effects/spiral.effect";
 
 const log = logger("app", correlationId());
 
@@ -518,9 +470,11 @@ async function runDiffusion(
     "#diffusion-note",
     `${kernels.length} kernel(s) registered in <code>diffusion.rs</code>, ` +
       `every one of them below, in the ${escapeHtml(palette.name)} palette. ` +
-      `F-ED-14 (Ostromoukhov) is deliberately absent — its 256-row coefficient ` +
-      `table has no closed form, and a kernel written from memory would render ` +
-      `and be wrong.`,
+      `That is the whole of F-ED-01…15. Ostromoukhov (F-ED-14) is the one to ` +
+      `look at hardest: its coefficients change with the input level, so a ` +
+      `mistyped digit in its table renders a convincing picture. It should read ` +
+      `as quieter than Floyd-Steinberg and finer-grained than Jarvis, with no ` +
+      `diagonal worming in the flats.`,
   );
 
   for (const kernel of kernels) {
@@ -823,59 +777,16 @@ async function runOrdered(
 // --- every other parallel effect ----------------------------------------
 
 /**
- * The thirty-nine parallel effects that are not ordered dithers.
+ * Which page section a family's figures go into.
  *
- * Some modules export a `GpuEffect` constant and some a factory, depending on
- * whether the effect ships a table it has to build (a glyph sheet, a clustered
- * screen). Both are resolved here so the runner below sees one shape.
+ * `ordered` is deliberately absent: the five ordered dithers are the
+ * tile-and-table path and have their own section above, run by `runOrdered`.
+ * Every other GPU family belongs here, and a family with no entry is reported
+ * rather than skipped — an effect that renders into no section is an effect
+ * nobody looks at.
  */
-const PARALLEL_CATALOGUE: readonly GpuEffect[] = [
-  // pattern (F-PT)
-  halftoneEffect(),
-  cmykHalftoneEffect(),
-  lineScreenEffect(),
-  crossHatchEffect(),
-  concentricRingsGpuEffect(),
-  spiralGpuEffect(),
-  clusteredDotGpuEffect(),
-  glyphTileGpuEffect(),
-  // special (F-SP)
-  epsilonGlowGpuEffect,
-  blurGpuEffect,
-  sharpenGpuEffect,
-  edgeDetectGpuEffect,
-  embossGpuEffect,
-  POSTERIZE_GPU,
-  THRESHOLD_GPU,
-  INVERT_GPU,
-  GRADIENT_MAP_GPU,
-  OUTLINE_GPU,
-  DILATE_ERODE_GPU,
-  VIGNETTE_GPU,
-  LENS_DISTORTION_GPU,
-  LIGHT_LEAK_GPU,
-  GRAIN_GPU,
-  // glitch (F-GL)
-  pixelSortGpuEffect,
-  rowDisplacementGpuEffect,
-  columnDisplacementGpuEffect,
-  rgbSplitGpuEffect,
-  chromaticAberrationGpuEffect,
-  datamoshSmearEffect(),
-  scanlinesEffect(),
-  crtMaskEffect(),
-  WAVE_WARP_GPU,
-  SLICE_REPEAT_GPU,
-  BLOCK_SHUFFLE_GPU,
-  BIT_CRUSH_GPU,
-  channelSwapEffect(),
-  ghostEchoEffect(),
-  interlaceTearEffect(),
-  noiseBurstEffect(),
-];
-
-/** Which page section a family's figures go into. */
 const FAMILY_SECTION: Readonly<Record<string, string>> = {
+  preprocess: "#preprocess",
   pattern: "#pattern",
   special: "#special",
   glitch: "#glitch",
@@ -962,49 +873,143 @@ function surprisedParams(descriptor: EffectDescriptor): Record<string, Parameter
 }
 
 /**
- * How much of the frame a node actually changed, and how bright it left it.
+ * How much of the frame a node actually changed, and what it changed about it.
  *
- * The whole point of rendering all thirty-nine: an effect that compiles,
+ * The whole point of rendering the whole catalogue: an effect that compiles,
  * validates and returns its input unchanged looks identical to one that works
  * until you put the two frames side by side, and an effect that returns zeroes
  * looks like a deliberate black. Both are stated numerically in every caption
  * so they cannot be missed by eye.
+ *
+ * "How much" is not enough on its own, though, and the preprocessing family is
+ * where that becomes obvious: a levels node with the gamma control wired to
+ * nothing and a hue rotation of zero degrees would each move most of the frame
+ * by a plausible amount and still not be the effect they are named after. So
+ * three descriptive statistics come out beside the change fraction — mean
+ * luminance, its standard deviation, and the mean hue rotation — and they are
+ * *generic image statistics*, not per-effect assertions. Reading them against
+ * the name is the human's job; producing them so the reading is possible is
+ * this function's.
  */
 interface FrameDelta {
   /** Fraction of pixels differing from the input by more than one 8-bit step. */
   readonly changed: number;
   /** Mean absolute 8-bit difference across RGB. */
   readonly magnitude: number;
+  /** Mean sRGB luminance of the input, 0..1. */
+  readonly luminanceBefore: number;
   /** Mean sRGB luminance of the result, 0..1. */
   readonly luminance: number;
+  /** Standard deviation of sRGB luminance before and after — contrast, in a word. */
+  readonly contrastBefore: number;
+  readonly contrast: number;
+  /**
+   * Mean absolute hue rotation in degrees, over pixels coloured enough in both
+   * frames for a hue to mean anything.
+   *
+   * Restricted that way on purpose: hue is undefined on a neutral pixel and
+   * numerically wild on a nearly neutral one, so averaging it over a frame that
+   * is mostly grey would report a large rotation produced entirely by noise.
+   */
+  readonly hueShift: number;
+  /** Fraction of pixels that qualified for the hue measurement. */
+  readonly hueCoverage: number;
 }
+
+/** Rec.709 luminance of an 8-bit sRGB triplet, 0..1. Descriptive, not colorimetric. */
+function encodedLuma(r: number, g: number, b: number): number {
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+/** Hue in degrees and chroma in 8-bit units, from an 8-bit sRGB triplet. */
+function hueOf(r: number, g: number, b: number): { hue: number; chroma: number } {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const chroma = max - min;
+  if (chroma === 0) return { hue: 0, chroma: 0 };
+  let hue: number;
+  if (max === r) hue = ((g - b) / chroma) % 6;
+  else if (max === g) hue = (b - r) / chroma + 2;
+  else hue = (r - g) / chroma + 4;
+  hue *= 60;
+  return { hue: hue < 0 ? hue + 360 : hue, chroma };
+}
+
+/**
+ * Below this 8-bit chroma a pixel is treated as neutral and left out of the hue
+ * average. Eight levels is about three times the chroma an 8-bit rounding
+ * difference can manufacture, so what survives is colour the effect meant.
+ */
+const HUE_CHROMA_FLOOR = 8;
 
 function frameDelta(before: ImageData, after: ImageData): FrameDelta {
   const pixels = Math.min(before.data.length, after.data.length) / 4;
   let changed = 0;
   let total = 0;
-  let luma = 0;
+  let lumaBefore = 0;
+  let lumaAfter = 0;
+  let sqBefore = 0;
+  let sqAfter = 0;
+  let hueSum = 0;
+  let hueCount = 0;
+
   for (let i = 0; i < pixels; i += 1) {
     const at = i * 4;
-    const dr = Math.abs((after.data[at] ?? 0) - (before.data[at] ?? 0));
-    const dg = Math.abs((after.data[at + 1] ?? 0) - (before.data[at + 1] ?? 0));
-    const db = Math.abs((after.data[at + 2] ?? 0) - (before.data[at + 2] ?? 0));
+    const br = before.data[at] ?? 0;
+    const bg = before.data[at + 1] ?? 0;
+    const bb = before.data[at + 2] ?? 0;
+    const ar = after.data[at] ?? 0;
+    const ag = after.data[at + 1] ?? 0;
+    const ab = after.data[at + 2] ?? 0;
+
+    const dr = Math.abs(ar - br);
+    const dg = Math.abs(ag - bg);
+    const db = Math.abs(ab - bb);
     if (dr > 1 || dg > 1 || db > 1) changed += 1;
     total += (dr + dg + db) / 3;
-    luma +=
-      (0.2126 * (after.data[at] ?? 0) +
-        0.7152 * (after.data[at + 1] ?? 0) +
-        0.0722 * (after.data[at + 2] ?? 0)) /
-      255;
+
+    const lb = encodedLuma(br, bg, bb);
+    const la = encodedLuma(ar, ag, ab);
+    lumaBefore += lb;
+    lumaAfter += la;
+    sqBefore += lb * lb;
+    sqAfter += la * la;
+
+    const hb = hueOf(br, bg, bb);
+    const ha = hueOf(ar, ag, ab);
+    if (hb.chroma >= HUE_CHROMA_FLOOR && ha.chroma >= HUE_CHROMA_FLOOR) {
+      // Shortest arc: a rotation from 350° to 10° is 20°, not 340°.
+      let arc = Math.abs(ha.hue - hb.hue) % 360;
+      if (arc > 180) arc = 360 - arc;
+      hueSum += arc;
+      hueCount += 1;
+    }
   }
+
   const n = Math.max(1, pixels);
-  return { changed: changed / n, magnitude: total / n, luminance: luma / n };
+  const meanBefore = lumaBefore / n;
+  const meanAfter = lumaAfter / n;
+  return {
+    changed: changed / n,
+    magnitude: total / n,
+    luminanceBefore: meanBefore,
+    luminance: meanAfter,
+    contrastBefore: Math.sqrt(Math.max(0, sqBefore / n - meanBefore * meanBefore)),
+    contrast: Math.sqrt(Math.max(0, sqAfter / n - meanAfter * meanAfter)),
+    hueShift: hueCount === 0 ? 0 : hueSum / hueCount,
+    hueCoverage: hueCount / n,
+  };
 }
 
 function describeDelta(delta: FrameDelta): string {
+  const percent = (value: number): string => `${(value * 100).toFixed(0)}%`;
   return (
     `changed ${(delta.changed * 100).toFixed(1)}% of pixels, ` +
-    `mean |Δ| ${delta.magnitude.toFixed(1)}/255, mean luma ${(delta.luminance * 100).toFixed(0)}%`
+    `mean |Δ| ${delta.magnitude.toFixed(1)}/255; ` +
+    `luma ${percent(delta.luminanceBefore)} → ${percent(delta.luminance)}, ` +
+    `contrast σ ${percent(delta.contrastBefore)} → ${percent(delta.contrast)}, ` +
+    `mean hue rotation ${delta.hueShift.toFixed(1)}° ` +
+    `(over the ${percent(delta.hueCoverage)} of pixels with chroma in both frames)`
   );
 }
 
@@ -1063,11 +1068,20 @@ async function quantizerUnit(
  * the same palette as every other section. A failure is reported in place and
  * the run continues, because the interesting output of this section is the list
  * of effects that did *not* work, and stopping at the first one hides the rest.
+ *
+ * **The list comes from the registry, never from this file.** `loadGpuEffects()`
+ * turns an effect id into its passes, so the page enumerates
+ * `registry.byExecution("gpu")` and asks the resolver for each one. That is what
+ * makes this a proof of the catalogue rather than a proof of whatever somebody
+ * remembered to import: an effect added next week appears here without this file
+ * being edited, and an effect that stops being discovered takes its own figure
+ * away and the per-family "n of m rendered" line goes red.
  */
 async function runParallelCatalogue(
   core: Core,
   layer: GpuLayer,
   registry: EffectRegistry,
+  resolver: GpuEffectResolver,
   source: ImageData,
   palette: BuiltinPalette,
 ): Promise<void> {
@@ -1206,27 +1220,36 @@ async function runParallelCatalogue(
     }
   };
 
+  // Spec order rather than glob order, so the figures in a section read the way
+  // the requirement list does and two runs produce the same page.
+  const catalogue = [...registry.byExecution("gpu")]
+    .filter((descriptor) => descriptor.family !== "ordered")
+    .sort((a, b) => a.requirement.localeCompare(b.requirement));
+
   try {
-    for (const gpu of PARALLEL_CATALOGUE) {
-      const descriptor = registry.get(gpu.effect);
-      if (descriptor === undefined) {
-        // A compute pass with no descriptor is an effect the catalogue does not
-        // know about, which means the UI could never offer it.
-        log.error("a compute pass names an effect the registry has no descriptor for", {
-          effect: gpu.effect,
-        });
-        continue;
-      }
+    for (const descriptor of catalogue) {
       const section = FAMILY_SECTION[descriptor.family];
       if (section === undefined) {
         log.error("no page section for family", {
-          effect: gpu.effect,
+          effect: descriptor.id,
           family: descriptor.family,
         });
         continue;
       }
 
       try {
+        // Everything outside the ordered family builds from nothing. Asked
+        // rather than assumed: an effect that starts needing a threshold tile
+        // would otherwise be handed `NO_GPU_BUILD_DATA` and either throw far
+        // away or, worse, come back with a plausible screen it never asked for.
+        const requirement = resolver.requirementOf(descriptor.id);
+        if (requirement.kind !== "none") {
+          throw new Error(
+            `needs build-time data of kind "${requirement.kind}", which this section does ` +
+              `not fetch — only the ordered dithers did, and they run in their own section`,
+          );
+        }
+        const gpu = resolver.resolve(descriptor.id, NO_GPU_BUILD_DATA);
         await layer.compiler.compile(descriptor, gpu);
 
         const run = await renderNode(descriptor, gpu, defaultParams(descriptor), "defaults");
@@ -1325,7 +1348,7 @@ async function runParallelCatalogue(
     });
   }
   log.info("parallel catalogue complete", {
-    effects: PARALLEL_CATALOGUE.length,
+    effects: catalogue.length,
     rendered: [...rendered.values()].reduce((a, b) => a + b, 0),
     suspicious: doubtfulTotal.length,
   });
@@ -1442,6 +1465,10 @@ async function main(): Promise<void> {
   // The GPU section is last because it is the one that can legitimately be
   // unavailable, and a failure here must not take the WASM proof down with it.
   try {
+    // Resolved before the device is touched: an effect the catalogue declares as
+    // `gpu` and that nothing can turn into passes is a broken catalogue, not a
+    // missing adapter, and the two must not be reported as the same thing.
+    const resolver = loadGpuEffects();
     const layer = await log.time("acquire gpu layer", () =>
       GpuLayer.create({ report }),
     );
@@ -1449,7 +1476,7 @@ async function main(): Promise<void> {
     // Every other parallel effect, grouped by family. Separate from the ordered
     // section because that one is the tile-and-table path specifically; this is
     // the rest of the catalogue proving it renders at all.
-    await runParallelCatalogue(core, layer, registry, source, cga);
+    await runParallelCatalogue(core, layer, registry, resolver, source, cga);
   } catch (error) {
     setStatus(
       "#ordered-status",

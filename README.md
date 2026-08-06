@@ -6,13 +6,14 @@ Load an image, stack dither and glitch effects in a reorderable pipeline, bind
 any parameter to a modulator, and export a seamless animated loop — or a still,
 or a vector file for print and cutting.
 
-**Status: scaffold.** What exists: the colour core in linear light, 14 of the 15
-error-diffusion kernels against golden images, all 5 ordered dithers running as
-WebGPU compute passes, the hardware palette library, automatic palette
-extraction, the render graph and node cache headless, the node registry with
-startup validation, and the local development environment. What does not: any
-user interface. `docker compose up` serves a proof page, not an application —
-there is nothing yet to load an image into.
+**Status: scaffold.** What exists: the colour core in linear light, all 15
+error-diffusion kernels against golden images, 48 more effects running as WebGPU
+compute passes and pinned by their own golden set in a pinned browser, the
+hardware palette library, automatic palette extraction, the render graph and
+node cache headless, the node registry with startup validation, and the local
+development environment. What does not: any user interface. `docker compose up`
+serves a proof page, not an application — there is nothing yet to load an image
+into.
 
 ---
 

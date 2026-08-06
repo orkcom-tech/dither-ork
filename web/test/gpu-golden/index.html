@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>dither-ork GPU golden harness</title>
+  </head>
+  <body>
+    <!--
+      Nothing is drawn here. The page exists so the harness runs on a real
+      origin: WebGPU needs a secure context, and the WASM core needs
+      cross-origin isolation for its shared memory, neither of which a
+      `data:` or `about:blank` document provides.
+    -->
+    <p>Headless. Driven by <code>web/test/gpu-golden/run.mjs</code> over the DevTools protocol.</p>
+    <script type="module" src="./harness.ts"></script>
+  </body>
+</html>

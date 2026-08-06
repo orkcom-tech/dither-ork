@@ -1,7 +1,7 @@
 # WGSL conventions
 
-44 of the catalogue's 58 effects run as WebGPU compute passes, and all 44 exist.
-They are rules rather than suggestions because the alternative is 44 shaders
+48 of the catalogue's 63 effects run as WebGPU compute passes, and all 48 exist.
+They are rules rather than suggestions because the alternative is 48 shaders
 that each need to be read before they can be bound.
 
 The contract these implement is `web/src/types/gpu.ts`. Read it first.

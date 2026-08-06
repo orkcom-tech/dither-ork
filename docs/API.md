@@ -288,27 +288,29 @@ what F-GL-06 would cost.
 
 ### What is registered
 
-58 effects, all validated:
+63 effects, all validated:
 
 | Family | Count | Execution | Slot |
 | --- | --- | --- | --- |
-| `error-diffusion` | 14 | `wasm` | dither |
+| `error-diffusion` | 15 | `wasm` | dither |
 | `ordered` | 5 | `gpu` | dither |
 | `pattern` | 8 | `gpu` | dither |
 | `special` | 15 | `gpu` | 12 preprocess, 3 postprocess |
 | `glitch` | 16 | `gpu` | postprocess |
-| `preprocess` | 0 | — | — |
+| `preprocess` | 4 | `gpu` | preprocess |
 
-Totals: 14 `wasm`, 44 `gpu`; 12 preprocess, 27 dither, 19 postprocess. The
-`preprocess` **family** is empty because the F-PP requirements (internal
-resolution, levels, HSL, curves, seeded noise) have no descriptors yet — the
-preprocess **slot** is full of `special` and nothing else.
+Totals: 15 `wasm`, 48 `gpu`; 16 preprocess, 28 dither, 19 postprocess.
 
-Three of the spec's 61 named effects are deliberately absent: **F-ED-14**
-Ostromoukhov (its 256-row coefficient table has no closed form and a remembered
-one renders and is wrong), **F-GL-06** JPEG glitch (needs an encoder, and
-therefore an execution kind that does not exist), **F-SP-14** nearest-neighbour
-upscale (a resampling stage, not a pass — it belongs with F-PP-01 and F-EX-12).
+Two of the spec's 61 named effects are deliberately absent: **F-GL-06** JPEG
+glitch (needs an encoder, and therefore an execution kind that does not exist)
+and **F-SP-14** nearest-neighbour upscale (a resampling stage, not a pass — it
+belongs with F-PP-01 and F-EX-12).
+
+The `preprocess` family holds F-PP-02 (brightness/contrast), F-PP-03 (levels),
+F-PP-04 (HSL) and F-PP-06 (noise injection). The other four F-PP requirements
+are not effect descriptors and will not become ones: F-PP-01 is the internal
+resolution stage, F-PP-05 needs an editable spline that `ParamDescriptor`'s
+`curve` kind declares but nothing packs, and F-PP-07/08 take an uploaded image.
 
 `web/src/registry/catalogue.test.ts` asserts every number in that table, runs
 the startup validator over the shipped descriptors, and checks that every `gpu`
@@ -325,15 +327,16 @@ edited, so two effects written in parallel cannot conflict — which is not
 hypothetical: the catalogue arrived as nine parallel contributions and none of
 them touched a shared file.
 
-A parallel effect's module carries three more things beside the descriptor: the
-uniform layout, the `ComputePass` list, and the `GpuEffect` that wraps them. They
-live together because the parameter keys, the byte offsets and the shader's
-`struct Params` are the same fact written three times, and splitting them puts a
-rename one file away from a wrong picture with no error.
+A parallel effect's module carries four more things beside the descriptor: the
+uniform layout, the `ComputePass` list, the `GpuEffect` that wraps them, and the
+`gpu` source that resolves the id to it. They live together because the
+parameter keys, the byte offsets and the shader's `struct Params` are the same
+fact written three times, and splitting them puts a rename one file away from a
+wrong picture with no error.
 
 Helper modules may sit in the same directory; the `.effect.ts` suffix is what
 distinguishes a descriptor from a helper. `effects/error-diffusion.ts` is one —
-the shared F-ED-CTL control set and the factory that stamps the 14 kernel
+the shared F-ED-CTL control set and the factory that stamps the 15 kernel
 descriptors from it.
 
 The glob matching nothing is itself a failure, because a renamed directory
@@ -476,21 +479,45 @@ Input and output are always different textures: `PassAccess` permits a
 `pointwise` pass to alias them but WebGPU does not, so `SurfaceChain`
 ping-pongs.
 
-### Getting from an effect id to its passes — **not built**
+### Getting from an effect id to its passes
 
-There is no such lookup. The registry globs *descriptors*, and a descriptor says
-an effect runs on the GPU without saying where its passes are; each effect module
-exports its `GpuEffect` under a name of its own (`INVERT_GPU`,
-`blurGpuEffect`, `halftoneEffect()` — constants where the passes are static,
-factories where the effect builds a table first). `web/src/main.ts` therefore
-imports all thirty-nine by name.
+**One named export per module.** An effect whose descriptor says
+`execution: "gpu"` also exports `const gpu: GpuEffectSource`, built with
+`staticGpuEffect` or `thresholdMatrixGpuEffect` from `web/src/types/registry.ts`.
+`registry/gpu-effects.ts` collects those with the same glob that collects the
+descriptors, and `loadGpuEffects()` returns a `GpuEffectResolver`.
 
-That is a real gap and it is stated here rather than papered over, because it is
-the first thing a document loader needs and because the obvious fix is not free:
-a conventional export picked up by the same glob would work for thirty-nine of
-the forty-four, and not for the five ordered dithers, whose passes cannot be
-built until the Rust core has handed over a threshold tile. Resolving that needs
-a decision about how an effect asks for build-time data, not another export.
+```ts
+const resolver = loadGpuEffects();
+const requirement = resolver.requirementOf(id);   // ask first
+const effect = requirement.kind === "none"
+  ? resolver.resolve(id, NO_GPU_BUILD_DATA)
+  : resolver.resolve(id, { kind: "threshold-matrix", matrix });
+```
+
+**The source is a source rather than a `GpuEffect` because not every effect is
+constructible from nothing.** The five ordered dithers need a threshold tile out
+of `dither-core` before their passes can be named, so `GpuEffectSource.requires`
+states what the effect is waiting for and the caller fetches it *before* asking
+for passes. A design that assumed every effect could be built from nothing would
+have worked for forty-three of the forty-eight and quietly excluded the family
+the dither slot is named after.
+
+Coverage is checked against the sealed catalogue, not assumed. A `gpu`
+descriptor with no source, a source with no descriptor, a `wasm` descriptor that
+exports passes anyway, or two modules claiming the same id — each fails the whole
+catalogue the way a missing surprise range does, because a resolver that is
+silently one effect short renders a document with one node missing, and that is
+a picture nobody can tell is wrong.
+
+One thing the requirement does **not** carry, and it is a real gap: the tile
+*size* but not which generator produces it. A caller holding nothing but an
+effect id therefore cannot ask the core for the right tile, and both
+`web/test/gpu-golden/harness.ts` and `web/src/gpu/effects/` carry a small table
+saying "`blue-noise` wants void-and-cluster, the four Bayers want Bayer". That
+belongs in `GpuBuildRequirement`, so that an effect needing a tile that nobody
+has taught the table about fails loudly instead of quietly receiving a plausible
+wrong screen.
 
 ### Conventions the shaders settled on
 
@@ -507,7 +534,7 @@ predict, established while the catalogue was written and now in force:
   the top of the WGSL against the descriptor's `values` order. Both sides say so,
   and both say the list is append-only: inserting a value in the middle
   renumbers every saved document.
-- **Shared blocks are fenced and duplicated**, per CONVENTIONS.md — 34 of the 44
+- **Shared blocks are fenced and duplicated**, per CONVENTIONS.md — 38 of the 48
   shaders carry at least one. The palette search, the sRGB transfer, the clamped
   texel fetch, the perceptual-lightness pair, the gaussian kernel geometry and
   the halftone dot areas are each identical everywhere they appear. The seeded

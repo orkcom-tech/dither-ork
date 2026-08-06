@@ -1,0 +1,37 @@
+{
+  "//": [
+    "The harness has its own tsconfig because web/tsconfig.json includes only",
+    "`src` and `vite.config.ts`, so nothing here would otherwise be type-checked",
+    "at all. Every compiler option below is copied from that file rather than",
+    "loosened: the harness imports the renderer directly, and a harness held to a",
+    "weaker standard than the code it exercises is a harness that can be wrong",
+    "about it.",
+    "",
+    "`npm run typecheck` does not pick this up — it runs one tsc over the root",
+    "config. The gpu-golden CI job runs `tsc -p test/gpu-golden` as its first",
+    "step, which is what keeps this from rotting.",
+    "",
+    "`vite.config.ts` and the Node-side `.mjs` files are outside `include`: they",
+    "import Node built-ins, `@types/node` is not a dependency of this package, and",
+    "adding one to web/package.json is not this harness's call to make. Those files",
+    "are checked by running them, which the same CI job does."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["vite/client", "@webgpu/types"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowJs": false
+  },
+  "include": ["fixture.ts", "harness.ts"]
+}

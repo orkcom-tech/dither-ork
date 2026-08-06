@@ -1,0 +1,5 @@
+# The image needs one file — chrome-version.txt — and everything else in this
+# directory is either source the container reads off the bind mount at run time
+# or build output. Sending it to the daemon on every build buys nothing.
+*
+!chrome-version.txt

@@ -6,7 +6,7 @@
  * says an effect runs on the GPU without saying where its passes are; every
  * effect module used to export its `GpuEffect` under a name of its own
  * (`INVERT_GPU`, `blurGpuEffect`, `halftoneEffect()`), so the only way to reach
- * them was to name all forty-four by hand — which is exactly what
+ * them was to name all of them by hand — which is exactly what
  * `web/src/main.ts` did, and exactly what a loader holding an id out of a
  * `.dork` file cannot do.
  *
@@ -21,8 +21,8 @@
  * need a threshold tile from `dither-core` before their passes can be named at
  * all, so `GpuEffectSource.requires` states what an effect is waiting for and
  * the caller fetches it *before* asking for passes. A design that assumed every
- * effect could be built from nothing would have worked for thirty-nine of the
- * forty-four and quietly excluded the family the dither slot is named after.
+ * effect could be built from nothing would have worked for forty-three of the
+ * forty-eight and quietly excluded the family the dither slot is named after.
  *
  * Coverage is checked against the registry rather than assumed: a `gpu`
  * descriptor with no source, or a source with no descriptor, fails the whole

@@ -5,13 +5,17 @@ for still images: the spec's 61 named effects in a stackable reorderable
 pipeline, full colour with palette extraction, CMYK halftone, timeline animation
 with live playback, batch processing, and PNG / JPEG / SVG / GIF / MP4 export.
 
-**58 of those 61 are built and registered.** By family: 14 error diffusion, 5
-ordered, 8 pattern, 16 glitch, 15 special. By execution: 14 WASM, 44 WebGPU. By
-slot: 12 preprocess, 27 dither, 19 postprocess. The three that are absent are
-absent on purpose and each is recorded where the decision was made — F-ED-14
-Ostromoukhov, F-GL-06 JPEG glitch, F-SP-14 nearest-neighbour upscale. The
-counts are asserted by `web/src/registry/catalogue.test.ts`, so an effect that
-silently stops being discovered fails the build rather than the eye.
+**59 of those 61 are built and registered, plus 4 of the 8 preprocessing nodes
+(F-PP): 63 effects in the catalogue.** By family: 15 error diffusion, 5 ordered,
+8 pattern, 16 glitch, 15 special, 4 preprocess. By execution: 15 WASM, 48
+WebGPU. By slot: 16 preprocess, 28 dither, 19 postprocess. Two of the 61 are
+absent on purpose and each is recorded where the decision was made — F-GL-06
+JPEG glitch and F-SP-14 nearest-neighbour upscale. Of the F-PP group, F-PP-01 is
+the internal-resolution stage rather than a stack node, F-PP-05 needs a spline
+control the parameter vocabulary does not have, and F-PP-07/08 take an uploaded
+image; none of the four is an effect descriptor. The counts are asserted by
+`web/src/registry/catalogue.test.ts`, so an effect that silently stops being
+discovered fails the build rather than the eye.
 
 Video editing is out of scope and is a separate future application. Animated
 output is in scope, because frames are generated from a still source — that
@@ -31,8 +35,8 @@ glitch, which needs an encoder to re-compress and corrupt — is not implemented
 for exactly that reason, and adding it is a decision about the execution model
 rather than one more shader.
 
-- **14 serial kernels** run on the CPU in WebAssembly, compiled from Rust.
-- **44 parallel effects** run on the GPU as WebGPU compute passes.
+- **15 serial kernels** run on the CPU in WebAssembly, compiled from Rust.
+- **48 parallel effects** run on the GPU as WebGPU compute passes.
 - **The boundary between them is the performance ceiling.** Each serial node
   costs a GPU readback plus an upload. Two mitigations, both also correct for
   the look: consecutive parallel nodes are coalesced into a single GPU pass, and
@@ -149,6 +153,17 @@ Palette matching uses **OKLab** by default. Plain sRGB Euclidean distance is
 also exposed — not as a fallback but as a look control, since it reproduces what
 period-accurate tools did.
 
+One consequence of working in linear light is worth stating because getting it
+wrong is invisible in every aggregate measure. **Ostromoukhov's variable
+coefficient table (F-ED-14) is indexed by the linear value, not by the sRGB code
+value.** A row of that table is the triple solved so that a field of a given
+*dot coverage* comes out blue-noise, and in a linear-light pipeline the coverage
+a flat field settles at is its linear value. Indexing by the display-referred
+code instead selects a row solved for a different coverage; it leaves the mean
+level correct and every kernel-agnostic test passing, and it puts visible
+vertical stripes through the upper mid-tones. The measurement, the cause and the
+regression test that pins it are in `level_index` in `core/.../diffusion.rs`.
+
 ## Surprise generator
 
 Lives in `core/gen`, driven by a seeded PCG PRNG so a seed reproduces
@@ -197,7 +212,12 @@ lightness spacing instead of clumping.
 
 - GPU results are deterministic per device. Golden-image tests for the CPU path
   run anywhere; the GPU goldens need a pinned environment, since WebGPU
-  implementation variance across drivers is real.
+  implementation variance across drivers is real. **That environment now exists
+  and is part of the repository**: `web/test/gpu-golden/` builds one pinned
+  Chrome for Testing build (`chrome-version.txt`) into a `linux/amd64` image and
+  drives it onto SwiftShader, and the runner refuses to compare anything if the
+  adapter it gets back is not the software rasteriser. See DEVELOPMENT.md for
+  how to run and re-bless it.
 
 ## Logging
 
@@ -235,12 +255,20 @@ core/                     Rust workspace, zero web dependencies
   fixtures/golden/        reference renders, one per fixture x palette x kernel
 web/
   public/_headers         COOP/COEP for production; shipped to the site root
+  fixtures/gpu/           the parallel catalogue's reference set: one generated
+                          source and two renders per gpu effect
+  test/gpu-golden/        the harness that produces and checks it — a Dockerfile
+                          pinning one Chrome for Testing build, the browser-side
+                          renderer, the Node-side comparator, and perturb.mjs,
+                          which damages a shader on purpose to measure what the
+                          set would catch
   src/effects/            one file per effect; the registry finds them by glob.
-                          A parallel effect's file carries three things that must
+                          A parallel effect's file carries four things that must
                           agree byte for byte and therefore may not be separated:
-                          the registry descriptor, the uniform layout, and the
-                          `GpuEffect` its passes live in. The WGSL is the fourth
-                          and sits in src/shaders/ under the same id
+                          the registry descriptor, the uniform layout, the
+                          `GpuEffect` its passes live in, and the `gpu` export
+                          that resolves its id to those passes. The WGSL is the
+                          fifth and sits in src/shaders/ under the same id
   src/registry/           discovery, validation, search over the catalogue
   src/graph/              DAG scheduling, content hashing, node cache
   src/gpu/                device, compiler, resources, boundary, scheduler
@@ -269,21 +297,45 @@ Nothing in `core/` may know a browser exists.
 
 ## Testing
 
-The list below is the strategy. What is built today: golden images for all 14
-registered diffusion kernels across four fixtures and two palettes, the colour
+The list below is the strategy. What is built today: golden images for all 15
+registered diffusion kernels across four fixtures and two palettes, golden
+images for all 48 parallel effects at two parameter sets each, the colour
 correctness tests, determinism across threads, and the catalogue test that runs
 the startup validator over the shipped descriptors and asserts the counts above.
 The loop seam, the perf budget and the document round trip have nothing to test
 yet — there are no modulators, no timeline and no document loader.
 
-**The 44 parallel effects have no goldens.** They are proven today by
-`web/src/main.ts`, which renders every one of them through the real compute path
-against a generated source and states, per effect, how much of the frame it
-changed and how bright it left it. That catches the failure a golden cannot be
-written for yet — an effect that compiles, validates, and returns its input or a
-black rectangle — but it is a human reading numbers and pictures, not CI. GPU
-goldens need the pinned environment described under Determinism, and they are
-the gap that matters most in this area.
+**Both halves of the catalogue now have goldens.** The CPU set is
+`core/fixtures/golden/`, compared byte for byte. The GPU set is
+`web/fixtures/gpu/`, produced by `web/test/gpu-golden/` inside the pinned
+browser image and compared within one 8-bit code value — a tolerance the CPU set
+does not need and the GPU set does, because half the parallel catalogue writes
+continuous colour through `exp`, `pow` and trigonometry, which a JIT may
+legitimately contract differently on two machines.
+
+Three properties of the GPU harness are worth knowing because they are what make
+it a check rather than a ritual:
+
+- **The plan is enumerated from the registry**, never listed. An effect added
+  next week is rendered without the harness being edited; an effect that stops
+  being discovered leaves its reference behind and the run fails on the orphan.
+- **Two parameter sets per effect** — the declared defaults, and the far end of
+  every declared surprise range. Defaults alone would record the identity for
+  the handful of effects that legitimately open as one; the surprise end alone
+  would leave unprotected the state most renders actually use.
+- **A vacuity check that runs in bless mode too.** An effect that returns its
+  input at both parameter sets, or that renders an almost black frame, fails the
+  run instead of having that output stored as the truth forever. It is the one
+  failure a golden set cannot otherwise catch, because it is the failure that
+  was present when the set was blessed.
+
+What remains outside CI is the proof page's own judgement: `web/src/main.ts`
+renders the catalogue and states per effect how much of the frame moved, what it
+did to mean luminance and to its standard deviation, and how far it rotated hue.
+Those numbers are what a human reads against the effect's *name* — a levels node
+that does not move the tone scale and a hue control that rotates nothing both
+pass every golden, because a golden pins what an effect does, not that what it
+does matches what it is called.
 
 - **Golden images per algorithm** — all of them, fixed inputs, stored
   references. The only defence against a plausible-looking coefficient typo.
@@ -300,7 +352,7 @@ the gap that matters most in this area.
 ## Build order
 
 1. Colour core plus one kernel, headless, with the golden-image harness.
-2. The remaining 14 diffusion kernels against goldens.
+2. The remaining diffusion kernels against goldens.
 3. Render graph and cache, headless, with hashing.
 4. WebGPU path: ordered dithers and halftone in WGSL, pass coalescing, boundary
    instrumentation.
@@ -319,26 +371,31 @@ the gap that matters most in this area.
 
 Steps 1–2 are where the look is decided, so they come before any UI.
 
-**Where the repository is:** steps 1 and 2 are done bar Ostromoukhov (F-ED-14),
-whose 256-row coefficient table is not derivable and is left out rather than
-invented. Step 3 is built headless — hashing, cache, plan, animate — and is not
-yet driven by a document. Step 4 is done: the WebGPU layer, all five ordered
-dithers and all eight pattern dithers run end to end with boundary
-instrumentation. Step 7 is done bar JPEG glitch (F-GL-06) and nearest-neighbour
-upscale (F-SP-14) — all 16 remaining glitch effects and all 15 remaining special
-effects are registered and render — **except for the goldens**, which the
-Testing section above records as the outstanding item. Step 6's extraction half
-exists in the core and at the WASM boundary; the library, editor and the
-palette-side index-map operations do not, though the two index-map *stack* nodes
-(outline F-SP-10, dilate/erode F-SP-11) do. Nothing from step 5 onward is an
-application yet — `web/src/main.ts` is a proof page, not a UI.
+**Where the repository is:** steps 1 and 2 are done. All fifteen kernels are
+built and pinned by goldens, Ostromoukhov (F-ED-14) included — its table is
+transcribed from Appendix I of the paper and the transcription is checked
+against the paper's own construction rather than against a second copy of the
+numbers, in exact rational arithmetic. Step 3 is built headless — hashing,
+cache, plan, animate — and is not yet driven by a document. Step 4 is done: the
+WebGPU layer, all five ordered dithers and all eight pattern dithers run end to
+end with boundary instrumentation. Step 7 is done bar JPEG glitch (F-GL-06) and
+nearest-neighbour upscale (F-SP-14) — all 16 remaining glitch effects and all 15
+remaining special effects are registered, render, and **now have goldens**,
+which the previous revision of this section recorded as the outstanding item.
+The tone front of the stack has started: F-PP-02, 03, 04 and 06 are registered
+as the `preprocess` family. Step 6's extraction half exists in the core and at
+the WASM boundary; the library, editor and the palette-side index-map operations
+do not, though the two index-map *stack* nodes (outline F-SP-10, dilate/erode
+F-SP-11) do. Nothing from step 5 onward is an application yet —
+`web/src/main.ts` is a proof page, not a UI.
 
-One consequence of building step 7 before step 5 is now load-bearing and is
-recorded under "GPU pass layer" in docs/API.md: **nothing resolves an effect id
-to its `GpuEffect`.** Each effect file exports its passes under its own name and
-the proof page names all thirty-nine by hand. That is fine while the only caller
-is a page that wants all of them; it is the first thing a document loader will
-need, and it is not written yet.
+The gap this section used to record — **nothing resolves an effect id to its
+`GpuEffect`** — is closed. Every `gpu` effect module exports
+`const gpu: GpuEffectSource` beside its descriptor, `loadGpuEffects()` collects
+them with the same glob that collects the descriptors, and a `gpu` descriptor
+with no source fails the catalogue the way a missing surprise range does. The
+proof page and the golden harness both enumerate the registry through it and
+name no effect by hand. See "GPU pass layer" in docs/API.md for the contract.
 
 ## Known technical risks
 

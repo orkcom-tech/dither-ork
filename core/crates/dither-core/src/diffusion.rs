@@ -19,7 +19,7 @@
 //! three algorithms it is, and the shared controls of F-ED-CTL apply to every
 //! one of them.
 
-use crate::color::{linear_to_srgb, Rgba};
+use crate::color::Rgba;
 use crate::palette::{Metric, Palette};
 use crate::rng::{stream_of, Pcg32};
 use std::collections::VecDeque;
@@ -1074,14 +1074,40 @@ impl<'a> Pass<'a> {
 
 /// Map a linear-light colour onto one of [`LEVELS`] input levels.
 ///
-/// Through the sRGB transfer curve, because a variable-coefficient table is
-/// indexed by the 8-bit code value of the source image and code values are
-/// display-referred. Indexing by linear luminance instead would crowd
-/// two-thirds of the table into the top stop of the image.
+/// **On the linear value, not through the sRGB transfer curve**, and the
+/// difference is visible rather than academic.
+///
+/// A row of Ostromoukhov's table is not a lookup on "how bright does this pixel
+/// look". It is the coefficient triple that was solved so that a field whose
+/// **dot coverage** is `i/255` comes out with a blue-noise spectrum. This
+/// pipeline diffuses in linear light, so the coverage a flat field settles at is
+/// its linear value — which makes the linear value the row index by definition
+/// of what the row means. Two structural confirmations from the paper's own
+/// table: the key levels are packed at 0, 1, 2, 3, 4, which is a fine sampling
+/// only if the axis is coverage (isolated-dot placement changes fast in the
+/// first 2% of coverage and not at all in the first 2% of a code ramp); and
+/// row 64 carries `A_01 = 0`, a transport that produces a clean lattice at
+/// quarter coverage and vertical striping anywhere else.
+///
+/// That striping is what the earlier display-referred index produced, and it was
+/// measured before this was changed. Indexing sRGB code `c` selects row `c`,
+/// whose intended coverage is `c/255`, while the field actually settles at
+/// `srgb_to_linear(c/255)` — at code 192 that is row 192 (75% coverage) driving
+/// a 53% field. Rows 184..200 mirror the near-zero-`down` band at 55..72, so the
+/// error left with nowhere to go but right and down-left, and the output locked
+/// into columns: vertical autocorrelation at lag 1 of **+0.54** where
+/// Floyd-Steinberg on the same field gives −0.27. On the linear index the same
+/// field gives +0.08, and the mean level lands closer as well. See
+/// [`tests::the_variable_kernel_never_locks_into_columns`], which pins it.
+///
+/// The argument the display-referred index was written for — that a linear index
+/// crowds most image content into the bottom of the table — is true and is not a
+/// defect: content that is dark in linear light genuinely wants the sparse rows,
+/// because those are the rows solved for sparse coverage.
 #[inline]
 fn level_index(c: Rgba) -> usize {
-    let code = linear_to_srgb(luminance(c)).clamp(0.0, 1.0);
-    (code * (LEVELS - 1) as f32 + 0.5) as usize
+    let coverage = luminance(c).clamp(0.0, 1.0);
+    (coverage * (LEVELS - 1) as f32 + 0.5) as usize
 }
 
 /// Hilbert-curve traversal for arbitrary, non-power-of-two images (F-ED-15).
@@ -1876,21 +1902,73 @@ mod tests {
     }
 
     /// The level index has to walk the whole table as the input walks the whole
-    /// range, and it has to do it through the transfer curve — a linear index
-    /// would leave the bottom half of the table unreachable by most images.
+    /// range, and the rung it lands on has to be the coverage the field will
+    /// settle at — that is what a row of the table means. See [`level_index`].
     #[test]
-    fn the_level_index_spans_the_table() {
+    fn the_level_index_is_the_coverage_the_field_will_settle_at() {
         assert_eq!(level_index(Rgba::new(0.0, 0.0, 0.0, 1.0)), 0);
         assert_eq!(level_index(Rgba::new(1.0, 1.0, 1.0, 1.0)), LEVELS - 1);
-        // sRGB mid-grey is linear 0.214; on the display-referred scale the
-        // table is indexed on, that is the middle rung.
-        let mid = level_index(Rgba::new(
-            srgb_to_linear(0.5),
-            srgb_to_linear(0.5),
-            srgb_to_linear(0.5),
-            1.0,
-        ));
-        assert!((127..=128).contains(&mid), "mid-grey landed on rung {mid}");
+
+        // Every rung is reachable, and the one a given field lands on is the one
+        // whose coefficients were solved for that field's dot density.
+        for rung in 0..LEVELS {
+            let coverage = rung as f32 / (LEVELS - 1) as f32;
+            let landed = level_index(Rgba::new(coverage, coverage, coverage, 1.0));
+            assert_eq!(landed, rung, "coverage {coverage} landed on rung {landed}");
+        }
+    }
+
+    /// F-ED-14 must not lock into columns at any level.
+    ///
+    /// The failure this pins is the one the display-referred level index
+    /// produced and no other test in this file noticed: the mean was right, the
+    /// golden set matched itself, every kernel-agnostic assertion passed, and
+    /// the picture had visible vertical stripes through the upper mid-tones.
+    /// See [`level_index`] for the measurement and the cause.
+    ///
+    /// Vertical autocorrelation at lag 1 is the statistic because that *is* the
+    /// artifact: a column that repeats down the frame correlates with itself one
+    /// row down, and nothing else in a diffusion output does. A good kernel
+    /// leaves it at or below zero — Floyd-Steinberg over this sweep never rises
+    /// above about −0.05 — so the bound below is loose by a wide margin and
+    /// still an order of magnitude under what the defect produced.
+    #[test]
+    fn the_variable_kernel_never_locks_into_columns() {
+        let pal = Palette::from_srgb_rgb(builtin::MONO);
+        let (w, h) = (128usize, 128usize);
+        const LIMIT: f32 = 0.25;
+
+        for step in 1..32 {
+            let level = step as f32 / 32.0;
+            let src = flat(w, h, Rgba::new(level, level, level, 1.0));
+            let res = dither(&src, w, h, &pal, &OSTROMOUKHOV, Options::default());
+
+            let on: Vec<f32> = res.pixels.iter().map(|p| p.r).collect();
+            let mean: f32 = on.iter().sum::<f32>() / on.len() as f32;
+            let variance: f32 =
+                on.iter().map(|v| (v - mean) * (v - mean)).sum::<f32>() / on.len() as f32;
+            if variance <= f32::EPSILON {
+                // A level that resolves to one solid colour has no texture to
+                // judge, which is a legitimate answer and not a column lock.
+                continue;
+            }
+
+            let mut covariance = 0.0f32;
+            for y in 0..h - 1 {
+                for x in 0..w {
+                    covariance += (on[y * w + x] - mean) * (on[(y + 1) * w + x] - mean);
+                }
+            }
+            covariance /= ((h - 1) * w) as f32;
+
+            let correlation = covariance / variance;
+            assert!(
+                correlation < LIMIT,
+                "at linear level {level} the output correlates {correlation} with itself one \
+                 row down — F-ED-14 has locked into columns, which is what a level index that \
+                 does not match the dot coverage produces"
+            );
+        }
     }
 
     // ---- shapes and edges ---------------------------------------------------

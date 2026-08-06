@@ -29,15 +29,21 @@ import type { NodeSlot } from "../types/document";
 /**
  * What the build is expected to contain, from docs/ARCHITECTURE.md.
  *
- * Three of the spec's sixty-one named effects are deliberately absent and each
- * gap is recorded where the decision was made rather than here: F-ED-14
- * (Ostromoukhov, whose 256-row coefficient table has no closed form), F-GL-06
- * (JPEG glitch, which needs an encoder the pipeline does not have) and F-SP-14
+ * Two of the spec's named effects are deliberately absent and each gap is
+ * recorded where the decision was made rather than here: F-GL-06 (JPEG glitch,
+ * which needs an encoder the pipeline does not have) and F-SP-14
  * (nearest-neighbour upscale, which is a resampling stage rather than a pass).
+ *
+ * The `preprocess` family is the tone-and-noise front of the stack (F-PP) and
+ * is deliberately partial: F-PP-02, 03, 04 and 06 are here; F-PP-01 is the
+ * internal-resolution stage, F-PP-05 needs a spline control the parameter
+ * vocabulary does not have, and F-PP-07/08 take an uploaded image. Those four
+ * are not effect descriptors at all, so their absence is not a hole in this
+ * count — it is recorded in docs/ARCHITECTURE.md under the build order.
  */
 const EXPECTED_BY_FAMILY: Readonly<Record<EffectFamily, number>> = {
-  preprocess: 0,
-  "error-diffusion": 14,
+  preprocess: 4,
+  "error-diffusion": 15,
   ordered: 5,
   pattern: 8,
   glitch: 16,
@@ -45,17 +51,17 @@ const EXPECTED_BY_FAMILY: Readonly<Record<EffectFamily, number>> = {
 };
 
 const EXPECTED_BY_EXECUTION: Readonly<Record<ExecutionKind, number>> = {
-  wasm: 14,
-  gpu: 44,
+  wasm: 15,
+  gpu: 48,
 };
 
 const EXPECTED_BY_SLOT: Readonly<Record<NodeSlot, number>> = {
-  preprocess: 12,
-  dither: 27,
+  preprocess: 16,
+  dither: 28,
   postprocess: 19,
 };
 
-const EXPECTED_TOTAL = 58;
+const EXPECTED_TOTAL = 63;
 
 /** Every WGSL file the build ships, keyed by the effect id it is named for. */
 const SHADER_IDS: ReadonlySet<string> = new Set(
