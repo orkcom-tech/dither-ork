@@ -159,9 +159,32 @@ lightness spacing instead of clumping.
 - Modulator frequency is an integer number of cycles per loop, so frame `N`
   equals frame `0` by construction. A hash comparison of the two blocks any
   animated export that would not loop.
-- Same document + same frame index + same build = byte-identical output on the
-  CPU path. GPU results are deterministic per device; golden-image tests run on
-  a pinned environment.
+- Same document + same frame index + same build + **same platform** =
+  byte-identical output on the CPU path.
+
+  The platform qualifier is not hedging, and it was measured rather than
+  assumed. `srgb_to_linear` and `linear_to_oklab` call `powf` and `cbrt`, so
+  they are on every render path, and the C library is not required to round
+  those correctly — implementations do differ between platforms and versions.
+  The seeded integer draws feeding them are bit-identical; the transforms are
+  not.
+
+  What that costs in practice is small and is now known: the golden set is
+  blessed on aarch64 and passes on x86_64 in CI, within the harness tolerance.
+  So results are reproducible to within a rounding difference across platforms
+  and byte-identical on one. Anything that must be exact across platforms —
+  a share URL reproducing a seed, a batch worker matching the preview — is
+  exact because it re-runs the same pipeline on the same machine, not because
+  the floating point agrees everywhere.
+
+  The alternative, committing to correctly-rounded implementations of the
+  handful of transcendentals involved, buys byte-equality across platforms at
+  the cost of owning that code forever. Not taken; revisit only if a real
+  requirement needs cross-platform byte-equality.
+
+- GPU results are deterministic per device. Golden-image tests for the CPU path
+  run anywhere; the GPU goldens need a pinned environment, since WebGPU
+  implementation variance across drivers is real.
 
 ## Logging
 
