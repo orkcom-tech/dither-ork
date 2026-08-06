@@ -6,6 +6,10 @@
 
 pub mod color;
 pub mod diffusion;
+pub mod fixture;
+pub mod noise;
 pub mod palette;
+pub mod quantize;
+pub mod rng;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

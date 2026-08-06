@@ -1,9 +1,9 @@
 # API
 
-Contracts between the layers. Four surfaces: the WASM core, the node registry,
-the `.dork` document, and the worker RPC.
+Contracts between the layers. Six surfaces: the WASM core, the node registry,
+the `.dork` document, the GPU pass layer, the render graph, and the worker RPC.
 
-Items marked **planned** are specified but not yet implemented in the scaffold.
+Items marked **planned** are specified but not yet implemented.
 
 ---
 
@@ -17,46 +17,93 @@ import init, * as core from "./wasm/pkg/dither_wasm.js";
 await init();
 ```
 
+**Everything returned from this boundary that is not a typed array is a
+`wasm-bindgen` handle.** Every getter copies out of WASM memory, and the handle
+holds linear memory until `free()` is called. Read each getter once, hold the
+result, and release the handle.
+
 ### `version(): string`
 
 Version of the compiled core. Logged at startup so a stale WASM build is
 visible rather than mysterious.
 
-### `kernel_ids(): string`
+### `kernels(): KernelInfo[]`
 
-Newline-separated ids of every registered error-diffusion kernel. The web layer
+Every registered error-diffusion kernel, in catalogue order. The web layer
 builds its effect list from this rather than keeping a parallel copy that can
-drift out of sync.
+drift out of sync — and it carries the display name as well as the id for
+exactly that reason, since a UI that has only ids has to invent labels, and
+invented labels are a second list.
 
 ```ts
-const kernels = core.kernel_ids().split("\n").filter(Boolean);
-// ["floyd-steinberg", "atkinson"]
+const handles = core.kernels();
+const kernels = handles.map((k) => ({ id: k.id, name: k.name }));
+for (const handle of handles) handle.free();
+// [{ id: "floyd-steinberg", name: "Floyd-Steinberg" }, ...]
 ```
 
-### `dither_image(...): DitherOutput`
+### `DitherOptions`
+
+Every control of F-ED-CTL, as one object. This replaced the eight positional
+parameters `dither_image` used to take: the controls only grow — threshold
+jitter, the overshoot clamp and the channel mode arrived together and would have
+made it eleven — and a call site with eleven bare positionals is one
+transposition away from silently dithering with the wrong strength.
+
+The kernel is a constructor argument rather than a settable property because it
+is the one choice the object cannot be built without, and because resolving it
+once means an unknown id is reported where it was written instead of at render
+time.
 
 ```ts
-function dither_image(
+class DitherOptions {
+  constructor(kernel_id: string);   // throws on an unrecognised id
+  readonly kernelId: string;
+  strength: number;                 // 0..=1; 0 is plain nearest-colour quantization
+  serpentine: boolean;              // alternate scan direction per row
+  jitter: number;                   // 0..=1, seeded threshold jitter
+  seed: bigint;                     // 64-bit, explicit; nothing invents one
+  overshootLimit: number;           // headroom outside [0, 1] for the working buffer
+  channels: DiffusionChannels;      // PerChannel | Luma
+  metric: ColorMetric;              // Oklab | Srgb
+  free(): void;
+}
+```
+
+Ranges are checked when the options are *used*, not in the setters. A setter
+that silently clamps is a setter that lies about what it stored, and one that
+throws makes a property assignment a `try` block; both are worse than one
+refusal at the point the values are read.
+
+`seed` is a `BigInt` because the document seed is 64 bits (F-SM-02) and
+narrowing it to a JS `number` would quietly throw away half of it.
+
+**`metric` is a look control, not a correctness switch.** `Oklab` is
+perceptually correct; `Srgb` reproduces what period-accurate tools did by doing
+the maths in gamma space.
+
+`serpentine` is ignored by Riemersma, which does not scan in rows at all. The
+registry descriptor for that kernel omits the control rather than showing an
+inert one.
+
+### `ditherImage(...): DitherOutput`
+
+```ts
+function ditherImage(
   rgba: Uint8Array,        // 8-bit sRGB RGBA, width * height * 4 bytes
   width: number,
   height: number,
   palette_rgb: Uint8Array, // packed sRGB triplets, length % 3 === 0
-  kernel_id: string,       // an id from kernel_ids()
-  strength: number,        // 0..1; 0 is plain nearest-colour quantization
-  serpentine: boolean,     // alternate scan direction per row
-  metric: "oklab" | "srgb",
+  options: DitherOptions,  // carries the kernel
 ): DitherOutput;
 ```
 
 Decodes to linear light, dithers, re-encodes to sRGB.
 
-Throws (rejects) rather than panicking on bad input — a malformed call surfaces
-as a JS error instead of an aborted WASM instance. Error cases: buffer length
-mismatch, empty or misaligned palette, unknown kernel id, unknown metric.
-
-**`metric` is a look control, not a correctness switch.** `oklab` is
-perceptually correct; `srgb` reproduces what period-accurate tools did by doing
-the maths in gamma space.
+Throws rather than panicking on bad input — a malformed call surfaces as a JS
+error instead of an aborted WASM instance. Error cases: zero dimensions, buffer
+length mismatch, empty or misaligned palette, a palette larger than a `u16`
+index map can address, and any control outside its range.
 
 ### `DitherOutput`
 
@@ -71,7 +118,98 @@ Both buffers are returned deliberately. The **index map** is what makes
 hue-targeted recolour, index remap, outline, dilate/erode and the SVG tracer
 lossless and cheap; carrying it is a chosen memory cost.
 
-Getters copy out of WASM memory. Read each one once and hold the result.
+### `builtinPalettes(): PaletteInfo[]`
+
+The hardware palette library (F-CO-04), in catalogue order. Same arrangement as
+`kernels()`: the web layer reads this table rather than keeping a copy that can
+drift from the values the renderer uses.
+
+```ts
+class PaletteInfo {
+  readonly id: string;    // stable; .dork documents store it
+  readonly name: string;
+  readonly srgb: Uint8Array;  // packed 8-bit sRGB triplets
+  free(): void;
+}
+```
+
+Only factual hardware colour specifications are bundled. The NES and the Apple
+II are absent because neither has a digital RGB specification — both emit
+composite, so every published table is one particular measurement — and a
+palette whose real values cannot be established is left out rather than shipped
+with invented numbers.
+
+### `extractPalette(...): ExtractedPalette`
+
+Automatic palette extraction (F-CO-02). Decodes to linear light, clusters
+there, and returns sRGB triplets — the same round trip `ditherImage` does, so an
+extracted palette fed straight back in matches what the extraction saw.
+
+```ts
+class ExtractOptions {
+  constructor();                // Wu, k = 16, seed = 0n, maxIterations = 64
+  method: ExtractMethod;        // MedianCut | Wu | KMeans
+  k: number;                    // requested size; the result may be smaller
+  seed: bigint;
+  maxIterations: number;        // Lloyd ceiling; ignored by the single-pass methods
+  free(): void;
+}
+
+function extractPalette(
+  rgba: Uint8Array,
+  width: number,
+  height: number,
+  options: ExtractOptions,
+): ExtractedPalette;
+```
+
+| Member | Type | Notes |
+| --- | --- | --- |
+| `srgb` | `Uint8Array` | packed triplets, ready to hand back to `ditherImage` |
+| `indices` | `Uint16Array` | one palette index per source pixel |
+| `populations` | `Uint32Array` | pixels matched to each entry; input to a population sort (F-CO-06) |
+| `paletteLen` | `number` | entries actually produced |
+| `occupiedBins` | `number` | occupied histogram bins — the ceiling on palette size for this image, and the explanation for a short palette |
+| `iterations` | `number` | Lloyd iterations run; zero for the single-pass methods |
+| `emptyClusterRepairs` | `number` | clusters re-seeded deterministically after losing every member |
+| `emptyClustersDropped` | `number` | clusters still empty at the end, producing no entry |
+
+The report travels with the result rather than being logged inside the core:
+`dither-core` has no logger, because a crate that must not know a browser exists
+must not pick the browser's logging story either.
+
+**All three methods take a seed**, even though only k-means draws from one
+today, so the document records a seed for every extraction and a later change
+that adds a stochastic step cannot quietly become unseeded.
+
+Throws on zero dimensions, a buffer length mismatch, a `k` outside `1..=65536`,
+or `maxIterations` of zero — each a caller error the core would otherwise
+panic on.
+
+### `bayerRanks(size)` and `blueNoiseRanks(size, seed)`
+
+Threshold tiles for the ordered dithers (F-OD-01..05).
+
+```ts
+function bayerRanks(size: number): Uint32Array;              // size a power of two >= 2
+function blueNoiseRanks(size: number, seed: bigint): Uint32Array;  // power of two >= 4
+```
+
+**Ranks, not normalized thresholds.** Both return `size * size` integers that
+are a permutation of `0 .. size*size - 1`; the shader turns rank `k` into the
+threshold `(k + 0.5) / (size * size)` itself. Integers cross the language
+boundary exactly, whereas two float implementations of the same recursion
+disagree in the last bit and put a visible seam between a CPU preview and a GPU
+export. It is also the natural output of both generators — Bayer's recursion
+produces an ordering, and void-and-cluster produces one by definition.
+
+`web/src/gpu/matrices.ts` validates the permutation before a tile is uploaded. A
+generator that repeats a rank produces a tile that dithers, looks broadly right,
+and has a fixed pattern of pixels that never cross their threshold.
+
+Blue noise is Ulichney's void-and-cluster method, not a white-noise texture with
+a blue name, and it costs `O(size^4)`: 64x64 is a fraction of a second, so build
+once and cache.
 
 ### Rust-side contract
 
@@ -107,45 +245,73 @@ scanning is on, so tables are written exactly as published.
 
 ---
 
-## 2. Node registry — **planned**
+## 2. Node registry
 
-The registry is the single source of truth about effects. The UI builds its
+Defined in `web/src/types/registry.ts`; discovered, validated and sealed by
+`web/src/registry/`. The single source of truth about effects: the UI builds its
 effect list from it, the graph schedules from it, and the Surprise generator
 samples from it. There is no second list anywhere.
 
 ```ts
 interface EffectDescriptor {
-  readonly id: string;                 // "floyd-steinberg", "halftone-cmyk"
+  readonly id: string;                 // "floyd-steinberg", "bayer-8"
   readonly name: string;
+  /** The spec requirement this implements, e.g. "F-ED-01". */
+  readonly requirement: string;
   readonly slot: "preprocess" | "dither" | "postprocess";
-  readonly family: "error-diffusion" | "ordered" | "pattern" | "glitch" | "special";
+  readonly family:
+    | "preprocess" | "error-diffusion" | "ordered" | "pattern" | "glitch" | "special";
   readonly execution: "wasm" | "gpu";
   readonly params: readonly ParamDescriptor[];
   /** Relative likelihood in Surprise Me. 1.0 is ordinary; niche effects sit lower. */
   readonly surpriseWeight: number;
-}
-
-interface ParamDescriptor {
-  readonly key: string;
-  readonly label: string;
-  readonly type: "float" | "int" | "bool" | "enum";
-  readonly legal: readonly [min: number, max: number];
-  /**
-   * The range Surprise Me samples. Narrower than `legal` on purpose — this is
-   * what separates a usable random result from noise.
-   */
-  readonly surprise: readonly [min: number, max: number];
-  readonly distribution: "uniform" | "log" | "normal";
-  readonly default: number | boolean | string;
-  readonly enumValues?: readonly string[];
-  /** Whether a modulator or keyframe track may bind to it. */
-  readonly animatable: boolean;
+  /** True when this node quantizes and therefore emits an index map. */
+  readonly producesIndexMap: boolean;
+  /** True when it reads one — outline, dilate/erode, hue-targeted recolour. */
+  readonly requiresIndexMap: boolean;
+  /** Effect ids it must not share a stack with; the grammar excludes them. */
+  readonly excludes?: readonly string[];
 }
 ```
 
-**Registry validation runs at build time.** A descriptor missing `surprise`,
-`distribution` or `surpriseWeight` fails the build. That is what keeps Surprise
-Me correct as effects are added, instead of degrading quietly.
+`ParamDescriptor` is a **discriminated union over `type`**, not one shape with
+optional fields: `float`, `int`, `bool`, `enum`, `color`, `seed` and `curve`
+each carry the surprise metadata that kind actually needs. A bool has a
+`trueProbability` and no range; an enum draws from a weighted subset of its own
+values; a colour samples in OKLab, because sampling sRGB channels independently
+clumps around muddy mid-greys. Read the file for the full set — it is the
+authority and this section does not duplicate it.
+
+### Adding an effect is adding one file
+
+One effect is one module under `web/src/effects/` whose name ends in
+`.effect.ts` and whose default export is a descriptor. `registry/discovery.ts`
+collects them with `import.meta.glob`, eagerly, at startup. Nothing central is
+edited, so two effects written in parallel cannot conflict — which matters when
+the catalogue is 63 independent contributions. Helper modules may sit in the
+same directory; the `.effect.ts` suffix is what distinguishes a descriptor from
+a helper.
+
+The glob matching nothing is itself a failure, because a renamed directory
+produces exactly that and would otherwise present as an app with no effects.
+
+### Validation
+
+**Validation runs at startup and it is terminal.** `loadEffectRegistry()`
+discovers, validates the whole set, and returns a sealed registry, or logs one
+line per issue naming the effect and the module it came from and throws
+`RegistryValidationError`.
+
+A missing `surprise` range, a missing distribution, a `surpriseWeight` of zero,
+a duplicate id, a default outside its own legal range, a log distribution over a
+range that includes zero, an `error-diffusion` effect claiming `gpu` execution,
+an index-map consumer in the `preprocess` slot — each fails the whole
+catalogue. Nothing is repaired and nothing is dropped: a catalogue that is 62
+effects because one was quietly discarded is worse than one that refuses to
+start.
+
+Startup is expected to surface that rather than continue. `web/src/main.ts`
+renders the verdict and every issue on the page, and stops.
 
 ---
 
@@ -225,7 +391,66 @@ Documents are versioned. A newer `schema` than the build understands is
 
 ---
 
-## 4. Worker RPC — **planned**
+## 4. GPU pass layer
+
+Defined in `web/src/types/gpu.ts`; implemented in `web/src/gpu/`. The contract
+between a parallel effect and the pass compiler that schedules it.
+
+An effect provides a `GpuEffect`: an id and one or more `ComputePass`es. Each
+pass declares its complete, constant WGSL, its entry point, its
+`@workgroup_size`, a `DispatchShape` (`per-pixel`, `per-row`, `per-column`,
+`fixed`), a `PassAccess` (`pointwise`, `neighbourhood`, `global`), its bindings
+by role, and its uniform layout **with explicit byte offsets**.
+
+Three rules the layer enforces rather than documents:
+
+- **Offsets are declared, not derived.** WGSL's uniform address space is
+  std140-like, so a packer that lays fields out sequentially writes to addresses
+  the shader does not read from — and the symptom is a wrong-looking image with
+  no error anywhere. `uniforms.ts` validates alignment, overlap and total size
+  on every pack and throws naming the field.
+- **A binding role has the same binding number in every shader** (0 input
+  colour, 1 output colour, 2 input index, 3 output index, 4 palette, 5 uniforms,
+  6+ tables and scratch), so any shader can be read without cross-referencing
+  its descriptor. `web/src/shaders/CONVENTIONS.md` is the full set.
+- **A pass that writes nothing observable is a compile error**, not a no-op
+  dispatch.
+
+Scheduling is `planExecution(units)` over the stack in order: a maximal run of
+consecutive `gpu` nodes becomes one `PassBatch` encoded into one command buffer,
+and each `gpu`↔`wasm` transition is counted as a **crossing**. The crossing
+count, not the pass count, is what sets the ceiling on how live the preview
+feels, so it is planned and logged rather than discovered.
+
+`boundary.ts` is the only place a surface changes residency. Every readback and
+every upload logs its node, direction, byte count and duration — the known
+performance trap has to be readable from the console rather than found with a
+profiler.
+
+Working surfaces are `rgba16float` for colour and `r32uint` for the index map.
+Input and output are always different textures: `PassAccess` permits a
+`pointwise` pass to alias them but WebGPU does not, so `SurfaceChain`
+ping-pongs.
+
+## 5. Render graph
+
+Defined in `web/src/types/graph.ts`; implemented in `web/src/graph/`. It
+schedules a document, hashes it, caches node outputs and executes against the
+GPU and WASM backends. It computes no pixels itself — `backend.ts` is that line.
+
+```ts
+const cache = new NodeCache({ budget: { maxBytes }, surfaces, log: logger("graph") });
+const outcome = await renderGraph({ graph, source, palette, retain: { kind: "all" } }, deps);
+await renderAnimation({ frames, graphForFrame, source, palette, onFrame }, deps);
+```
+
+Every node exposes a **content hash** over its parameters, seed and input hash;
+outputs are cached against it, so editing a parameter invalidates that node and
+everything downstream and nothing upstream re-runs. The cache has an explicit
+byte budget with LRU eviction and a logged eviction event, not an
+out-of-memory crash.
+
+## 6. Worker RPC — **planned**
 
 Comlink interfaces. The main thread holds UI state only; it never renders.
 
@@ -269,13 +494,13 @@ render once and are reused across all frames.
 
 ---
 
-## 5. Capability report
+## 7. Capability report
 
 `web/src/lib/capabilities.ts`, implementing F-UI-12.
 
 ```ts
 interface Capability {
-  readonly id: "webgpu" | "sab" | "opfs" | "fsa";
+  readonly id: string;       // "webgpu", "sab", "opfs", "fsa"
   readonly label: string;
   readonly fatal: boolean;
   readonly state: "ok" | "missing";
@@ -302,7 +527,7 @@ fallbacks.
 
 ---
 
-## 6. Logging
+## 8. Logging
 
 `web/src/lib/log.ts`.
 

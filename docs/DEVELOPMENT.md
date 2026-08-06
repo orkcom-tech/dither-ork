@@ -42,17 +42,34 @@ CI cannot drift apart without the drift being a reviewable commit.
 To bump: edit the value, run `docker compose up --build`, and confirm the page
 still reaches the smoke test.
 
-What you should see:
+What you should see, in order down the page:
 
 1. **Capabilities** — four rows. WebGPU and SharedArrayBuffer must both read
    `OK`. If SharedArrayBuffer reads `FAIL`, the dev server is not sending
    COOP/COEP; check `web/vite.config.ts`.
-2. **Core** — `loaded`, with the core version and the registered kernel ids.
-3. **Smoke test** — the source gradient plus one dithered result per kernel, in
-   the Game Boy DMG palette, nearest-neighbour upscaled.
+2. **Node registry** — `validated`, with the effect count split by execution
+   kind, and a row per effect. A rejected catalogue stops the page here and
+   lists every issue; nothing below it runs.
+3. **Core** — `loaded`, with the core version, the kernel count and the built-in
+   palette count.
+4. **Source** — the generated test image.
+5. **Error diffusion** — one result per registered kernel, Game Boy DMG,
+   nearest-neighbour upscaled.
+6. **Hardware palettes** — the same image through a selection of the built-in
+   library, each with its swatches.
+7. **Automatic palette extraction** — median cut, Wu and k-means at K=8, each
+   with the palette it produced and the extraction report.
+8. **Ordered dithers** — the five ordered dithers through the WebGPU compute
+   path, each captioned with the bytes and milliseconds of its readback.
 
-That page is the end-to-end proof: headers, cross-origin isolation, the WASM
-boundary and the linear-light colour path all working.
+That page is the end-to-end proof: headers, cross-origin isolation, registry
+validation, the WASM boundary, the linear-light colour path, WGSL compilation,
+compute dispatch and the GPU↔CPU boundary, all working. A section that cannot
+run says so in place, with the error that stopped it — a blank gap would read as
+"nothing to see here", which is the one thing it must never mean.
+
+The browser console carries the same run in full: one line per pass compiled,
+per batch submitted, per boundary crossing with its byte count and duration.
 
 ## Watching
 

@@ -13,6 +13,7 @@
         --ok: #8ee06a;
         --fail: #e06a6a;
         --warn: #e0c46a;
+        --rule: #1b2118;
       }
       body {
         margin: 0;
@@ -36,17 +37,38 @@
         letter-spacing: 0.16em;
         text-transform: uppercase;
         color: var(--dim);
-        margin: 2rem 0 0.75rem;
+        margin: 2.5rem 0 0.75rem;
+        border-top: 1px solid var(--rule);
+        padding-top: 1.25rem;
+      }
+      h2:first-of-type {
+        border-top: 0;
+        padding-top: 0;
+        margin-top: 2rem;
+      }
+      p.note {
+        margin: 0 0 1rem;
+        color: var(--dim);
+        max-width: 60rem;
       }
       table {
         border-collapse: collapse;
         width: 100%;
-        max-width: 46rem;
+        max-width: 66rem;
       }
-      td {
+      td,
+      th {
         padding: 0.3rem 0.75rem 0.3rem 0;
         vertical-align: top;
-        border-bottom: 1px solid #1b2118;
+        border-bottom: 1px solid var(--rule);
+        text-align: left;
+        font-weight: normal;
+      }
+      th {
+        color: var(--dim);
+        font-size: 0.75rem;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
       }
       td.state {
         width: 4rem;
@@ -54,33 +76,116 @@
       td.detail {
         color: var(--dim);
       }
-      .ok { color: var(--ok); }
-      .fail { color: var(--fail); }
-      .warn { color: var(--warn); }
+      .ok {
+        color: var(--ok);
+      }
+      .fail {
+        color: var(--fail);
+      }
+      .warn {
+        color: var(--warn);
+      }
       canvas {
         image-rendering: pixelated;
-        border: 1px solid #1b2118;
+        border: 1px solid var(--rule);
         max-width: 100%;
+        display: block;
       }
-      .row { display: flex; gap: 1.5rem; flex-wrap: wrap; }
-      figure { margin: 0; }
-      figcaption { color: var(--dim); padding-top: 0.4rem; }
+      .row {
+        display: flex;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+      }
+      figure {
+        margin: 0;
+      }
+      figcaption {
+        color: var(--dim);
+        padding-top: 0.4rem;
+        max-width: 22rem;
+      }
+      .swatches {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2px;
+        padding-top: 0.4rem;
+        max-width: 22rem;
+      }
+      .swatch {
+        width: 14px;
+        height: 14px;
+        border: 1px solid var(--rule);
+      }
+      .status {
+        margin-bottom: 1rem;
+      }
+      ul.issues {
+        margin: 0.5rem 0 0;
+        padding-left: 1.2rem;
+        color: var(--fail);
+      }
     </style>
   </head>
   <body>
     <h1>dither-ork</h1>
-    <p class="sub">scaffold — capability check and core smoke test</p>
+    <p class="sub">
+      scaffold — capability check, registry validation, and an end-to-end proof
+      of the WASM and WebGPU render paths
+    </p>
 
     <h2>Capabilities</h2>
+    <p class="note">
+      F-UI-12. WebGPU and SharedArrayBuffer are fatal; the other two degrade
+      stated capabilities rather than failing.
+    </p>
     <table id="capabilities">
       <tbody></tbody>
     </table>
 
-    <h2>Core</h2>
-    <div id="core-status">not run</div>
+    <h2>Node registry</h2>
+    <p class="note">
+      Every effect module under <code>src/effects/</code> is discovered by glob
+      and validated as one set at startup. A missing surprise range, a duplicate
+      id or a default outside its own legal range stops the page here rather
+      than degrading Surprise Me silently.
+    </p>
+    <div id="registry-status" class="status">not run</div>
+    <table id="registry-table">
+      <tbody></tbody>
+    </table>
 
-    <h2>Smoke test</h2>
-    <div class="row" id="smoke"></div>
+    <h2>Core</h2>
+    <div id="core-status" class="status">not run</div>
+
+    <h2>Source</h2>
+    <p class="note">
+      Generated, not loaded — image input (F-IN-01) is not built yet. A hue
+      sweep over a lightness ramp above a neutral wedge, which is what makes
+      both palette matching and diffusion legible in one frame.
+    </p>
+    <div class="row" id="source"></div>
+
+    <h2>Error diffusion — every registered kernel</h2>
+    <p class="note" id="diffusion-note">not run</p>
+    <div class="row" id="diffusion"></div>
+
+    <h2>Hardware palettes</h2>
+    <p class="note" id="palettes-note">not run</p>
+    <div class="row" id="palettes"></div>
+
+    <h2>Automatic palette extraction</h2>
+    <p class="note" id="extraction-note">not run</p>
+    <div class="row" id="extraction"></div>
+
+    <h2>Ordered dithers — WebGPU compute path</h2>
+    <p class="note">
+      The real path: threshold ranks generated in Rust, uploaded as a table, one
+      compute dispatch per effect against the linear-light
+      <code>rgba16float</code> working surface, then read back across the
+      instrumented boundary. Nothing here is a CPU stand-in.
+    </p>
+    <div id="ordered-status" class="status">not run</div>
+    <div class="row" id="ordered"></div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

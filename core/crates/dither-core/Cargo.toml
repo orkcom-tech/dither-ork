@@ -8,4 +8,14 @@ description = "Colour, dithering and quantization core. No web dependencies."
 [lib]
 crate-type = ["rlib"]
 
+# Deliberately empty, and it stays that way. Zero production dependencies is
+# what keeps this crate free of anything that could reach for a browser, a
+# clock or the network, and what makes a future native or CLI build packaging
+# rather than a rewrite.
 [dependencies]
+
+# Test-only. The golden-image harness reads and writes reference PNGs; that is
+# I/O in a test, not a capability of the library, so it must not appear in the
+# dependency graph of a release build.
+[dev-dependencies]
+png = "0.17"
