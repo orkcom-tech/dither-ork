@@ -198,6 +198,56 @@ The image declares that platform anyway — Chrome for Testing ships no
 linux-arm64 build, and one reference set is the point — so it runs under
 emulation and is still fast.
 
+### When the page fails to start
+
+The harness is two processes with a WebSocket between them, and the browser half
+has no stderr of its own. Everything it does has to be *subscribed to* or it is
+lost. The rule the driver now obeys:
+
+**Nothing in the harness document can happen before something is listening for
+it.** The browser is launched on `about:blank`; `chrome.mjs` enables `Runtime`,
+`Log`, `Network` and `Page`, installs page-side `error` and `unhandledrejection`
+hooks with `Page.addScriptToEvaluateOnNewDocument`, and only then navigates and
+waits for `load`. `Log.enable` also replays what the browser buffered before the
+driver connected.
+
+What that buys, concretely:
+
+| The page does | You see |
+| --- | --- |
+| throws during top-level module execution | `UNCAUGHT <error>` with file, line and stack, then a failure naming the missing global |
+| rejects a promise nobody catches | `UNCAUGHT` plus `unhandled rejection:` from the page-side hook |
+| fails to load a script, a `.wasm`, anything | `network: FAILED <url> — <errorText>`, with `blockedReason` when COEP refused it |
+| gets a 404 under the relative base | `network: HTTP 404 for <url>` |
+| logs anything at all | `console.<level>: …`, with the stack for errors |
+
+Every startup failure prints the same block regardless of which path reached it:
+the page's URL, `document.readyState`, `crossOriginIsolated`, `isSecureContext`,
+whether `SharedArrayBuffer` and `navigator.gpu` exist, the scripts it loaded, and
+the whole transcript in order. Live echo drops to problems-only once the plan is
+in hand, because ninety-six renders times three debug lines is a log nobody
+reads — but nothing stops being *recorded*, and a failure quotes all of it.
+
+Cross-origin isolation is asserted rather than inferred, on both sides: `run.mjs`
+refuses if the page reports `crossOriginIsolated !== true`, and `harness.ts`
+refuses before it calls `init()`. The core is compiled with `+atomics`, so its
+memory is shared, so `WebAssembly.instantiate` will not accept it without
+`SharedArrayBuffer` — and diagnosed from the inside that arrives as an
+instantiation error that never mentions a header.
+
+This section exists because the job once failed with
+
+```
+TypeError: Cannot read properties of undefined (reading 'init')
+```
+
+and nothing else. The driver had evaluated `window.__ditherOrkGolden.init()` as
+soon as it had a socket, without waiting for the document — a race it won on an
+emulated laptop and lost on a native runner — and `Runtime.enable` had been
+called too late to catch anything that went wrong on the way. If you are ever
+tempted to reach for a `try`/`catch` that lets the run continue, this is the
+alternative: make the failure say what happened.
+
 ### Re-blessing
 
 ```bash

@@ -385,7 +385,13 @@ async function main() {
     // SharedArrayBuffer — surfaces deep inside `init()` as something else
     // entirely. `serve()` above sends both headers; this is the page confirming
     // it actually got them.
-    const context = await browser.page.context();
+    const context = await browser.page.context().catch(() => null);
+    if (context === null) {
+      throw await pageReport(
+        "the page could not even be interrogated — it has no live execution context. The " +
+          "navigation failed, or the renderer died.",
+      );
+    }
     console.log(
       `page: ${context.href} readyState=${context.readyState} ` +
         `crossOriginIsolated=${context.crossOriginIsolated} ` +
