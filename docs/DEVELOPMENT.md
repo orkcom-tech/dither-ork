@@ -265,19 +265,48 @@ far end of its surprise range, or rendered an almost black frame in both. Those
 are the two ways a reference can be blessed against a broken shader and pass
 forever afterwards.
 
-**Blessing from CI.** The browser is pinned, but SwiftShader's JIT emits code for
-whatever instruction set it finds, so a laptop and a CI runner are not guaranteed
-to agree in the last bit — and on an Apple Silicon host the emulated CPU exposes
-a narrower set than a native x86-64 runner does. CI is the machine the gate runs
-on, so it is the environment the set should ultimately be blessed in. Run the CI
-workflow manually with **`bless_gpu_goldens`** checked; it renders the set there
-and uploads it as the `gpu-golden-blessed` artifact. Nothing is committed from
-CI: you download it, put it in a commit, and review the pictures, because a
+### Which environment is authoritative
+
+**CI is.** The gate runs on GitHub's `ubuntu-latest` x86-64 runners, and that is
+where a red build stops a merge, so if a local run and CI disagree about a
+picture, CI is right by definition and the committed set has to be the CI one.
+
+A local run is a fast smoke test, not a verdict, and on an Apple Silicon host it
+is a smoke test through two layers of translation: the image is
+`--platform=linux/amd64`, so the whole container is emulated, and SwiftShader's
+JIT then emits code for whatever CPU it believes it is running on. The emulated
+CPU advertises a narrower feature set than a native runner's — no guarantee of
+FMA, for one — and the tolerance section below exists precisely because that can
+land a smooth gradient one code value either side of a rounding boundary.
+
+The gap is not only about pixels. The emulated container is *slower in a
+different shape* than a runner: measured on this repository, the browser's
+debugging port answers about 2.2 s after spawn under emulation and about 0.45 s
+on a runner, while the page load that follows is barely quicker. Any timing
+assumption a local run gets away with is one a runner will punish — which is
+exactly how the harness once shipped a load race that passed here every time and
+failed there every time. Treat a green local run as "nothing obviously broke".
+
+**Re-blessing on CI.** Run the CI workflow manually with
+**`bless_gpu_goldens`** checked:
+
+```bash
+gh workflow run ci.yml --ref <your-branch> -f bless_gpu_goldens=true
+```
+
+It renders the set on the runner and uploads it as the `gpu-golden-blessed`
+artifact. Nothing is committed from CI: you download it, replace
+`web/fixtures/gpu` with it, look at the pictures, and commit — because a
 reference changing has to be a decision somebody made.
 
-The set committed today was blessed locally on an emulated x86-64 container. If
-the first CI run disagrees, that is what the manual bless is for — and the size
-of the disagreement is itself worth reading before you replace anything.
+```bash
+gh run download <run-id> -n gpu-golden-blessed -D web/fixtures/gpu
+git status --short web/fixtures/gpu   # then look at the diff, then commit
+```
+
+After that, a run on the emulated host may legitimately disagree with the
+committed set. That is the set being right and the laptop being approximate; do
+not re-bless locally to make it quiet.
 
 ### The environment, and why it is this one
 
@@ -500,6 +529,15 @@ that is already up, see "Adding a dependency to a running stack" above.
 `web/test/gpu-golden/dist` is missing or stale. It is a build output and is not
 committed; rebuild it with step 1 above. The harness deliberately refuses rather
 than running against whatever was there last.
+
+**The GPU golden harness says the page failed to start.**
+Read the block underneath it before anything else — it prints the page's URL,
+`readyState`, `crossOriginIsolated`, whether `SharedArrayBuffer` and
+`navigator.gpu` exist, the scripts it loaded, and every line the page produced in
+order, including uncaught exceptions with file and line. See "When the page fails
+to start" above for what each class of failure looks like. If that block is empty
+and it says the module never ran, the bundle is not being served: check the
+`network:` lines for a 404 under the relative base.
 
 **The GPU golden harness says the adapter is not `swiftshader`.**
 The browser found a real GPU. That is a refusal, not a failure: reference images
