@@ -501,8 +501,18 @@ export async function launch(url, { port = 9222, onStderr, loadTimeoutMs = 60_00
     rmSync(profile, { recursive: true, force: true });
   };
 
+  // Measured and reported on every run, not because anyone tunes it but because
+  // these two numbers *are* the bug that produced this file's rewrite. On a
+  // GitHub runner the debugging port answered 453 ms after spawn and the old
+  // code evaluated at 509 ms, long before an 804 kB module had run; on an
+  // emulated x86-64 container the port took 2.2 s, by which time the module had
+  // finished, and the same code passed. Printing both means the next person to
+  // see them far apart does not have to discover that story again.
+  const spawnedAt = performance.now();
+
   try {
     const targets = await fetchJson(`http://127.0.0.1:${port}/json/list`, 150, 200);
+    const devtoolsAt = performance.now();
     const target = targets.find((t) => t.type === "page");
     if (target === undefined) {
       throw new Error("the browser started but exposed no page target");
@@ -534,6 +544,10 @@ export async function launch(url, { port = 9222, onStderr, loadTimeoutMs = 60_00
     return {
       page,
       version: await fetchJson(`http://127.0.0.1:${port}/json/version`, 5, 200),
+      timings: {
+        devtoolsMs: Math.round(devtoolsAt - spawnedAt),
+        loadedMs: Math.round(performance.now() - spawnedAt),
+      },
       stderr,
       close: () => {
         page.close();

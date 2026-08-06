@@ -378,7 +378,11 @@ async function main() {
   };
 
   try {
-    console.log(`browser: ${browser.version.Browser} (pinned ${PINNED_VERSION})`);
+    console.log(
+      `browser: ${browser.version.Browser} (pinned ${PINNED_VERSION}) — ` +
+        `devtools answered ${browser.timings.devtoolsMs}ms after spawn, ` +
+        `document loaded at ${browser.timings.loadedMs}ms`,
+    );
 
     // Asserted before anything is asked of the harness, because the failure it
     // catches — the WASM core's shared memory refusing to instantiate without
