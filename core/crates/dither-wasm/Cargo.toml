@@ -1,0 +1,17 @@
+[package]
+name = "dither-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WebAssembly bindings for dither-core. The only web-aware crate."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dither-core = { path = "../dither-core" }
+wasm-bindgen = "0.2"
+
+[dependencies.web-sys]
+version = "0.3"
+features = ["console"]

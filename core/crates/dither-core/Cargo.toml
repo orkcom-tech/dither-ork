@@ -1,0 +1,11 @@
+[package]
+name = "dither-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Colour, dithering and quantization core. No web dependencies."
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]

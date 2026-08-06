@@ -1,0 +1,16 @@
+# Rust
+core/target/
+**/*.rs.bk
+
+# Generated WASM package — built by `docker compose up wasm`
+web/src/wasm/pkg/
+
+# Node
+web/node_modules/
+web/dist/
+npm-debug.log*
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

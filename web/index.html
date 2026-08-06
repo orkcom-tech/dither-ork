@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>dither-ork</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0d0f0c;
+        --fg: #cfe8c2;
+        --dim: #6f8a63;
+        --ok: #8ee06a;
+        --fail: #e06a6a;
+        --warn: #e0c46a;
+      }
+      body {
+        margin: 0;
+        padding: 2rem;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.6 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+      h1 {
+        font-size: 1.1rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        margin: 0 0 0.25rem;
+      }
+      p.sub {
+        margin: 0 0 2rem;
+        color: var(--dim);
+      }
+      h2 {
+        font-size: 0.8rem;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--dim);
+        margin: 2rem 0 0.75rem;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        max-width: 46rem;
+      }
+      td {
+        padding: 0.3rem 0.75rem 0.3rem 0;
+        vertical-align: top;
+        border-bottom: 1px solid #1b2118;
+      }
+      td.state {
+        width: 4rem;
+      }
+      td.detail {
+        color: var(--dim);
+      }
+      .ok { color: var(--ok); }
+      .fail { color: var(--fail); }
+      .warn { color: var(--warn); }
+      canvas {
+        image-rendering: pixelated;
+        border: 1px solid #1b2118;
+        max-width: 100%;
+      }
+      .row { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+      figure { margin: 0; }
+      figcaption { color: var(--dim); padding-top: 0.4rem; }
+    </style>
+  </head>
+  <body>
+    <h1>dither-ork</h1>
+    <p class="sub">scaffold — capability check and core smoke test</p>
+
+    <h2>Capabilities</h2>
+    <table id="capabilities">
+      <tbody></tbody>
+    </table>
+
+    <h2>Core</h2>
+    <div id="core-status">not run</div>
+
+    <h2>Smoke test</h2>
+    <div class="row" id="smoke"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

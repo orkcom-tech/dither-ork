@@ -1,0 +1,50 @@
+name: dither-ork
+
+services:
+  # Compiles the Rust core to WebAssembly and writes the package into
+  # web/src/wasm/pkg, where Vite picks it up. Runs once on `up`, then watches
+  # core/ and rebuilds on change.
+  wasm:
+    build:
+      context: .
+      dockerfile: docker/wasm.Dockerfile
+    working_dir: /app
+    volumes:
+      - ./core:/app/core
+      - ./web/src/wasm:/app/web/src/wasm
+      - cargo-registry:/usr/local/cargo/registry
+      - cargo-git:/usr/local/cargo/git
+      - cargo-target:/app/core/target
+    command: ["/usr/local/bin/build-wasm.sh", "watch"]
+    healthcheck:
+      test: ["CMD", "test", "-f", "/app/web/src/wasm/pkg/dither_wasm_bg.wasm"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+
+  # Vite dev server. Serves with COOP/COEP so `crossOriginIsolated` is true and
+  # SharedArrayBuffer (and therefore the WASM thread pool) is available.
+  # Without these two headers the app fails its own capability check.
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    working_dir: /app/web
+    volumes:
+      - ./web:/app/web
+      - web-node-modules:/app/web/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      HOST: "0.0.0.0"
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+    depends_on:
+      wasm:
+        condition: service_healthy
+
+volumes:
+  cargo-registry:
+  cargo-git:
+  cargo-target:
+  web-node-modules:
