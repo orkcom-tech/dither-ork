@@ -1,0 +1,171 @@
+/*
+ * Viewport chrome.
+ *
+ * Everything here belongs to the non-React viewport (docs/ARCHITECTURE.md: the
+ * viewport owns its canvas). The canvas fills the element; every control and
+ * readout sits in an overlay above it that is `pointer-events: none` except
+ * where something is actually grabbable, so a stray overlay never eats a pan.
+ */
+
+.viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-sunken);
+  touch-action: none;
+  outline-offset: -2px;
+}
+
+.viewport__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.viewport--panning {
+  cursor: grabbing;
+}
+
+.viewport__overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.viewport__top,
+.viewport__bottom {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding: 6px 8px;
+}
+
+.viewport__bottom {
+  justify-content: space-between;
+}
+
+.viewport__controls {
+  pointer-events: auto;
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.viewport__readout {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
+  color: var(--fg-dim);
+  font-size: var(--text-sm);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.viewport__readout b {
+  color: var(--fg);
+  font-weight: normal;
+}
+
+/*
+ * The degraded-preview badge (F-UI-03). It is `--warn` and it is the only warm
+ * colour in the viewport, because the one thing it must never do is blend in.
+ */
+.viewport__badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--warn) 18%, var(--bg-raised));
+  color: var(--warn);
+  font-size: var(--text-sm);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.viewport__badge[hidden],
+.viewport__empty[hidden],
+.viewport__split[hidden],
+.viewport__compare-tag[hidden] {
+  display: none;
+}
+
+.viewport__compare-tag {
+  padding: 3px 8px;
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-raised));
+  color: var(--accent);
+  font-size: var(--text-sm);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* The before/after divider (F-UI-04). */
+.viewport__split {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 13px;
+  margin-left: -6px;
+  pointer-events: auto;
+  cursor: ew-resize;
+  display: flex;
+  justify-content: center;
+}
+
+.viewport__split::before {
+  content: "";
+  width: 1px;
+  height: 100%;
+  background: var(--accent);
+}
+
+.viewport__split-grip {
+  position: absolute;
+  top: 50%;
+  width: 13px;
+  height: 34px;
+  margin-top: -17px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+.viewport__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+  color: var(--fg-faint);
+}
+
+.viewport__empty-title {
+  color: var(--fg-dim);
+  font-size: var(--text-md);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.viewport__empty-detail {
+  font-size: var(--text-sm);
+  max-width: 34ch;
+  line-height: 1.6;
+}

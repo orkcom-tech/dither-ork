@@ -23,7 +23,16 @@ export { GraphError, expect } from "./errors";
 export type { GraphErrorCode } from "./errors";
 
 export { sha256Hex } from "./sha256";
-export { PALETTE_PARAM_KEY, contentHash, hashBytes, paletteDigest } from "./hash";
+export {
+  ASSET_PARAM_KEY,
+  PALETTE_PARAM_KEY,
+  contentHash,
+  hashBytes,
+  paletteDigest,
+} from "./hash";
+
+export { NodeAssetStore } from "./assets";
+export type { NodeAsset, NodeAssetStoreOptions, NodeAssets } from "./assets";
 
 export { PORT_ORDER, analyseGraph, renderUpTo } from "./topology";
 export type { GraphTopology } from "./topology";

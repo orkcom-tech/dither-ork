@@ -1,0 +1,377 @@
+/*
+ * The palette panel.
+ *
+ * No colour literals. Every value here is a custom property from
+ * `src/ui/theme.css`, which is what makes both themes work and what F-UI-09
+ * builds on later. The one exception is a swatch's own fill, which is written
+ * inline from the palette data by `SwatchGrid.tsx` — that is the datum being
+ * displayed, not a style choice, and the ink drawn on top of it comes back to
+ * the theme.
+ */
+
+.pal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: 8px;
+  font-size: var(--text-sm);
+}
+
+.pal__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap);
+}
+
+.pal__name {
+  color: var(--fg);
+  font-size: var(--text-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pal__note {
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.pal__prose {
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.pal__error {
+  margin: 0;
+  color: var(--fail);
+  font-size: var(--text-xs);
+}
+
+.pal__warn {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+/* A refused edit is stated where the eye already is, not only in the console. */
+.pal__refusal {
+  margin: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--warn);
+  font-size: var(--text-xs);
+}
+
+/* --- swatches --------------------------------------------------------- */
+
+.pal__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pal__cell {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: var(--radius);
+}
+
+.pal__cell[data-dragging="true"] {
+  opacity: 0.4;
+}
+
+/* The drop target, marked on its leading edge so the direction of the move is
+   visible while the pointer is still down. */
+.pal__cell[data-over="true"]::before {
+  content: "";
+  position: absolute;
+  inset: -3px -3px -3px -3px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+
+.pal__swatch {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.pal__swatch[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.pal__swatch-index {
+  position: absolute;
+  left: 2px;
+  bottom: 1px;
+  font-size: var(--text-xs);
+  line-height: 1;
+  pointer-events: none;
+}
+
+.pal__lock {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  font-size: var(--text-xs);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pal__lock[data-locked="true"] {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* Two inks, both from the theme, chosen by the swatch's perceptual lightness so
+   the label stays readable on any colour the palette holds. Scoped to `.pal`:
+   `data-ink` is a plausible attribute for another panel to reach for, and an
+   unscoped attribute selector in a panel's own stylesheet is how one panel ends
+   up restyling another. */
+.pal [data-ink="dark"] {
+  color: var(--bg-sunken);
+}
+
+.pal [data-ink="light"] {
+  color: var(--bg-raised);
+}
+
+.pal__lock[data-locked="false"] {
+  opacity: 0.55;
+}
+
+.pal__lock[data-locked="false"]:hover {
+  opacity: 1;
+}
+
+/* --- inspector -------------------------------------------------------- */
+
+.pal__inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+}
+
+.pal__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pal__row--wrap {
+  flex-wrap: wrap;
+}
+
+.pal__readout {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--gap);
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+}
+
+.pal__picker {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  cursor: pointer;
+}
+
+.pal__input {
+  min-width: 0;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  color: var(--fg);
+  font-size: var(--text-sm);
+}
+
+.pal__input[aria-invalid="true"] {
+  border-color: var(--fail);
+}
+
+.pal__input--hex {
+  flex: 1 1 auto;
+}
+
+.pal__input--number {
+  width: 66px;
+}
+
+.pal__select {
+  height: 22px;
+}
+
+/* --- sections --------------------------------------------------------- */
+
+.pal__section {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+
+.pal__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 4px 6px;
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pal__summary:hover {
+  color: var(--fg);
+}
+
+.pal__section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border-top: 1px solid var(--rule);
+}
+
+.pal__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pal__field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pal__field-label {
+  color: var(--fg-faint);
+}
+
+.pal__choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.pal__choice-button {
+  padding: 0 6px;
+}
+
+/* --- extraction report ------------------------------------------------ */
+
+.pal__report {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1px 8px;
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+.pal__report dt {
+  color: var(--fg-faint);
+}
+
+.pal__report dd {
+  margin: 0;
+  color: var(--fg-dim);
+}
+
+/* --- library ---------------------------------------------------------- */
+
+.pal__library {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow: auto;
+  list-style: none;
+  scrollbar-color: var(--rule-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.pal__library-item {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pal__library-item:hover {
+  border-color: var(--rule-strong);
+  color: var(--fg);
+}
+
+.pal__library-item[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+.pal__library-strip {
+  display: flex;
+  height: 12px;
+  overflow: hidden;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.pal__library-chip {
+  flex: 1 1 0;
+  min-width: 1px;
+}
+
+.pal__library-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

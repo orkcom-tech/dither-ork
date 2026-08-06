@@ -1,0 +1,336 @@
+/*
+ * The shell — F-UI-08.
+ *
+ * A grid the whole height of the window: toolbar, body, bottom region, status
+ * bar. The body is a row of left region / viewport / right region. Region sizes
+ * come from `layout.ts` as inline custom properties, so the model in that file
+ * is the single source of truth for how wide anything is and CSS only spends
+ * it.
+ *
+ * Regions with nothing registered into them are not rendered at all, so an
+ * unfilled slot is absent rather than an empty box.
+ */
+
+.shell {
+  display: grid;
+  /* toolbar, body, the bottom splitter, the bottom region, status bar. Tracks
+     with nothing in them collapse to zero, which is how a region that nothing
+     has registered into costs no space. */
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  height: 100%;
+  background: var(--bg);
+}
+
+/* --- toolbar ---------------------------------------------------------- */
+
+.shell__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  height: var(--toolbar-h);
+  padding: 0 8px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-raised);
+}
+
+.shell__brand {
+  color: var(--fg);
+  font-size: var(--text-sm);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  padding-right: 4px;
+}
+
+.shell__toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.shell__spacer {
+  flex: 1 1 auto;
+}
+
+/* --- body ------------------------------------------------------------- */
+
+.shell__body {
+  display: flex;
+  min-height: 0;
+}
+
+.shell__centre {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+/* The element the non-React viewport mounts itself into. */
+.shell__viewport-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.shell__region {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-raised);
+  flex: 0 0 auto;
+}
+
+.shell__region--left {
+  border-right: 1px solid var(--rule);
+}
+
+.shell__region--right {
+  border-left: 1px solid var(--rule);
+}
+
+.shell__region--bottom {
+  border-top: 1px solid var(--rule);
+}
+
+/* --- collapsed rails -------------------------------------------------- */
+
+.shell__rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  height: 100%;
+}
+
+.shell__region--bottom .shell__rail {
+  flex-direction: row;
+  height: auto;
+  padding: 4px 6px;
+}
+
+.shell__rail-button {
+  border: 0;
+  background: none;
+  padding: 6px 2px;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+}
+
+.shell__region--bottom .shell__rail-button {
+  writing-mode: horizontal-tb;
+  padding: 2px 6px;
+}
+
+.shell__rail-button:hover {
+  color: var(--fg);
+}
+
+/* --- panels ----------------------------------------------------------- */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.panel:last-child {
+  border-bottom: 0;
+}
+
+.panel--collapsed {
+  flex: 0 0 auto;
+}
+
+.panel__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: var(--panel-header-h);
+  padding: 0 8px;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-inset);
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: left;
+}
+
+.panel__header:hover {
+  color: var(--fg);
+}
+
+.panel--collapsed .panel__header {
+  border-bottom: 0;
+}
+
+.panel__chevron {
+  color: var(--fg-faint);
+  font-size: 9px;
+}
+
+.panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-color: var(--rule-strong) transparent;
+  scrollbar-width: thin;
+}
+
+/* --- splitters -------------------------------------------------------- */
+
+.splitter {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0;
+  background: var(--rule);
+  position: relative;
+}
+
+.splitter:hover,
+.splitter[data-dragging="true"] {
+  background: var(--accent-dim);
+}
+
+.splitter--vertical {
+  width: var(--splitter-size);
+  cursor: col-resize;
+  align-self: stretch;
+}
+
+.splitter--horizontal {
+  height: var(--splitter-size);
+  cursor: row-resize;
+  width: 100%;
+}
+
+/* --- status bar ------------------------------------------------------- */
+
+.shell__status {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: var(--statusbar-h);
+  padding: 0 8px;
+  border-top: 1px solid var(--rule);
+  background: var(--bg-raised);
+  color: var(--fg-dim);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.shell__status b {
+  color: var(--fg);
+  font-weight: normal;
+}
+
+.shell__status-warn {
+  color: var(--warn);
+}
+
+/* --- startup screens -------------------------------------------------- */
+
+.screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 32px;
+  background: var(--bg);
+  overflow: auto;
+}
+
+.screen__inner {
+  width: 100%;
+  max-width: 60rem;
+}
+
+.screen__title {
+  margin: 0 0 4px;
+  font-size: var(--text-lg);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--fail);
+}
+
+.screen__lede {
+  margin: 0 0 24px;
+  color: var(--fg-dim);
+  max-width: 62ch;
+  line-height: 1.7;
+}
+
+.screen__section {
+  margin: 24px 0 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.screen__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.screen__table th,
+.screen__table td {
+  padding: 5px 12px 5px 0;
+  text-align: left;
+  font-weight: normal;
+  vertical-align: top;
+  border-bottom: 1px solid var(--rule);
+}
+
+.screen__table th {
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.screen__state {
+  width: 6rem;
+}
+
+.screen__state--ok {
+  color: var(--ok);
+}
+
+.screen__state--missing {
+  color: var(--fail);
+}
+
+.screen__state--degraded {
+  color: var(--warn);
+}
+
+.screen__detail {
+  color: var(--fg-dim);
+}
+
+.screen__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--fg-dim);
+  line-height: 1.8;
+}
+
+.screen__list li::before {
+  content: "— ";
+  color: var(--fg-faint);
+}

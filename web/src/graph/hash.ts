@@ -24,7 +24,7 @@
  *   produce the same bytes.
  */
 
-import type { Palette, ParameterValue } from "../types/document";
+import type { CurvePoint, Palette, ParameterValue } from "../types/document";
 import type { ContentHash, ContentHashFn, ContentHashInput } from "../types/graph";
 import { GraphError } from "./errors";
 import { sha256Hex } from "./sha256";
@@ -42,6 +42,19 @@ const HASH_FORMAT_VERSION = 1;
 const TAG_STRING = 0x01;
 const TAG_NUMBER = 0x02;
 const TAG_BOOL = 0x03;
+/**
+ * The two composite `ParameterValue` members.
+ *
+ * They carry distinct tags, and each writes its own element count before its
+ * elements, so a three-entry colour and a three-point curve cannot produce the
+ * same bytes however their numbers happen to line up. Adding tags does not
+ * change the encoding of any value that was already hashable — a number is
+ * still `TAG_NUMBER` followed by its bits — which is why
+ * {@link HASH_FORMAT_VERSION} does not move and the golden digest in
+ * `hash.test.ts` still holds.
+ */
+const TAG_TRIPLET = 0x04;
+const TAG_CURVE = 0x05;
 
 const UTF8 = new TextEncoder();
 
@@ -125,6 +138,59 @@ function writeBool(writer: ByteWriter, value: boolean): void {
   writer.u8(value ? 1 : 0);
 }
 
+function isCurvePoint(value: unknown): value is CurvePoint {
+  if (typeof value !== "object" || value === null) return false;
+  const point = value as { x?: unknown; y?: unknown };
+  return typeof point.x === "number" && typeof point.y === "number";
+}
+
+/**
+ * Write a colour triplet or a transfer curve.
+ *
+ * The two are told apart structurally — a triplet is three numbers, a curve is
+ * objects — rather than from the registry descriptor, which this module does
+ * not have and should not need: the hash is over the document's own values, and
+ * a hash that needed the catalogue to interpret them would change meaning when
+ * an effect was edited.
+ *
+ * An empty array is a curve of no points. A triplet is exactly three by
+ * construction (`SrgbTriplet` is a fixed-length tuple), so nothing else is
+ * ambiguous.
+ */
+function writeComposite(writer: ByteWriter, key: string, value: readonly unknown[]): void {
+  if (value.every((entry) => typeof entry === "number")) {
+    if (value.length !== 3) {
+      throw new GraphError(
+        "unsupported-parameter",
+        `parameter ${key} is an array of ${value.length} numbers; the only numeric ParameterValue array is an SrgbTriplet, which is exactly three`,
+        { key, length: value.length },
+      );
+    }
+    writer.u8(TAG_TRIPLET);
+    for (const component of value) {
+      writeNumber(writer, component, `parameter ${key} component`);
+    }
+    return;
+  }
+
+  if (!value.every(isCurvePoint)) {
+    throw new GraphError(
+      "unsupported-parameter",
+      `parameter ${key} is an array that is neither three numbers nor a list of {x, y} control points`,
+      { key, length: value.length },
+    );
+  }
+
+  writer.u8(TAG_CURVE);
+  writer.u32(value.length);
+  for (const point of value) {
+    // Both coordinates, in order: two curves through the same x positions with
+    // different y values are two different transfer functions.
+    writeNumber(writer, point.x, `parameter ${key} control point x`);
+    writeNumber(writer, point.y, `parameter ${key} control point y`);
+  }
+}
+
 function writeParameter(writer: ByteWriter, key: string, value: ParameterValue): void {
   writeString(writer, key);
   switch (typeof value) {
@@ -138,9 +204,18 @@ function writeParameter(writer: ByteWriter, key: string, value: ParameterValue):
       writeString(writer, value);
       return;
     default:
+      // A colour (F-CO-07's per-node override) or a curve (F-PP-05). Both are
+      // pixel-affecting document values, so leaving them unhashable meant an
+      // effect that used one could not be cached at all — the hash threw rather
+      // than going stale, which is the better of the two failures and still not
+      // one anybody can ship.
+      if (Array.isArray(value)) {
+        writeComposite(writer, key, value as readonly unknown[]);
+        return;
+      }
       throw new GraphError(
         "unsupported-parameter",
-        `parameter ${key} is a ${typeof value}; ParameterValue is number, boolean or string`,
+        `parameter ${key} is a ${typeof value}; ParameterValue is a number, boolean, string, SrgbTriplet or curve`,
         { key },
       );
   }
@@ -165,6 +240,21 @@ function byCodeUnit(a: string, b: string): number {
  * collide with a real one.
  */
 export const PALETTE_PARAM_KEY = "@palette";
+
+/**
+ * The key a node's bulk-data digest is folded in under.
+ *
+ * Same mechanism and same reason as {@link PALETTE_PARAM_KEY}, for the other
+ * thing that changes a node's pixels without being one of its parameters: the
+ * image a user uploaded for it (F-PP-07). A `curve` parameter needs no such
+ * treatment — it is a `ParameterValue` and hashes as itself — but bytes that
+ * came from a file picker are invisible to the parameter record, and a node
+ * whose data changed while its hash did not is exactly the stale cached frame
+ * the hash exists to prevent.
+ *
+ * The `@` prefix is not a legal registry parameter key, so it cannot collide.
+ */
+export const ASSET_PARAM_KEY = "@assets";
 
 // --- the hashes the graph mints -----------------------------------------
 

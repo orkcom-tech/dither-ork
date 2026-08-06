@@ -154,8 +154,19 @@ export function validateUniformLayout(label: string, layout: UniformLayout): voi
 export interface UniformContext {
   readonly params: Readonly<Record<string, ParameterValue>>;
   readonly paramTypes: ReadonlyMap<string, ParamDescriptor>;
+  /** The extent the pass reads. */
   readonly width: number;
   readonly height: number;
+  /**
+   * The extent the pass writes, when a {@link PassExtent} makes it different.
+   *
+   * Optional, and absent means "the same as the input", which is what every
+   * pass in the catalogue but a resampler means. Optional rather than required
+   * because making it required would have edited 48 effect modules to restate a
+   * number they already pass.
+   */
+  readonly outputWidth?: number;
+  readonly outputHeight?: number;
   /** `frame / clock.frames`; never reaches 1, so a shader animating on it loops. */
   readonly normalizedTime: number;
   /** The node's resolved document seed. */
@@ -172,6 +183,10 @@ function resolveBuiltin(field: UniformField, ctx: UniformContext): readonly numb
       return [ctx.width];
     case "height":
       return [ctx.height];
+    case "output-width":
+      return [ctx.outputWidth ?? ctx.width];
+    case "output-height":
+      return [ctx.outputHeight ?? ctx.height];
     case "normalized-time":
       return [ctx.normalizedTime];
     case "seed":
@@ -194,6 +209,25 @@ function resolveParam(field: UniformField, ctx: UniformContext): readonly number
   }
   if (typeof value === "number") return [value];
   if (typeof value === "boolean") return [value ? 1 : 0];
+
+  // The two composite `ParameterValue` members are refused by name rather than
+  // guessed at. Both refusals are the honest answer to a question nobody has
+  // decided yet, and both name where the answer would go.
+  if (Array.isArray(value)) {
+    const descriptor = ctx.paramTypes.get(key);
+    if (descriptor?.type === "curve") {
+      // A curve is 2..N control points and a shader wants a resampled LUT. That
+      // is bulk data per node, which is what an `instance-data` binding is for
+      // (F-PP-05); flattening the points into a uniform block would make the
+      // block's size depend on the document.
+      throw new UniformPackError(
+        `${describe(field)}: parameter "${key}" is a curve, which does not go in a uniform block — declare an instance-data binding and build the LUT there`,
+      );
+    }
+    throw new UniformPackError(
+      `${describe(field)}: parameter "${key}" is a ${descriptor?.type ?? "composite"} value, and this packer writes scalars and vectors of scalars only; nothing decides here whether an sRGB triplet reaches a shader as 0..255, 0..1 or linear light, and guessing is a look decision taken by accident`,
+    );
+  }
 
   // A string value is an enum, and its numeric form is its ordinal. The
   // descriptor is the only thing that knows the order, so without it the value

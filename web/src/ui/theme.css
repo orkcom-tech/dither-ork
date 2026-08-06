@@ -1,0 +1,195 @@
+/*
+ * Design tokens — F-UI-09 groundwork.
+ *
+ * Two complete themes, dark and light, expressed as custom properties on the
+ * root element. `data-theme` is stamped on <html>: by `index.html` before any
+ * script runs, so the first paint is already the right colour, and afterwards
+ * by `app/theme.ts` when the user or the OS changes it.
+ *
+ * Dark is the default and it is the terminal green the scaffold page has worn
+ * since the first commit. That is not nostalgia: the product's whole subject is
+ * what happens to a picture when you take colour away from it, and a chrome
+ * that is nearly monochrome keeps the eye's colour adaptation on the image
+ * rather than on the app around it. Light exists because the same argument runs
+ * the other way for anyone working from a printed reference.
+ *
+ * Every panel written by any part of the app reads these names and never a
+ * literal colour. That is the whole mechanism by which F-UI-09's user-editable
+ * themes become possible later: a theme is a set of values for this list.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces, back to front. */
+  --bg: #0d0f0c;
+  --bg-raised: #12160f;
+  --bg-sunken: #080a07;
+  --bg-inset: #161b12;
+
+  /* Ink. */
+  --fg: #cfe8c2;
+  --fg-dim: #6f8a63;
+  --fg-faint: #47573f;
+
+  /* Lines. */
+  --rule: #1b2118;
+  --rule-strong: #2a3325;
+
+  /* Interaction. */
+  --accent: #8ee06a;
+  --accent-dim: #4d7a39;
+  --accent-fg: #08120a;
+  --focus: #8ee06a;
+
+  /* Verdicts — the same three the scaffold page used. */
+  --ok: #8ee06a;
+  --warn: #e0c46a;
+  --fail: #e06a6a;
+
+  /* The checkerboard behind transparency (F-UI-05). */
+  --checker-a: #1a1f16;
+  --checker-b: #10140e;
+
+  --shadow: 0 8px 24px rgb(0 0 0 / 45%);
+
+  /* Type. One family: this is a tool, not a document. */
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+  --text-xs: 10px;
+  --text-sm: 11px;
+  --text-md: 13px;
+  --text-lg: 15px;
+
+  /* Metrics the shell and the panels share. */
+  --panel-header-h: 26px;
+  --toolbar-h: 34px;
+  --statusbar-h: 22px;
+  --splitter-size: 5px;
+  --radius: 2px;
+  --gap: 8px;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #eef1e9;
+  --bg-raised: #f7f9f4;
+  --bg-sunken: #e2e7db;
+  --bg-inset: #ffffff;
+
+  --fg: #1c2418;
+  --fg-dim: #52644a;
+  --fg-faint: #8fa085;
+
+  --rule: #cfd7c6;
+  --rule-strong: #b3bfa8;
+
+  --accent: #2f6b18;
+  --accent-dim: #7fa06d;
+  --accent-fg: #f7f9f4;
+  --focus: #2f6b18;
+
+  --ok: #2f6b18;
+  --warn: #8a6a06;
+  --fail: #a52424;
+
+  --checker-a: #d8ddd1;
+  --checker-b: #c9cfc1;
+
+  --shadow: 0 8px 24px rgb(28 36 24 / 18%);
+}
+
+/* --- base ------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: var(--text-md) / 1.5 var(--font-mono);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  height: 100%;
+}
+
+:where(button, input, select, textarea) {
+  font: inherit;
+  color: inherit;
+}
+
+:where(a) {
+  color: var(--accent);
+}
+
+/*
+ * One focus treatment for the whole app. `:focus-visible` rather than `:focus`
+ * so a pointer user never sees a ring they did not ask for, and a keyboard user
+ * always does — the viewport is focusable and its keyboard controls are useless
+ * if you cannot tell whether it has focus.
+ */
+:where(:focus-visible) {
+  outline: 1px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* --- shared primitives ------------------------------------------------ */
+
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--fg-dim);
+  font-size: var(--text-sm);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ui-button:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--accent-dim);
+}
+
+.ui-button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.ui-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ui-label {
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.ui-scroll {
+  overflow: auto;
+  scrollbar-color: var(--rule-strong) transparent;
+  scrollbar-width: thin;
+}

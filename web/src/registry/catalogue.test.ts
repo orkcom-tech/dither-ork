@@ -29,39 +29,41 @@ import type { NodeSlot } from "../types/document";
 /**
  * What the build is expected to contain, from docs/ARCHITECTURE.md.
  *
- * Two of the spec's named effects are deliberately absent and each gap is
+ * **One** of the spec's named effects is deliberately absent, and the gap is
  * recorded where the decision was made rather than here: F-GL-06 (JPEG glitch,
- * which needs an encoder the pipeline does not have) and F-SP-14
- * (nearest-neighbour upscale, which is a resampling stage rather than a pass).
+ * which needs an encoder the pipeline does not have, and therefore an execution
+ * kind that does not exist). F-SP-14 (nearest-neighbour upscale) was the second
+ * such gap and is now built — as the other half of the F-PP-01 pair rather than
+ * as a resampling stage outside the stack, which is what closed it.
  *
  * The `preprocess` family is the tone-and-noise front of the stack (F-PP) and
- * is deliberately partial: F-PP-02, 03, 04 and 06 are here; F-PP-01 is the
- * internal-resolution stage, F-PP-05 needs a spline control the parameter
- * vocabulary does not have, and F-PP-07/08 take an uploaded image. Those four
- * are not effect descriptors at all, so their absence is not a hole in this
- * count — it is recorded in docs/ARCHITECTURE.md under the build order.
+ * is now complete bar one: F-PP-01 through 06 are here, and F-PP-07 arrives as
+ * an `ordered` dither because a user-supplied threshold map *is* one. F-PP-08,
+ * the mask input, is the single F-PP requirement with no descriptor: it is a
+ * second image edge on the graph rather than a pass, and the graph has no
+ * second edge yet.
  */
 const EXPECTED_BY_FAMILY: Readonly<Record<EffectFamily, number>> = {
-  preprocess: 4,
+  preprocess: 6,
   "error-diffusion": 15,
-  ordered: 5,
+  ordered: 6,
   pattern: 8,
   glitch: 16,
-  special: 15,
+  special: 16,
 };
 
 const EXPECTED_BY_EXECUTION: Readonly<Record<ExecutionKind, number>> = {
   wasm: 15,
-  gpu: 48,
+  gpu: 52,
 };
 
 const EXPECTED_BY_SLOT: Readonly<Record<NodeSlot, number>> = {
-  preprocess: 16,
-  dither: 28,
-  postprocess: 19,
+  preprocess: 18,
+  dither: 29,
+  postprocess: 20,
 };
 
-const EXPECTED_TOTAL = 63;
+const EXPECTED_TOTAL = 67;
 
 /** Every WGSL file the build ships, keyed by the effect id it is named for. */
 const SHADER_IDS: ReadonlySet<string> = new Set(

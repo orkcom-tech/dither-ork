@@ -1,0 +1,57 @@
+/*
+ * Toolbar items. Everything here is a value from ui/theme.css — no colour
+ * literal appears in this file, which is what makes both themes work (F-UI-09).
+ */
+
+/*
+ * The file input is inside its label, so it must not take space or catch a
+ * click of its own. `display: none` would take it out of the accessibility tree
+ * and out of reach of the keyboard; this keeps it focusable and operable while
+ * the label is what is seen.
+ */
+.toolbar__file input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.toolbar__file {
+  position: relative;
+  cursor: pointer;
+}
+
+/* Focus moves to the input, so the label has to show it. */
+.toolbar__file:focus-within {
+  outline: 1px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.toolbar__notice {
+  max-width: 46ch;
+  overflow: hidden;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--warn);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  padding: 2px 6px;
+}
+
+.toolbar__notice--error {
+  color: var(--fail);
+  border-color: var(--fail);
+}
+
+.toolbar__notice:hover {
+  background: var(--bg-inset);
+}

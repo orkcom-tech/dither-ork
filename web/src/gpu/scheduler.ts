@@ -17,11 +17,12 @@
  */
 
 import type { ExecutionKind } from "../types/registry";
-import type { PassBatch, ScheduledPass } from "../types/gpu";
+import type { Extent, PassBatch, ScheduledPass } from "../types/gpu";
 import { logger } from "../lib/log";
 import type { GpuContext } from "./device";
 import type { CompiledPass, PassCompiler } from "./compiler";
 import { dispatchCounts } from "./compiler";
+import { describeExtent, extentsEqual, passExtentRule, resizes } from "./extent";
 import {
   scratchBytes,
   type BufferCache,
@@ -62,6 +63,15 @@ export interface ExecutionPlan {
  * The rule is deliberately the simplest one that is correct: adjacency in stack
  * order. Reordering nodes to make longer runs would change the image, and a
  * `global` pass cannot be reordered against anything at all.
+ *
+ * **A resolution change does not end a batch.** It looks as though it should —
+ * every surface in a batch used to be one shape — but the reason was the
+ * fixed-shape ping-pong in `SurfaceChain`, not anything about WebGPU, which
+ * orders dispatches within one command buffer whatever shape their textures
+ * are. Now that the chain carries a live extent, F-PP-01 sits in the middle of
+ * a coalesced run instead of splitting every stack that uses it into two
+ * submissions — which matters, because it is the node the architecture expects
+ * in almost every stack.
  */
 export function planExecution(units: readonly ScheduleUnit[]): ExecutionPlan {
   const batches: PassBatch[] = [];
@@ -111,6 +121,41 @@ export function planExecution(units: readonly ScheduleUnit[]): ExecutionPlan {
     crossings,
   });
   return { batches, crossings };
+}
+
+/**
+ * The extent a scheduled pass writes, checked against what its descriptor said.
+ *
+ * The executor cannot derive it: resolving a {@link PassExtent} needs the
+ * node's parameters and all the executor has is the packed uniform bytes. So
+ * whoever built the `ScheduledPass` resolved it, and this is where the two are
+ * made to agree — a pass that declares a rule and arrives without an `output`
+ * would otherwise be dispatched at the wrong shape, and one that declares no
+ * rule but arrives with a different `output` would allocate a texture its
+ * shader knows nothing about.
+ */
+export function resolveScheduledOutput(
+  scheduled: ScheduledPass,
+  input: Extent,
+): Extent {
+  const rule = passExtentRule(scheduled.pass);
+  const declared = scheduled.output;
+
+  if (resizes(rule)) {
+    if (declared === undefined) {
+      throw new ScheduleError(
+        `pass ${scheduled.pass.id} at node ${scheduled.nodeId}: declares extent rule "${rule.kind}" but was scheduled without a resolved output extent`,
+      );
+    }
+    return declared;
+  }
+
+  if (declared !== undefined && !extentsEqual(declared, input)) {
+    throw new ScheduleError(
+      `pass ${scheduled.pass.id} at node ${scheduled.nodeId}: declares no extent rule, so it writes what it reads (${describeExtent(input)}), but was scheduled to write ${describeExtent(declared)}`,
+    );
+  }
+  return input;
 }
 
 /** The surfaces a batch reads and writes. */
@@ -206,7 +251,16 @@ export class BatchExecutor {
       );
     }
 
-    const { entries, uniformBytes, commit } = this.#bind(compiled, scheduled, bindings);
+    const input: Extent = { width: scheduled.width, height: scheduled.height };
+    const output = resolveScheduledOutput(scheduled, input);
+
+    const { entries, uniformBytes, commit } = this.#bind(
+      compiled,
+      scheduled,
+      bindings,
+      input,
+      output,
+    );
 
     const bindGroup = this.#ctx.device.createBindGroup({
       label: `${scheduled.pass.label} @ ${scheduled.nodeId}`,
@@ -214,10 +268,12 @@ export class BatchExecutor {
       entries,
     });
 
+    // Over the output extent: a dispatch has to cover what it writes. For every
+    // pass that does not resample the two extents are the same number.
     const [x, y, z] = dispatchCounts(
       scheduled.pass,
-      scheduled.width,
-      scheduled.height,
+      output.width,
+      output.height,
       this.#ctx.limits,
     );
 
@@ -233,8 +289,8 @@ export class BatchExecutor {
     log.debug("pass encoded", {
       node: scheduled.nodeId,
       pass: scheduled.pass.id,
-      width: scheduled.width,
-      height: scheduled.height,
+      reads: describeExtent(input),
+      writes: describeExtent(output),
       workgroups: `${x}x${y}x${z}`,
     });
 
@@ -245,6 +301,8 @@ export class BatchExecutor {
     compiled: CompiledPass,
     scheduled: ScheduledPass,
     bindings: BatchBindings,
+    input: Extent,
+    output: Extent,
   ): {
     entries: GPUBindGroupEntry[];
     uniformBytes: number;
@@ -256,15 +314,42 @@ export class BatchExecutor {
     let uniformBytes = 0;
 
     if (plan.inputColor !== null) {
+      // The chain's live extent is the ground truth about what the previous
+      // pass wrote; the scheduled extent is what this pass's uniforms told the
+      // shader. A disagreement means the shader is reading its dimensions from
+      // one texture and its texels from another, which is a wrong picture with
+      // no error, so it is one here instead.
+      const live = bindings.color.extent;
+      if (!extentsEqual(live, input)) {
+        throw new ScheduleError(
+          `pass ${scheduled.pass.id} at node ${scheduled.nodeId}: scheduled to read ${describeExtent(input)} but the colour surface holds ${describeExtent(live)}`,
+        );
+      }
       entries.push({
         binding: plan.inputColor,
         resource: bindings.color.current.createView(),
       });
     }
+
+    // Checked before anything is allocated, so a refusal costs no texture. The
+    // two halves of a quantized buffer have to keep telling the same story: a
+    // resampling pass that rewrites the colour and leaves a live index map at
+    // the old extent produces a buffer whose indices name a different pixel
+    // grid than its colours — losslessly wrong, and invisible until an
+    // index-map consumer runs on it.
+    if (!extentsEqual(input, output) && plan.outputIndex === null) {
+      const index = bindings.index;
+      if (index !== null && index.hasContent) {
+        throw new ScheduleError(
+          `pass ${scheduled.pass.id} at node ${scheduled.nodeId}: resamples colour from ${describeExtent(input)} to ${describeExtent(output)} while an index map is live at ${describeExtent(index.extent)}, and writes no index output; the two would name different pixel grids`,
+        );
+      }
+    }
+
     if (plan.outputColor !== null) {
-      const target = bindings.color.target();
+      const target = bindings.color.target(output);
       entries.push({ binding: plan.outputColor, resource: target.createView() });
-      commits.push(() => bindings.color.commit(target));
+      commits.push(() => bindings.color.commit(target, output));
     }
 
     if (plan.inputIndex !== null || plan.outputIndex !== null) {
@@ -278,9 +363,9 @@ export class BatchExecutor {
         entries.push({ binding: plan.inputIndex, resource: chain.current.createView() });
       }
       if (plan.outputIndex !== null) {
-        const target = chain.target();
+        const target = chain.target(output);
         entries.push({ binding: plan.outputIndex, resource: target.createView() });
-        commits.push(() => chain.commit(target));
+        commits.push(() => chain.commit(target, output));
       }
     }
 
@@ -310,7 +395,10 @@ export class BatchExecutor {
     }
 
     for (const slot of plan.scratch) {
-      const bytes = scratchBytes(slot.size, scheduled.width, scheduled.height);
+      // Sized at the output extent. The compiler forbids scratch on a pass that
+      // resamples, so for every pass that reaches here the two are equal — the
+      // choice is stated rather than left to be inferred from that.
+      const bytes = scratchBytes(slot.size, output.width, output.height);
       const buffer = this.#buffers.scratch(`${scheduled.nodeId}/${slot.slot}`, bytes);
       entries.push({ binding: slot.binding, resource: { buffer, offset: 0, size: bytes } });
     }
@@ -319,6 +407,27 @@ export class BatchExecutor {
       entries.push({
         binding: table.binding,
         resource: { buffer: table.buffer, offset: 0, size: table.buffer.size },
+      });
+    }
+
+    for (const slot of plan.instances) {
+      const data = scheduled.instances?.find((entry) => entry.slot === slot.slot);
+      if (data === undefined) {
+        throw new ScheduleError(
+          `pass ${scheduled.pass.id} at node ${scheduled.nodeId}: binds instance-data slot "${slot.slot}", but the scheduled pass carries no bytes for it`,
+        );
+      }
+      const buffer = this.#buffers.instance(
+        `${scheduled.nodeId}/${slot.slot}`,
+        data.bytes,
+        data.digest,
+      );
+      // Bound at the exact byte length rather than at the buffer's size: the
+      // buffer may be larger because a previous, longer LUT sized it, and
+      // `arrayLength` in the shader reports the binding, not the allocation.
+      entries.push({
+        binding: slot.binding,
+        resource: { buffer, offset: 0, size: data.bytes.byteLength },
       });
     }
 

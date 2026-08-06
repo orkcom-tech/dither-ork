@@ -1,7 +1,8 @@
 # API
 
-Contracts between the layers. Six surfaces: the WASM core, the node registry,
-the `.dork` document, the GPU pass layer, the render graph, and the worker RPC.
+Contracts between the layers. Eight surfaces: the WASM core, the node registry,
+the `.dork` document, the GPU pass layer, the render graph, the editor session,
+the shell's slots, and the worker RPC.
 
 Items marked **planned** are specified but not yet implemented.
 
@@ -288,29 +289,34 @@ what F-GL-06 would cost.
 
 ### What is registered
 
-63 effects, all validated:
+67 effects, all validated:
 
 | Family | Count | Execution | Slot |
 | --- | --- | --- | --- |
 | `error-diffusion` | 15 | `wasm` | dither |
-| `ordered` | 5 | `gpu` | dither |
+| `ordered` | 6 | `gpu` | dither |
 | `pattern` | 8 | `gpu` | dither |
-| `special` | 15 | `gpu` | 12 preprocess, 3 postprocess |
+| `special` | 16 | `gpu` | 12 preprocess, 4 postprocess |
 | `glitch` | 16 | `gpu` | postprocess |
-| `preprocess` | 4 | `gpu` | preprocess |
+| `preprocess` | 6 | `gpu` | preprocess |
 
-Totals: 15 `wasm`, 48 `gpu`; 16 preprocess, 28 dither, 19 postprocess.
+Totals: 15 `wasm`, 52 `gpu`; 18 preprocess, 29 dither, 20 postprocess.
 
-Two of the spec's 61 named effects are deliberately absent: **F-GL-06** JPEG
-glitch (needs an encoder, and therefore an execution kind that does not exist)
-and **F-SP-14** nearest-neighbour upscale (a resampling stage, not a pass — it
-belongs with F-PP-01 and F-EX-12).
+One of the spec's 61 named effects is deliberately absent: **F-GL-06** JPEG
+glitch, which needs an encoder and therefore an execution kind that does not
+exist. **F-SP-14** nearest-neighbour upscale was the second such gap and is now
+built: it is the other half of the F-PP-01 pair — internal resolution runs the
+middle of the stack small, nearest upscale brings the frame back to size with
+the chunk intact — which is what made it a pass rather than a resampling stage.
 
-The `preprocess` family holds F-PP-02 (brightness/contrast), F-PP-03 (levels),
-F-PP-04 (HSL) and F-PP-06 (noise injection). The other four F-PP requirements
-are not effect descriptors and will not become ones: F-PP-01 is the internal
-resolution stage, F-PP-05 needs an editable spline that `ParamDescriptor`'s
-`curve` kind declares but nothing packs, and F-PP-07/08 take an uploaded image.
+The `preprocess` family holds F-PP-01 (internal resolution), F-PP-02
+(brightness/contrast), F-PP-03 (levels), F-PP-04 (HSL), F-PP-05 (curves) and
+F-PP-06 (noise injection). F-PP-07, an uploaded threshold map, is registered in
+the `ordered` family, because a user-supplied threshold map *is* an ordered
+dither; its image arrives through `InstanceDataBinding` rather than as a
+parameter. **F-PP-08 (masking) is the one F-PP requirement with no descriptor
+and will not get one**: it is a second image edge on the graph, and the graph
+gives each node one input.
 
 `web/src/registry/catalogue.test.ts` asserts every number in that table, runs
 the startup validator over the shipped descriptors, and checks that every `gpu`
@@ -353,12 +359,28 @@ A missing `surprise` range, a missing distribution, a `surpriseWeight` of zero,
 a duplicate id, a default outside its own legal range, a log distribution over a
 range that includes zero, an `error-diffusion` effect claiming `gpu` execution,
 an index-map consumer in the `preprocess` slot — each fails the whole
-catalogue. Nothing is repaired and nothing is dropped: a catalogue that is 62
+catalogue. Nothing is repaired and nothing is dropped: a catalogue that is 66
 effects because one was quietly discarded is worse than one that refuses to
 start.
 
-Startup is expected to surface that rather than continue. `web/src/main.ts`
-renders the verdict and every issue on the page, and stops.
+Startup is expected to surface that rather than continue. `app/boot.ts` returns
+`registry-failed` and `app/StartupFailureScreen.tsx` puts the verdict and every
+issue on the screen instead of the application. The proof page does the same
+thing on its own page.
+
+### What the grammar checks, and what it does not
+
+`registry/stack.ts` validates a whole stack: index-map dependencies (a node that
+reads one must be downstream of a node that emits one) and declared exclusions.
+The stack editor consults it *before* a node is added or moved, so an illegal
+stack is refused with a reason at the picker rather than built and then found
+broken.
+
+It does **not** know about extents. `internal-resolution` placed after a
+quantizer resamples colour while an index map is live at the old extent; that is
+refused, correctly, but by the pass scheduler at render time — so it reaches the
+user as an error banner rather than as a disabled entry in the picker. The check
+is right and it is in the wrong layer.
 
 ---
 
@@ -500,7 +522,7 @@ constructible from nothing.** The five ordered dithers need a threshold tile out
 of `dither-core` before their passes can be named, so `GpuEffectSource.requires`
 states what the effect is waiting for and the caller fetches it *before* asking
 for passes. A design that assumed every effect could be built from nothing would
-have worked for forty-three of the forty-eight and quietly excluded the family
+have worked for forty-six of the fifty-two and quietly excluded the family
 the dither slot is named after.
 
 Coverage is checked against the sealed catalogue, not assumed. A `gpu`
@@ -562,7 +584,96 @@ everything downstream and nothing upstream re-runs. The cache has an explicit
 byte budget with LRU eviction and a logged eviction event, not an
 out-of-memory crash.
 
-## 6. Worker RPC — **planned**
+## 6. Editor session and document store
+
+`web/src/state/`. The session is the one call that turns the shell into an
+application; the store is the only mutable state in it.
+
+```ts
+const session = await createEditorSession({ registry, report, palette: paletteStore });
+session.attachViewport(viewport);          // from the shell, once it has mounted
+await session.openFile(file);              // from the toolbar's file input
+const off = session.onError((error) => …); // null when a render succeeds again
+```
+
+`createEditorSession` acquires the GPU device and the Rust core, restores the
+autosave *before* the store exists — a restored document is the store's initial
+state, not an edit pushed into it — bridges the palette editor to the document
+palette in both directions, installs drop and paste, and subscribes the
+renderer. Renders are **coalesced, not queued**: one in flight, one latest
+pending, and anything arriving during a render replaces the pending one.
+
+`attachViewport` takes `null`. React mounts and unmounts the viewport host to
+prove the effect is clean, so a session that treated its first viewport as its
+only one would draw into a canvas that had been thrown away.
+
+### `DocumentStore`
+
+```ts
+const snapshot = React.useSyncExternalStore(store.subscribe, store.getSnapshot);
+
+store.addNode(effectId, index?): string;   // returns the id it created
+store.duplicateNode(nodeId): string;
+store.removeNode(nodeId): void;
+store.moveNode(nodeId, toIndex): void;
+store.setNodeEnabled(nodeId, enabled): void;
+store.setNodeSeed(nodeId, seed, options?): void;
+store.setNodeParam(nodeId, key, value, options?): void;
+store.selectNode(nodeId | null): void;
+store.setSolo(nodeId | null): void;
+store.setPalette(palette, options?): void;
+store.undo(): boolean;  store.redo(): boolean;
+```
+
+Three properties the types cannot state and every caller depends on:
+
+- **`getSnapshot()` is referentially stable.** `useSyncExternalStore` compares
+  snapshots with `Object.is`; a store that rebuilt one per read renders forever
+  and one that mutated in place renders never.
+- **Every command is one undo step** (F-ST-04) unless it passes
+  `{ continuous: true }`, which coalesces consecutive commits of the *same*
+  control into one step whose starting point is where the drag began. Pointer
+  controls pass it; discrete ones must not, or two clicks of one checkbox
+  collapse into a step that undoes both.
+- **`addNode` and `duplicateNode` return the id.** A caller that searched the
+  new stack instead guesses wrong the moment the same effect appears twice.
+
+`DocumentSnapshot` carries the document, the decoded source, the selection, the
+solo point, the undo and redo labels, the restore notice and a `revision` that
+increments on every change — the renderer's "something moved" signal.
+
+**Selection and solo are on the store, not in the document.** They are ways of
+looking at a document rather than part of one, they are not saved and not
+undone, and both are cleared when the node they name leaves the stack — solo
+because `buildRenderGraph` refuses a solo point that is not in the stack, which
+would otherwise turn every later render into an error.
+
+**Per-node opacity and blend (F-ST-03) have no mutator**, deliberately. The
+fields are in the schema and round trip; neither backend composites, and both
+refuse a node carrying a non-identity composite by name rather than drawing it
+at full opacity. A store command would be a control whose only effect is to make
+the next render fail.
+
+## 7. Shell slots
+
+`web/src/app/slots.ts`. How anything gets into the shell, which imports no panel.
+
+```ts
+registerPanel({ id: "stack", title: "Stack", region: "left", order: 0, component });
+registerToolbarItem({ id: "open", side: "start", order: 0, component });
+```
+
+`id` is a closed union of the four panels F-UI-08 names. A duplicate
+registration **throws** — two modules claiming `properties` means one of them is
+silently invisible, which is the failure the registry exists to prevent.
+Registration is observable, so a panel registered after the first render appears
+without a reload. A region nothing registered into is not rendered at all.
+
+Panels take no props: the shell's slot takes a component with no props, so
+dependencies arrive by closure at registration time. A context would need a
+provider in a file no panel owns.
+
+## 8. Worker RPC — **planned**
 
 Comlink interfaces. The main thread holds UI state only; it never renders.
 
@@ -606,7 +717,7 @@ render once and are reused across all frames.
 
 ---
 
-## 7. Capability report
+## 9. Capability report
 
 `web/src/lib/capabilities.ts`, implementing F-UI-12.
 
@@ -639,7 +750,7 @@ fallbacks.
 
 ---
 
-## 8. Logging
+## 10. Logging
 
 `web/src/lib/log.ts`.
 

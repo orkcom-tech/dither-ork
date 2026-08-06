@@ -21,9 +21,10 @@
  */
 
 import type { ColorMetric, Palette } from "../types/document";
-import type { ScratchSize } from "../types/gpu";
+import type { Extent, ScratchSize } from "../types/gpu";
 import { logger } from "../lib/log";
 import type { GpuContext } from "./device";
+import { assertExtent, describeExtent, extentsEqual } from "./extent";
 
 const log = logger("gpu");
 
@@ -47,12 +48,22 @@ export function bytesPerTexel(format: SurfaceFormat): number {
  * `COPY_SRC`/`COPY_DST` are always present because any node may turn out to be
  * the one before a serial WASM kernel, and that is decided by the document, not
  * at allocation time.
+ *
+ * Read inside the function rather than at module scope. `GPUTextureUsage` is a
+ * global that only exists where WebGPU does, and evaluating it on import made
+ * merely *importing* this module — and therefore anything that imports it,
+ * including the scheduler — impossible outside a browser. The flags are four
+ * constants ORed together; computing them per allocation costs nothing and buys
+ * the whole layer the ability to be reasoned about in a plain test runner.
  */
-const SURFACE_USAGE =
-  GPUTextureUsage.TEXTURE_BINDING |
-  GPUTextureUsage.STORAGE_BINDING |
-  GPUTextureUsage.COPY_SRC |
-  GPUTextureUsage.COPY_DST;
+function surfaceUsage(): GPUTextureUsageFlags {
+  return (
+    GPUTextureUsage.TEXTURE_BINDING |
+    GPUTextureUsage.STORAGE_BINDING |
+    GPUTextureUsage.COPY_SRC |
+    GPUTextureUsage.COPY_DST
+  );
+}
 
 export class GpuResourceError extends Error {
   constructor(message: string) {
@@ -127,7 +138,7 @@ export class TexturePool {
       label,
       size: { width, height, depthOrArrayLayers: 1 },
       format,
-      usage: SURFACE_USAGE,
+      usage: surfaceUsage(),
       dimension: "2d",
     });
     this.#shapes.set(texture, key);
@@ -201,16 +212,28 @@ export class TexturePool {
  * The texture the chain starts from is **not** owned. It is a cached node
  * output, and writing over it would corrupt the cache for every downstream
  * frame that still expects it.
+ *
+ * **The chain's extent is live, not fixed.** A resampling pass (F-PP-01,
+ * F-SP-14) writes a different shape than it reads, so `target()` takes the
+ * extent to allocate and `commit()` records the extent that is now current.
+ * That is the whole reason a run of parallel nodes can still be coalesced
+ * across a resolution change: WebGPU orders dispatches within one command
+ * buffer whatever shape their textures are, and the fixed-shape ping-pong was
+ * the only thing that ever made it impossible. The spare is only reused when
+ * its shape matches; otherwise it goes back to the pool, because the pool is
+ * keyed by exact shape and an oversized texture would leave a border of stale
+ * pixels.
  */
 export class SurfaceChain {
   readonly #pool: TexturePool;
   readonly #format: SurfaceFormat;
-  readonly #width: number;
-  readonly #height: number;
   readonly #label: string;
   readonly #owned: GPUTexture[] = [];
+  /** The extent of {@link current}. Moves when a resampling pass commits. */
+  #extent: Extent;
   #current: GPUTexture | null;
   #spare: GPUTexture | null = null;
+  #spareExtent: Extent | null = null;
 
   /**
    * `initial` is `null` for a surface nothing has produced yet — the index map
@@ -229,14 +252,18 @@ export class SurfaceChain {
     this.#pool = pool;
     this.#format = format;
     this.#current = initial;
-    this.#width = width;
-    this.#height = height;
+    this.#extent = assertExtent(`surface chain ${label}`, { width, height });
     this.#label = label;
   }
 
   /** Whether anything has written to this chain yet. */
   get hasContent(): boolean {
     return this.#current !== null;
+  }
+
+  /** The shape of the live content — what the next pass must declare it reads. */
+  get extent(): Extent {
+    return this.#extent;
   }
 
   /** The texture holding live content — what the next pass reads. */
@@ -251,17 +278,37 @@ export class SurfaceChain {
     return current;
   }
 
-  /** A write target guaranteed distinct from {@link current}. */
-  target(): GPUTexture {
+  /**
+   * A write target guaranteed distinct from {@link current}, at `extent`.
+   *
+   * Defaults to the live extent, which is what every pass but a resampler
+   * writes.
+   */
+  target(extent: Extent = this.#extent): GPUTexture {
+    assertExtent(`surface chain ${this.#label} target`, extent);
+
     const spare = this.#spare;
     if (spare !== null) {
+      if (this.#spareExtent !== null && extentsEqual(this.#spareExtent, extent)) {
+        this.#spare = null;
+        this.#spareExtent = null;
+        return spare;
+      }
+      // Wrong shape for what is being asked for. Handed back rather than kept,
+      // so a stack that resizes twice does not accumulate a spare per shape.
+      this.#release(spare);
       this.#spare = null;
-      return spare;
+      this.#spareExtent = null;
+      log.debug("surface chain spare returned on extent change", {
+        chain: this.#label,
+        wanted: describeExtent(extent),
+      });
     }
+
     const texture = this.#pool.acquire(
       this.#format,
-      this.#width,
-      this.#height,
+      extent.width,
+      extent.height,
       `${this.#label}/pong`,
     );
     this.#owned.push(texture);
@@ -269,27 +316,53 @@ export class SurfaceChain {
   }
 
   /**
-   * Promote a written texture to current. The displaced one becomes the spare
-   * if this chain owns it, which is what keeps a chain of any length down to
-   * two allocations.
+   * Promote a written texture to current, at the extent it was written at.
+   *
+   * The displaced one becomes the spare if this chain owns it, which is what
+   * keeps a chain of any length down to two allocations per shape.
    */
-  commit(written: GPUTexture): void {
+  commit(written: GPUTexture, extent: Extent = this.#extent): void {
+    assertExtent(`surface chain ${this.#label} commit`, extent);
     const previous = this.#current;
+    const previousExtent = this.#extent;
     this.#current = written;
+    this.#extent = extent;
     if (previous !== null && this.#owned.includes(previous)) {
+      // A spare already held here would be leaked by overwriting it. There is
+      // at most one at a time — a chain alternates — but saying so in code is
+      // cheaper than relying on it.
+      if (this.#spare !== null && this.#spare !== previous) this.#release(this.#spare);
       this.#spare = previous;
+      this.#spareExtent = previousExtent;
+    }
+    if (!extentsEqual(previousExtent, extent)) {
+      log.debug("surface chain extent changed", {
+        chain: this.#label,
+        from: describeExtent(previousExtent),
+        to: describeExtent(extent),
+      });
     }
   }
 
   /** Hand every texture this chain allocated back to the pool. */
   release(): void {
-    for (const texture of this.#owned) {
+    // Over a copy: `#release` removes from `#owned`, and mutating the array
+    // being walked would skip every second texture and leak it.
+    for (const texture of [...this.#owned]) {
       // The one still holding the result is the caller's to keep until they are
       // done with it; releasing it here would let the next node overwrite it.
-      if (texture !== this.#current) this.#pool.release(texture);
+      if (texture !== this.#current) this.#release(texture);
     }
     this.#owned.length = 0;
     this.#spare = null;
+    this.#spareExtent = null;
+  }
+
+  /** One release path, so a texture cannot be handed back twice by two of them. */
+  #release(texture: GPUTexture): void {
+    const at = this.#owned.indexOf(texture);
+    if (at >= 0) this.#owned.splice(at, 1);
+    this.#pool.release(texture);
   }
 }
 
@@ -325,15 +398,25 @@ export class BufferCache {
   readonly #ctx: GpuContext;
   readonly #buffers = new Map<string, CachedBuffer>();
   readonly #tables = new Map<Uint8Array, GPUBuffer>();
+  /** Digest of what was last written to each instance-data buffer. */
+  readonly #instanceDigests = new Map<string, string>();
   #uploadedTableBytes = 0;
+  #uploadedInstanceBytes = 0;
 
   constructor(ctx: GpuContext) {
     this.#ctx = ctx;
   }
 
-  #ensure(key: string, sizeBytes: number, usage: GPUBufferUsageFlags, label: string): GPUBuffer {
+  #ensure(
+    key: string,
+    sizeBytes: number,
+    usage: GPUBufferUsageFlags,
+    label: string,
+  ): { buffer: GPUBuffer; reallocated: boolean } {
     const existing = this.#buffers.get(key);
-    if (existing !== undefined && existing.sizeBytes >= sizeBytes) return existing.buffer;
+    if (existing !== undefined && existing.sizeBytes >= sizeBytes) {
+      return { buffer: existing.buffer, reallocated: false };
+    }
     if (existing !== undefined) {
       log.debug("buffer grown", { label, from: existing.sizeBytes, to: sizeBytes });
       existing.buffer.destroy();
@@ -341,7 +424,7 @@ export class BufferCache {
     const buffer = this.#ctx.device.createBuffer({ label, size: sizeBytes, usage });
     this.#buffers.set(key, { buffer, sizeBytes });
     log.debug("buffer created", { label, bytes: sizeBytes });
-    return buffer;
+    return { buffer, reallocated: true };
   }
 
   /** One uniform buffer per (node, pass), rewritten in place every frame. */
@@ -358,7 +441,7 @@ export class BufferCache {
       sizeBytes,
       GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       `uniform ${key}`,
-    );
+    ).buffer;
   }
 
   /**
@@ -378,7 +461,72 @@ export class BufferCache {
       sizeBytes,
       GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
       `scratch ${key}`,
+    ).buffer;
+  }
+
+  /**
+   * One node's bulk data — a curve LUT (F-PP-05), a decoded threshold tile
+   * (F-PP-07).
+   *
+   * Keyed by `${nodeId}/${slot}` rather than by the array, because the bytes
+   * are rebuilt from the node's state on every render and are therefore a new
+   * array each time: keying on identity, the way {@link table} does, would
+   * upload the same LUT on every frame of a playing animation.
+   *
+   * The digest is what decides. It is a real hash of the bytes (see
+   * `gpu/instance.ts`), so an unchanged curve costs no upload and a changed one
+   * costs exactly one — and a buffer that had to be reallocated is rewritten
+   * whatever the digest says, because the new allocation holds nothing.
+   */
+  instance(key: string, bytes: Uint8Array, digest: string): GPUBuffer {
+    this.#ctx.assertUsable("BufferCache.instance");
+    if (bytes.byteLength === 0) {
+      throw new GpuResourceError(`instance data ${key} is empty`);
+    }
+    if (bytes.byteLength % 4 !== 0) {
+      throw new GpuResourceError(
+        `instance data ${key} is ${bytes.byteLength} bytes, which is not a multiple of 4`,
+      );
+    }
+    const max = this.#ctx.limits.maxStorageBufferBindingSize;
+    if (bytes.byteLength > max) {
+      throw new GpuResourceError(
+        `instance data ${key} is ${bytes.byteLength} bytes, over the ${max}-byte limit`,
+      );
+    }
+
+    const cacheKey = `instance:${key}`;
+    const { buffer, reallocated } = this.#ensure(
+      cacheKey,
+      bytes.byteLength,
+      GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      `instance ${key}`,
     );
+
+    if (!reallocated && this.#instanceDigests.get(cacheKey) === digest) {
+      log.debug("instance data unchanged", { key, bytes: bytes.byteLength, digest });
+      return buffer;
+    }
+
+    const started = performance.now();
+    // Copied into a fresh view for the same reason `table` does: bytes built
+    // over WASM linear memory are a view onto a SharedArrayBuffer once the
+    // thread pool is on, and `writeBuffer` does not take one.
+    this.#ctx.device.queue.writeBuffer(buffer, 0, new Uint8Array(bytes));
+    this.#instanceDigests.set(cacheKey, digest);
+    this.#uploadedInstanceBytes += bytes.byteLength;
+    // A CPU→GPU crossing like any other, and logged at the same level, because
+    // a node re-uploading a megabyte LUT every frame is exactly the kind of
+    // cost the architecture asks to be readable from the console.
+    log.info("instance data uploaded", {
+      key,
+      bytes: bytes.byteLength,
+      digest,
+      reallocated,
+      ms: Math.round((performance.now() - started) * 100) / 100,
+      totalInstanceBytes: this.#uploadedInstanceBytes,
+    });
+    return buffer;
   }
 
   /**
@@ -437,10 +585,13 @@ export class BufferCache {
     log.info("buffer cache destroyed", {
       buffers: this.#buffers.size,
       tables: this.#tables.size,
+      instanceSlots: this.#instanceDigests.size,
     });
     this.#buffers.clear();
     this.#tables.clear();
+    this.#instanceDigests.clear();
     this.#uploadedTableBytes = 0;
+    this.#uploadedInstanceBytes = 0;
   }
 }
 

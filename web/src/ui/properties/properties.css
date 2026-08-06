@@ -1,0 +1,348 @@
+/*
+ * The properties panel and every parameter control in it.
+ *
+ * No colour literal appears here: every value is a custom property from
+ * `src/ui/theme.css`, which is what makes both themes work and what F-UI-09's
+ * user-editable themes are built on.
+ *
+ * The control primitives (`.field`, `.nf`, `.badge`) are used by the stack
+ * editor too — its rows carry a numeric opacity control and the same slot and
+ * execution badges — so this stylesheet is imported by both panels. Vite
+ * includes it once.
+ */
+
+/* --- panel ------------------------------------------------------------- */
+
+.properties {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.properties--empty {
+  padding: 12px;
+}
+
+.properties__header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--rule-strong);
+}
+
+.properties__name {
+  color: var(--fg);
+  font-size: var(--text-md);
+}
+
+.properties__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.properties__body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- shared primitives ------------------------------------------------- */
+
+.badge {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+.badge--quiet {
+  border-color: transparent;
+  color: var(--fg-faint);
+}
+
+.badge--warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.field {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.field--inline {
+  padding: 5px 8px;
+}
+
+.field__label {
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.field__note {
+  margin: 0;
+  color: var(--fg-dim);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.field__note--fail {
+  color: var(--fail);
+}
+
+.field__note b {
+  color: var(--fg);
+  font-weight: normal;
+}
+
+/* --- numeric control (F-UI-06) ----------------------------------------- */
+
+.nf {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.nf__label {
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  /* The label is a drag grip: sideways, with shift for fine and alt for coarse. */
+  cursor: ew-resize;
+  user-select: none;
+  touch-action: none;
+  width: fit-content;
+}
+
+.nf__label:hover {
+  color: var(--fg);
+}
+
+.nf__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nf--dense {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  border-bottom: 0;
+}
+
+.nf--dense .nf__label {
+  margin-bottom: 0;
+  flex: 0 0 auto;
+  min-width: 1.5em;
+}
+
+.nf--dense .nf__row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.nf__track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 32px;
+  height: 16px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  cursor: ew-resize;
+  /* Pointer capture drag does not work without this on touch and pen. */
+  touch-action: none;
+}
+
+.nf__track:hover {
+  border-color: var(--accent-dim);
+}
+
+.nf__fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  background: var(--accent-dim);
+  pointer-events: none;
+}
+
+.nf__thumb {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.nf__entry {
+  flex: 0 0 auto;
+  width: 5.5em;
+  height: 18px;
+  padding: 0 4px;
+  text-align: right;
+  background: var(--bg-inset);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+}
+
+.nf__entry:focus {
+  border-color: var(--accent-dim);
+}
+
+/* --- bool, enum -------------------------------------------------------- */
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--fg-dim);
+  font-size: var(--text-sm);
+}
+
+.toggle:hover {
+  color: var(--fg);
+}
+
+.toggle input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.select {
+  width: 100%;
+  height: 20px;
+  padding: 0 4px;
+  background: var(--bg-inset);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+}
+
+.select:hover {
+  border-color: var(--accent-dim);
+}
+
+/* --- colour ------------------------------------------------------------ */
+
+.colour {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.colour__swatch {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  cursor: pointer;
+}
+
+.colour__hex {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 20px;
+  padding: 0 4px;
+  background: var(--bg-inset);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+}
+
+.colour__channels {
+  margin-top: 4px;
+}
+
+/* --- seed -------------------------------------------------------------- */
+
+.seed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.seed__entry {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 20px;
+  padding: 0 4px;
+  background: var(--bg-inset);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+}
+
+/* --- curve ------------------------------------------------------------- */
+
+.curve {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  background: var(--bg-sunken);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.curve__ground {
+  fill: transparent;
+}
+
+.curve__grid {
+  stroke: var(--rule);
+  stroke-width: 1;
+}
+
+.curve__identity {
+  stroke: var(--rule-strong);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.curve__line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.curve__point {
+  fill: var(--bg);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.curve__point--active {
+  fill: var(--accent);
+}
+
+.curve__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 5px;
+}

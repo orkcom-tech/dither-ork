@@ -1,236 +1,49 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>dither-ork</title>
+    <!--
+      The only styles in this file are the ones that have to be right before any
+      module has loaded: the background, the ink and the font. Everything else
+      lives in src/ui/theme.css, imported by the app, so that a theme is one set
+      of values in one place (F-UI-09).
+
+      `data-theme` above is the pre-script default. app/theme.ts replaces it as
+      soon as it knows the stored mode and the OS preference, which is one frame
+      later; starting dark means that frame is not a white flash.
+    -->
     <style>
       :root {
         color-scheme: dark;
-        --bg: #0d0f0c;
-        --fg: #cfe8c2;
-        --dim: #6f8a63;
-        --ok: #8ee06a;
-        --fail: #e06a6a;
-        --warn: #e0c46a;
-        --rule: #1b2118;
+        background: #0d0f0c;
+        color: #cfe8c2;
+      }
+      html,
+      body,
+      #root {
+        height: 100%;
       }
       body {
         margin: 0;
+        font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      }
+      #boot-noscript {
         padding: 2rem;
-        background: var(--bg);
-        color: var(--fg);
-        font: 14px/1.6 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-      }
-      h1 {
-        font-size: 1.1rem;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-        margin: 0 0 0.25rem;
-      }
-      p.sub {
-        margin: 0 0 2rem;
-        color: var(--dim);
-      }
-      h2 {
-        font-size: 0.8rem;
-        letter-spacing: 0.16em;
-        text-transform: uppercase;
-        color: var(--dim);
-        margin: 2.5rem 0 0.75rem;
-        border-top: 1px solid var(--rule);
-        padding-top: 1.25rem;
-      }
-      h2:first-of-type {
-        border-top: 0;
-        padding-top: 0;
-        margin-top: 2rem;
-      }
-      p.note {
-        margin: 0 0 1rem;
-        color: var(--dim);
-        max-width: 60rem;
-      }
-      table {
-        border-collapse: collapse;
-        width: 100%;
-        max-width: 66rem;
-      }
-      td,
-      th {
-        padding: 0.3rem 0.75rem 0.3rem 0;
-        vertical-align: top;
-        border-bottom: 1px solid var(--rule);
-        text-align: left;
-        font-weight: normal;
-      }
-      th {
-        color: var(--dim);
-        font-size: 0.75rem;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-      }
-      td.state {
-        width: 4rem;
-      }
-      td.detail {
-        color: var(--dim);
-      }
-      .ok {
-        color: var(--ok);
-      }
-      .fail {
-        color: var(--fail);
-      }
-      .warn {
-        color: var(--warn);
-      }
-      canvas {
-        image-rendering: pixelated;
-        border: 1px solid var(--rule);
-        max-width: 100%;
-        display: block;
-      }
-      .row {
-        display: flex;
-        gap: 1.5rem;
-        flex-wrap: wrap;
-      }
-      figure {
-        margin: 0;
-      }
-      figcaption {
-        color: var(--dim);
-        padding-top: 0.4rem;
-        max-width: 22rem;
-      }
-      .swatches {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 2px;
-        padding-top: 0.4rem;
-        max-width: 22rem;
-      }
-      .swatch {
-        width: 14px;
-        height: 14px;
-        border: 1px solid var(--rule);
-      }
-      .status {
-        margin-bottom: 1rem;
-      }
-      ul.issues {
-        margin: 0.5rem 0 0;
-        padding-left: 1.2rem;
-        color: var(--fail);
+        max-width: 60ch;
+        line-height: 1.7;
       }
     </style>
   </head>
   <body>
-    <h1>dither-ork</h1>
-    <p class="sub">
-      scaffold — capability check, registry validation, and an end-to-end proof
-      of the WASM and WebGPU render paths
-    </p>
-
-    <h2>Capabilities</h2>
-    <p class="note">
-      F-UI-12. WebGPU and SharedArrayBuffer are fatal; the other two degrade
-      stated capabilities rather than failing.
-    </p>
-    <table id="capabilities">
-      <tbody></tbody>
-    </table>
-
-    <h2>Node registry</h2>
-    <p class="note">
-      Every effect module under <code>src/effects/</code> is discovered by glob
-      and validated as one set at startup. A missing surprise range, a duplicate
-      id or a default outside its own legal range stops the page here rather
-      than degrading Surprise Me silently.
-    </p>
-    <div id="registry-status" class="status">not run</div>
-    <table id="registry-table">
-      <tbody></tbody>
-    </table>
-
-    <h2>Core</h2>
-    <div id="core-status" class="status">not run</div>
-
-    <h2>Source</h2>
-    <p class="note">
-      Generated, not loaded — image input (F-IN-01) is not built yet. A hue
-      sweep over a lightness ramp above a neutral wedge, which is what makes
-      both palette matching and diffusion legible in one frame.
-    </p>
-    <div class="row" id="source"></div>
-
-    <h2>Error diffusion — every registered kernel</h2>
-    <p class="note" id="diffusion-note">not run</p>
-    <div class="row" id="diffusion"></div>
-
-    <h2>Hardware palettes</h2>
-    <p class="note" id="palettes-note">not run</p>
-    <div class="row" id="palettes"></div>
-
-    <h2>Automatic palette extraction</h2>
-    <p class="note" id="extraction-note">not run</p>
-    <div class="row" id="extraction"></div>
-
-    <h2>Ordered dithers — WebGPU compute path</h2>
-    <p class="note">
-      The real path: threshold ranks generated in Rust, uploaded as a table, one
-      compute dispatch per effect against the linear-light
-      <code>rgba16float</code> working surface, then read back across the
-      instrumented boundary. Nothing here is a CPU stand-in.
-    </p>
-    <div id="ordered-status" class="status">not run</div>
-    <div class="row" id="ordered"></div>
-
-    <h2>Preprocessing — WebGPU compute path</h2>
-    <p class="note">
-      F-PP-02, 03, 04 and 06: the tone and noise front of the stack, which runs
-      before any kernel sees the frame. These are the nodes whose figures are
-      hardest to read by eye — a levels move that clips nothing and a hue
-      rotation of zero both look exactly like the source — so every caption
-      states how much of the frame changed and how bright the result came out.
-      F-PP-01 (internal resolution), F-PP-05 (curves), F-PP-07 (uploaded
-      threshold map) and F-PP-08 (masking) are not effect descriptors and are
-      not here.
-    </p>
-    <div id="preprocess-status" class="status">not run</div>
-    <div class="row" id="preprocess"></div>
-
-    <h2>Pattern dithers — WebGPU compute path</h2>
-    <p class="note">
-      F-PT-01…08. Each one quantizes against the palette and emits the index
-      map, exactly as the ordered dithers do; what differs is the screen the
-      threshold comes from. Every figure states how much of the frame the node
-      actually changed, because a pattern dither that renders and changes
-      nothing is the failure this page exists to catch.
-    </p>
-    <div id="pattern-status" class="status">not run</div>
-    <div class="row" id="pattern"></div>
-
-    <h2>Special effects — WebGPU compute path</h2>
-    <p class="note">
-      F-SP-01…16. Preprocessing and post-processing nodes at their declared
-      defaults. Two of them (outline, dilate/erode) read the index map, so the
-      page runs a Bayer 4×4 quantizer immediately upstream of those and shows
-      the pair; anything else runs alone on the source.
-    </p>
-    <div id="special-status" class="status">not run</div>
-    <div class="row" id="special"></div>
-
-    <h2>Glitch effects — WebGPU compute path</h2>
-    <p class="note">
-      F-GL-01…17. Every one takes an explicit seed and is reproducible; nothing
-      here reads a clock. Defaults throughout, so what you see is what the
-      properties panel opens with.
-    </p>
-    <div id="glitch-status" class="status">not run</div>
-    <div class="row" id="glitch"></div>
-
-    <script type="module" src="/src/main.ts"></script>
+    <div id="root"></div>
+    <noscript>
+      <div id="boot-noscript">
+        dither-ork is a WebGPU image application and runs entirely in the
+        browser. It needs JavaScript enabled.
+      </div>
+    </noscript>
+    <script type="module" src="/src/app/main.tsx"></script>
   </body>
 </html>

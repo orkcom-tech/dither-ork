@@ -6,14 +6,22 @@ Load an image, stack dither and glitch effects in a reorderable pipeline, bind
 any parameter to a modulator, and export a seamless animated loop — or a still,
 or a vector file for print and cutting.
 
-**Status: scaffold.** What exists: the colour core in linear light, all 15
-error-diffusion kernels against golden images, 48 more effects running as WebGPU
-compute passes and pinned by their own golden set in a pinned browser, the
-hardware palette library, automatic palette extraction, the render graph and
-node cache headless, the node registry with startup validation, and the local
-development environment. What does not: any user interface. `docker compose up`
-serves a proof page, not an application — there is nothing yet to load an image
-into.
+**Status: it is an application, and it is early.** `docker compose up` then
+<http://localhost:5173> gives you a working still-image editor: open a picture,
+build a stack out of 67 effects, reorder it, edit every parameter, solo any
+node, change or extract the palette, compare against the source, zoom and pan,
+undo and redo without limit. The document autosaves and comes back on reload.
+
+What is **not** built: export of any kind — nothing leaves the browser yet, so
+what you make you can only look at. Nor is there animation (no timeline, no
+modulators, no playback), Surprise Me, presets, batch, or saving a `.dork` to a
+file you choose. Per-node opacity and blend are in the document format but have
+no implementation, so the editor does not offer them. The render loop runs on
+the main thread rather than in a worker, which a long stack at a large size will
+show you.
+
+Everything below under "What it will do" that is not in the first paragraph is
+still a plan.
 
 ---
 
@@ -23,8 +31,14 @@ into.
 docker compose up
 ```
 
-Open <http://localhost:5173>. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for
-what you should see and what to do when you do not.
+Open <http://localhost:5173>. First run takes several minutes — it builds a Rust
+toolchain. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for what you should
+see and what to do when you do not.
+
+`/proof.html` beside it is a development page, not part of the product: it
+renders the whole catalogue end to end and states per effect how much of the
+frame moved. It is how a shader that compiles but does not do what its name says
+gets caught.
 
 ## Requirements
 
@@ -37,12 +51,14 @@ cost, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## What it will do
 
-- **63 effects** — 15 error diffusion, 5 ordered, 8 pattern, 17 glitch, 16
-  special, plus epsilon glow and temporal variation
-- **A stackable, reorderable pipeline** — any effect, any number of times, in
-  any order, each with its own blend mode and opacity
-- **Full colour** — automatic palette extraction, a hardware palette library,
-  CMYK halftone, hue-targeted recolour
+- **67 effects, built** — 15 error diffusion, 6 ordered, 8 pattern, 16 glitch,
+  16 special, 6 preprocess. One of the specification's named effects is
+  deliberately absent: JPEG glitch, which needs an encoder in the render path
+- **A stackable, reorderable pipeline, built** — any effect, any number of
+  times, in any order. Per-node blend and opacity are specified and not yet
+  implemented
+- **Full colour** — automatic palette extraction, a hardware palette library
+  and CMYK halftone are built; hue-targeted recolour is not
 - **Animation** — a timeline editor with keyframes, parameter modulators, live
   playback, and loops that are seamless by construction rather than by luck
 - **Surprise Me** — a seeded random document generator with locks and a chaos

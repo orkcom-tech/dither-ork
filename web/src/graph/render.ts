@@ -29,12 +29,13 @@ import type {
   RenderGraph,
 } from "../types/graph";
 import type { EffectDescriptor } from "../types/registry";
-import type { BoundaryCrossing } from "../types/gpu";
+import type { BoundaryCrossing, Extent } from "../types/gpu";
 import type { Logger } from "../lib/log";
 import { logger } from "../lib/log";
 import type { GpuBackend, TransferResult, WasmBackend } from "./backend";
 import type { InputOrigin, PlanStep, PlannedNode, PreparedGraph, RenderPlan } from "./plan";
 import { planRender, prepareGraph, stepNodes } from "./plan";
+import type { NodeAssets } from "./assets";
 import type { NodeCache, SurfaceOwner } from "./cache";
 import { GraphError, expect } from "./errors";
 
@@ -61,6 +62,12 @@ export interface RenderDeps {
   readonly cache: NodeCache;
   readonly surfaces: SurfaceOwner;
   readonly effects: ReadonlyMap<string, EffectDescriptor>;
+  /**
+   * Bulk data the document carries per node — F-PP-07's uploaded threshold
+   * image. Absent when nothing in the stack takes one, which is every document
+   * the catalogue can express today.
+   */
+  readonly assets?: NodeAssets;
   /** Ties this render's log lines together; carried on every error too. */
   readonly correlationId: string;
 }
@@ -247,6 +254,8 @@ export async function renderPrepared(
     return result.buffer;
   };
 
+  const working: Extent = { width: graph.width, height: graph.height };
+
   const bufferFor = (origin: InputOrigin): { key: string; buffer: FrameBuffer } => {
     if (origin.kind === "source") return { key: SOURCE_KEY, buffer: source };
     return {
@@ -282,6 +291,36 @@ export async function renderPrepared(
     }
   };
 
+  /**
+   * The extent a unit reads: the shape of the buffer on its first node's `in`
+   * port.
+   *
+   * Not `graph.width`/`graph.height`, which is the extent the *source* enters
+   * at. The two are the same number for a stack with no resampling node in it,
+   * and they stop being the same the moment F-PP-01 appears — after which
+   * passing the working resolution to a backend would have it allocate and
+   * dispatch at a shape nothing in the stack is carrying.
+   */
+  const entryExtent = (
+    nodes: readonly PlannedNode[],
+    source: FrameBuffer | null,
+    buffers: ReadonlyMap<string, FrameBuffer>,
+  ): Extent => {
+    const first = nodes[0];
+    if (first === undefined) return working;
+    for (const input of first.inputs) {
+      if (input.port !== "in") continue;
+      // A `batch` origin is produced by an earlier node of this same batch,
+      // which the first node of a batch has none of by construction.
+      if (input.origin.kind === "batch") break;
+      const buffer =
+        input.origin.kind === "source" ? source : buffers.get(input.origin.nodeId);
+      if (buffer === undefined || buffer === null) break;
+      return { width: buffer.width, height: buffer.height };
+    }
+    return working;
+  };
+
   const runGpuBatch = async (
     step: Extract<PlanStep, { kind: "gpu-batch" }>,
     charge: Map<string, number>,
@@ -301,14 +340,16 @@ export async function renderPrepared(
       }
     }
 
+    const entry = entryExtent(step.nodes, batchSource, buffers);
     const startedBatch = performance.now();
     const result = await deps.gpu.submit({
       label: step.label,
       nodes: step.nodes,
       buffers,
       source: batchSource,
-      width: graph.width,
-      height: graph.height,
+      width: entry.width,
+      height: entry.height,
+      working,
       quality: graph.quality,
       frame: graph.frame,
       palette: prepared.palette,
@@ -365,13 +406,15 @@ export async function renderPrepared(
       else buffers.set(key, onCpu);
     }
 
+    const entry = entryExtent([planned], nodeSource, buffers);
     const startedNode = performance.now();
     const output = await deps.wasm.run({
       node: planned,
       buffers,
       source: nodeSource,
-      width: graph.width,
-      height: graph.height,
+      width: entry.width,
+      height: entry.height,
+      working,
       quality: graph.quality,
       frame: graph.frame,
       palette: prepared.palette,
@@ -481,6 +524,7 @@ export async function renderGraph(
     request.source.hash,
     request.palette,
     deps.effects,
+    deps.assets,
   );
   return renderPrepared({ prepared, source: request.source, retain: request.retain }, deps);
 }

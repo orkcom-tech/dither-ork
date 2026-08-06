@@ -11,8 +11,11 @@
  * - `uniforms.ts`   std140 layout validation and packing
  * - `compiler.ts`   WGSL to compute pipeline, with the pipeline cache
  * - `resources.ts`  rgba16float colour, r32uint index maps, pools, ping-pong
+ * - `extent.ts`     a pass's output extent, when it differs from its input
+ * - `instance.ts`   per-node bulk data: curve LUTs, uploaded threshold tiles
  * - `boundary.ts`   readback and upload, every crossing measured
  * - `scheduler.ts`  pass coalescing and batch execution
+ * - `prepare.ts`    one node to its scheduled passes: extent, uniforms, bulk data
  * - `matrices.ts`   the threshold-matrix upload interface
  * - `effects/`      per-effect passes; the WGSL lives in `web/src/shaders/`
  */
@@ -43,9 +46,31 @@ export {
   type BindingPlan,
   type CompiledEffect,
   type CompiledPass,
+  type InstanceSlotBinding,
   type ScratchBinding,
   type TableBinding,
 } from "./compiler";
+
+export {
+  assertExtent,
+  describeExtent,
+  ExtentError,
+  extentsEqual,
+  passExtentRule,
+  resizes,
+  resolveExtent,
+  resolvePassExtent,
+} from "./extent";
+
+export {
+  InstanceDataError,
+  instanceBindingsOf,
+  resolveInstanceData,
+  resolvePassInstances,
+} from "./instance";
+
+export { prepareNodePasses } from "./prepare";
+export type { NodeRenderState, PreparedNode } from "./prepare";
 
 export {
   bytesPerTexel,
@@ -81,6 +106,7 @@ export {
 export {
   BatchExecutor,
   planExecution,
+  resolveScheduledOutput,
   ScheduleError,
   type BatchBindings,
   type BatchStats,

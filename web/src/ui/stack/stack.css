@@ -1,0 +1,352 @@
+/*
+ * The stack editor.
+ *
+ * Shares the control primitives in `../properties/properties.css` — `.field`,
+ * `.badge` and the numeric control — because a stack row carries an opacity
+ * slider and the same slot and execution badges the properties panel shows. No
+ * colour literal appears here; every value is a token from `src/ui/theme.css`.
+ */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* --- the bar and its notices ------------------------------------------- */
+
+.stack__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-raised);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.stack__count {
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stack__solo,
+.stack__refusal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: var(--text-sm);
+  border-bottom: 1px solid var(--rule);
+}
+
+.stack__solo {
+  color: var(--fg-dim);
+  background: var(--bg-inset);
+}
+
+.stack__solo b {
+  color: var(--accent);
+  font-weight: normal;
+}
+
+.stack__refusal {
+  color: var(--warn);
+  background: var(--bg-inset);
+  align-items: flex-start;
+  line-height: 1.5;
+}
+
+.stack__empty {
+  padding: 12px 8px;
+}
+
+/* --- rows -------------------------------------------------------------- */
+
+.stack__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.node {
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-raised);
+  /* dnd-kit translates the row while dragging; without this the row that is
+     lifted paints under its neighbours. */
+  position: relative;
+}
+
+.node--selected {
+  background: var(--bg-inset);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.node--off .node__title,
+.node--off .node__controls {
+  opacity: 0.4;
+}
+
+.node--excluded {
+  /* Below the solo point: not in the render at all. */
+  opacity: 0.45;
+}
+
+.node--dragging {
+  z-index: 3;
+  box-shadow: var(--shadow);
+}
+
+.node--issue {
+  box-shadow: inset 2px 0 0 var(--warn);
+}
+
+.node__main {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px 0;
+}
+
+.node__grip,
+.node__flag,
+.node__action {
+  flex: 0 0 auto;
+  border: 0;
+  background: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: var(--text-sm);
+  line-height: 1.2;
+}
+
+.node__grip {
+  cursor: grab;
+  touch-action: none;
+}
+
+.node__grip:active {
+  cursor: grabbing;
+}
+
+.node__flag[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.node__grip:hover,
+.node__flag:hover,
+.node__action:hover {
+  color: var(--fg);
+}
+
+.node__action {
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.node__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: none;
+  padding: 2px 2px;
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+  font-size: var(--text-sm);
+}
+
+.node__index {
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  min-width: 1.4em;
+}
+
+.node__title {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node__controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 4px 26px;
+}
+
+.node__controls .select--dense {
+  flex: 0 0 auto;
+  width: 7.5em;
+  height: 16px;
+  font-size: var(--text-xs);
+}
+
+.node__controls .nf {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.node__issue {
+  margin: 0;
+  padding: 0 8px 5px 26px;
+  color: var(--warn);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+/* --- the add-node picker ----------------------------------------------- */
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.picker__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.picker__search {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  background: var(--bg-inset);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+}
+
+.picker__search:focus {
+  border-color: var(--accent-dim);
+}
+
+.picker__slots {
+  display: flex;
+  gap: 4px;
+  padding: 0 8px 6px;
+  border-bottom: 1px solid var(--rule);
+  flex-wrap: wrap;
+}
+
+.picker__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 22rem;
+}
+
+.picker__none {
+  padding: 12px 8px;
+}
+
+.picker__family {
+  margin: 0;
+  padding: 6px 8px 3px;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  font-weight: normal;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  position: sticky;
+  top: 0;
+  background: var(--bg-raised);
+}
+
+.picker__row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 3px 8px;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.picker__row--on {
+  background: var(--bg-inset);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.picker__row--blocked {
+  color: var(--fg-faint);
+  cursor: not-allowed;
+}
+
+.picker__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker__foot {
+  padding: 5px 8px;
+  border-top: 1px solid var(--rule);
+}
+
+.picker__reason {
+  margin: 0;
+  padding: 0 8px 6px;
+  color: var(--warn);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+/*
+ * Step-reorder buttons.
+ *
+ * Stacked into the width of one control so the row keeps its shape: a stack
+ * panel is narrow, and two more full-size buttons per row would push the effect
+ * name out of it.
+ */
+.node__steps {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.node__step {
+  padding: 0 3px;
+  font-size: 7px;
+  line-height: 1;
+  color: var(--fg-faint);
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.node__step:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.node__step:disabled {
+  /* Still visible, so the row does not change shape at the ends of the stack. */
+  opacity: 0.3;
+  cursor: default;
+}

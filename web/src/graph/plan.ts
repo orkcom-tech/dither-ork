@@ -33,7 +33,8 @@ import type {
 import type { EffectDescriptor, ExecutionKind } from "../types/registry";
 import type { GraphTopology } from "./topology";
 import { PORT_ORDER, analyseGraph } from "./topology";
-import { PALETTE_PARAM_KEY, contentHash, paletteDigest } from "./hash";
+import { ASSET_PARAM_KEY, PALETTE_PARAM_KEY, contentHash, paletteDigest } from "./hash";
+import type { NodeAssets } from "./assets";
 import { expect } from "./errors";
 
 /**
@@ -153,12 +154,21 @@ const SOURCE_ORIGIN: InputOrigin = { kind: "source" };
  * a palette edit invalidates exactly the dither node and what follows it, and
  * leaves the preprocessing before it alone. Folding it into every node instead
  * would re-run a blur on every drag of the palette editor.
+ *
+ * `assets` is the same idea for the other thing that changes a node's pixels
+ * without being one of its parameters: bulk data the document carries for one
+ * node — F-PP-07's uploaded threshold image. Its digest is folded into that
+ * node's hash and nowhere else, so replacing the image invalidates that node
+ * and everything after it. Omitting the argument is the ordinary case: no node
+ * in the catalogue carries an asset today, and a document with none hashes
+ * exactly as it did before this parameter existed.
  */
 export function prepareGraph(
   graph: RenderGraph,
   sourceHash: ContentHash,
   palette: Palette,
   effects: ReadonlyMap<string, EffectDescriptor>,
+  assets?: NodeAssets,
 ): PreparedGraph {
   const topology = analyseGraph(graph, effects);
   const digest = paletteDigest(palette);
@@ -232,9 +242,15 @@ export function prepareGraph(
     }
 
     const usesPalette = descriptor.producesIndexMap || descriptor.requiresIndexMap;
-    const params = usesPalette
-      ? { ...node.params, [PALETTE_PARAM_KEY]: digest }
-      : node.params;
+    const assetDigest = assets?.digestOf(nodeId) ?? null;
+    const params =
+      usesPalette || assetDigest !== null
+        ? {
+            ...node.params,
+            ...(usesPalette ? { [PALETTE_PARAM_KEY]: digest } : {}),
+            ...(assetDigest === null ? {} : { [ASSET_PARAM_KEY]: assetDigest }),
+          }
+        : node.params;
 
     hashes.set(
       nodeId,

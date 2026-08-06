@@ -21,6 +21,38 @@ toolchain and builds `wasm-pack` and `cargo-watch` from source. Subsequent runs
 are fast: the cargo registry, the git cache and the build target directory are
 all named volumes and survive `down`.
 
+### What you should see
+
+The application: a toolbar, a stack panel on the left, a viewport in the middle,
+properties and palette on the right, and a status bar reading `effects 67` with
+the GPU adapter beside it. Press **open image**, choose a picture, press **add
+node**, and pick an effect.
+
+If instead you get one full-page screen naming a missing capability, that is
+F-UI-12 and it is working: WebGPU and `SharedArrayBuffer` are hard requirements
+and there is no degraded path. If you get a screen listing registry issues, the
+effect catalogue in this build does not validate and the application refuses to
+start rather than render documents wrongly — see "Troubleshooting".
+
+### The proof page
+
+<http://localhost:5173/proof.html> is a development page, not part of the
+product. It renders the whole catalogue end to end through the real WASM and
+WebGPU paths and states, per effect, how much of the frame moved, what it did to
+mean luminance and standard deviation, and how far it rotated hue.
+
+Read those numbers against the effect's **name**. That is the check no golden
+image makes: a golden pins what an effect does, not that what it does matches
+what it is called, so a levels node that does not move the tone scale and a hue
+control that rotates nothing both pass every golden and both are wrong. The page
+currently reports four effects that are the identity at their declared defaults.
+
+Vite builds `index.html` only, so `proof.html` is served in development and is
+not in `dist/`. Its scheduler is hand-rolled and older than two features the
+real render path has — resolved output extents and per-node instance data — so
+`internal-resolution`, `nn-upscale` and `curves` fail on the page while working
+in the application. That is the page's bug, not the engine's.
+
 ## Pinned toolchains
 
 Every toolchain version lives in `docker/wasm.Dockerfile` and nowhere else:
@@ -51,10 +83,10 @@ that is expensive to diagnose precisely because there is no local change to
 blame. CI reads these same values straight out of the Dockerfile, so local and
 CI cannot drift apart without the drift being a reviewable commit.
 
-To bump: edit the value, run `docker compose up --build`, and confirm the page
-still reaches the smoke test.
+To bump: edit the value, run `docker compose up --build`, and confirm
+`/proof.html` still reaches the end.
 
-What you should see, in order down the page:
+What that page shows, in order:
 
 1. **Capabilities** — four rows. WebGPU and SharedArrayBuffer must both read
    `OK`. If SharedArrayBuffer reads `FAIL`, the dev server is not sending
@@ -71,17 +103,23 @@ What you should see, in order down the page:
    library, each with its swatches.
 7. **Automatic palette extraction** — median cut, Wu and k-means at K=8, each
    with the palette it produced and the extraction report.
-8. **Ordered dithers** — the five ordered dithers through the WebGPU compute
-   path, each captioned with the bytes and milliseconds of its readback.
+8. **The parallel catalogue by family** — every ordered, pattern, preprocess,
+   special and glitch effect through the real WebGPU compute path, at its
+   declared defaults and at the far end of its surprise range, each captioned
+   with what it did to the frame and with the bytes and milliseconds of its
+   readback.
 
-That page is the end-to-end proof: headers, cross-origin isolation, registry
-validation, the WASM boundary, the linear-light colour path, WGSL compilation,
-compute dispatch and the GPU↔CPU boundary, all working. A section that cannot
-run says so in place, with the error that stopped it — a blank gap would read as
+That page is the end-to-end proof of the *engine*: headers, cross-origin
+isolation, registry validation, the WASM boundary, the linear-light colour path,
+WGSL compilation, compute dispatch and the GPU↔CPU boundary. It is not a proof
+of the application — for that, use the application. A section that cannot run
+says so in place, with the error that stopped it; a blank gap would read as
 "nothing to see here", which is the one thing it must never mean.
 
-The browser console carries the same run in full: one line per pass compiled,
-per batch submitted, per boundary crossing with its byte count and duration.
+The browser console carries the same run in full, on both pages: one line per
+pass compiled, per batch submitted, per boundary crossing with its byte count
+and duration, and — in the application — one per node executed with its cache
+hit or miss.
 
 ## Watching
 
@@ -99,8 +137,16 @@ Docker bind mount reliably on macOS and Windows hosts.
 Three suites. Two of them — Rust and web — run inside the container that owns
 their toolchain and need no browser: the Rust core has no web dependencies, and
 everything the web suite covers — the node registry, content hashing, the node
-cache — is deliberately free of `document`, `navigator` and `GPUDevice`. A test
-that starts needing a DOM is a signal that a layer has grown one.
+cache, the document store and history, the image intake, the pure halves of the
+viewport and of every panel — is deliberately free of `document`, `navigator`
+and `GPUDevice`. A test that starts needing a DOM is a signal that a layer has
+grown one.
+
+**What none of the three covers is the assembled application.** Every panel's
+model is unit-tested and every render stage is tested; a click reaching a
+mutation reaching a frame is checked by a person with a browser and by nothing
+else. Before claiming a UI change works, open the page and use it — that is the
+acceptance test, and it is where this round's defects were found.
 
 The third is the **GPU golden set**, and it needs a browser because a WGSL
 compute pass has nowhere else to run. It is documented under "GPU golden images"
@@ -507,6 +553,14 @@ are behind a proxy, it must pass them through unmodified.
 `navigator.gpu` exists but the driver or GPU is blocklisted. On Linux this is
 expected — Linux is not a target platform.
 
+**The page is blank, or the panels are missing.**
+Open the console. Startup logs one line per stage on the `app` channel; a panel
+that failed to register logs a `DuplicateSlotError` naming the id, and a session
+that could not be built replaces the whole page with the reason. A blank page
+with no log at all usually means the module graph failed to load — check the
+Network tab for a 404 on `src/wasm/pkg/dither_wasm.js`, which means the next
+entry applies.
+
 **Core reads `not built`.**
 `web/src/wasm/pkg` is empty. Run `docker compose logs wasm` and look for the
 build error; the `web` service waits on a healthcheck for the `.wasm` file, so
@@ -572,3 +626,11 @@ entrypoint reinstall.
 - **A behavioural claim that is not in a test file is not a claim.** Tests live
   beside what they test as `web/src/**/*.test.ts` and `#[cfg(test)]` modules in
   `core/`, and both suites run without a browser. See "Tests" above.
+- **A UI claim that has not been made in a browser is not a claim either.** The
+  suites cover the models, not the wiring. Open the page and do the thing.
+- **The shell imports no panel.** A panel registers itself into a slot
+  (`app/slots.ts`); the integration is one import from `app/main.tsx`. Nothing
+  central is edited, so two panels written in parallel cannot conflict.
+- **A control that cannot work is left out, not disabled with a tooltip.**
+  Per-node opacity and blend are the standing example: in the schema, refused by
+  both backends, and absent from the stack row.

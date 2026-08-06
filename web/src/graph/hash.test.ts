@@ -195,19 +195,76 @@ describe("contentHash", () => {
     ).toThrowError(GraphError);
   });
 
-  it("refuses a parameter that is not a number, boolean or string", () => {
-    // `ParameterValue` forbids this at compile time. The guard is for values
+  it("refuses a parameter that is not a ParameterValue", () => {
+    // `ParameterValue` forbids these at compile time. The guard is for values
     // that arrive from a `.dork` file, which the type system never saw.
-    const params = { palette: [1, 2, 3] } as unknown as Readonly<
-      Record<string, ParameterValue>
-    >;
-    try {
-      contentHash(baseInput(params));
-      expect.unreachable("an array parameter must not hash");
-    } catch (error) {
-      expect(error).toBeInstanceOf(GraphError);
-      expect((error as GraphError).code).toBe("unsupported-parameter");
+    const rejected: readonly unknown[] = [
+      { r: 1, g: 2, b: 3 }, // a plain object is not any ParameterValue member
+      [1, 2], // a numeric array that is not a triplet
+      [1, 2, 3, 4],
+      [{ x: 0, y: 0 }, 4], // half a curve
+      [{ x: 0 }], // a control point missing a coordinate
+    ];
+    for (const value of rejected) {
+      const params = { bad: value } as unknown as Readonly<
+        Record<string, ParameterValue>
+      >;
+      try {
+        contentHash(baseInput(params));
+        expect.unreachable(`${JSON.stringify(value)} must not hash`);
+      } catch (error) {
+        expect(error).toBeInstanceOf(GraphError);
+        expect((error as GraphError).code).toBe("unsupported-parameter");
+      }
     }
+  });
+
+  // F-CO-07's per-node palette override and F-PP-05's transfer curve are both
+  // `ParameterValue` members and both change the pixels a node emits. Until
+  // they hashed, an effect that declared one could not be cached at all — the
+  // hash threw. These pin that they are covered and that they are covered
+  // *distinctly*.
+  it("covers a colour triplet, component by component", () => {
+    const base = contentHash(baseInput({ tint: [10, 20, 30] }));
+    expect(contentHash(baseInput({ tint: [10, 20, 30] }))).toBe(base);
+    expect(contentHash(baseInput({ tint: [11, 20, 30] }))).not.toBe(base);
+    expect(contentHash(baseInput({ tint: [10, 20, 31] }))).not.toBe(base);
+    // Order is part of the value: swapping two components is another colour.
+    expect(contentHash(baseInput({ tint: [30, 20, 10] }))).not.toBe(base);
+  });
+
+  it("covers a curve's control points, both coordinates and their count", () => {
+    const linear = [
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+    ];
+    const base = contentHash(baseInput({ curve: linear }));
+    expect(contentHash(baseInput({ curve: [...linear] }))).toBe(base);
+    // A moved control point is a different transfer function.
+    expect(
+      contentHash(baseInput({ curve: [{ x: 0, y: 0.1 }, { x: 1, y: 1 }] })),
+    ).not.toBe(base);
+    expect(
+      contentHash(baseInput({ curve: [{ x: 0.1, y: 0 }, { x: 1, y: 1 }] })),
+    ).not.toBe(base);
+    // An added point is too, even one that sits on the line.
+    expect(
+      contentHash(
+        baseInput({ curve: [{ x: 0, y: 0 }, { x: 0.5, y: 0.5 }, { x: 1, y: 1 }] }),
+      ),
+    ).not.toBe(base);
+  });
+
+  it("does not confuse a colour with a curve, or either with its own numbers", () => {
+    // Distinct tags and a length prefix are what make this true. Without them a
+    // three-entry colour and a three-point curve are two lists of numbers.
+    const triplet = contentHash(baseInput({ v: [0, 1, 2] }));
+    const curve = contentHash(
+      baseInput({ v: [{ x: 0, y: 1 }, { x: 2, y: 0 }] }),
+    );
+    expect(triplet).not.toBe(curve);
+    expect(triplet).not.toBe(contentHash(baseInput({ v: 12 })));
+    expect(triplet).not.toBe(contentHash(baseInput({ v: "0,1,2" })));
   });
 
   it("produces the encoding this build committed to", () => {

@@ -27,8 +27,10 @@ export type GraphErrorCode =
   | "cycle"
   /** A parameter value is NaN or infinite, so it cannot be hashed stably. */
   | "non-finite-parameter"
-  /** A parameter value is not a number, boolean or string. */
+  /** A parameter value is not one of the `ParameterValue` members. */
   | "unsupported-parameter"
+  /** Bulk data registered for a node is unusable — no id, no slot, or no bytes. */
+  | "invalid-asset"
   /** The cache was given a budget that cannot hold anything. */
   | "invalid-budget"
   /** One buffer is larger than the entire cache budget. */

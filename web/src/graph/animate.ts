@@ -104,7 +104,7 @@ export async function renderAnimation(
         { asked: frame, got: graph.frame },
       );
     }
-    prepared.push(prepareGraph(graph, source.hash, palette, deps.effects));
+    prepared.push(prepareGraph(graph, source.hash, palette, deps.effects, deps.assets));
   }
 
   const first = expect(prepared[0], "invariant", "no frames were prepared");

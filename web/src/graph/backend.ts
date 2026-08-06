@@ -24,14 +24,35 @@
  */
 
 import type { Palette } from "../types/document";
+import type { Extent } from "../types/gpu";
 import type { FrameBuffer, RenderQuality } from "../types/graph";
 import type { PlannedNode } from "./plan";
 
 /** Fields every backend call needs about the render it belongs to. */
 export interface RenderContext {
-  /** Working resolution. The only thing that differs between preview and export. */
+  /**
+   * The extent this unit **reads** — the shape of the buffer arriving on its
+   * `in` port.
+   *
+   * Not the render's working resolution, and the difference is not academic:
+   * F-PP-01 runs the middle of the stack at a fraction of the ends, so from the
+   * first resampling node onwards these two numbers diverge and a backend that
+   * used the working resolution would allocate and dispatch at the wrong shape.
+   * Where a unit's own passes resize further is the pass's business — see
+   * `PassExtent` in `types/gpu.ts` — and the buffer it returns states the shape
+   * it actually produced.
+   */
   readonly width: number;
   readonly height: number;
+  /**
+   * The render's working resolution: the extent the decoded source enters at.
+   *
+   * Carried separately because it is still a real number a backend may need —
+   * an adaptive-quality decision, a memory readout — and because leaving only
+   * one pair of dimensions in this record is what made the confusion above
+   * possible in the first place.
+   */
+  readonly working: Extent;
   readonly quality: RenderQuality;
   /** Frame index, already used to resolve bound parameters. */
   readonly frame: number;

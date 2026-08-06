@@ -26,6 +26,7 @@ import {
 } from "../types/gpu";
 import { logger } from "../lib/log";
 import type { GpuContext, GpuLimits } from "./device";
+import { passExtentRule } from "./extent";
 import type { BufferCache } from "./resources";
 import { validateUniformLayout } from "./uniforms";
 
@@ -48,6 +49,12 @@ export interface BindingPlan {
   readonly uniforms: number | null;
   readonly scratch: readonly ScratchBinding[];
   readonly tables: readonly TableBinding[];
+  /**
+   * Per-node bulk data slots, in declaration order. Only the binding number and
+   * the slot name are known here — the bytes belong to a node, and the compiler
+   * compiles an effect.
+   */
+  readonly instances: readonly InstanceSlotBinding[];
 }
 
 export interface ScratchBinding {
@@ -60,6 +67,11 @@ export interface ScratchBinding {
 export interface TableBinding {
   readonly binding: number;
   readonly buffer: GPUBuffer;
+}
+
+export interface InstanceSlotBinding {
+  readonly binding: number;
+  readonly slot: string;
 }
 
 export interface CompiledPass {
@@ -83,6 +95,7 @@ interface MutablePlan {
   uniforms: number | null;
   readonly scratch: ScratchBinding[];
   readonly tables: { binding: number; data: Uint8Array }[];
+  readonly instances: InstanceSlotBinding[];
 }
 
 function claim(
@@ -116,10 +129,12 @@ function planBindings(
     uniforms: null,
     scratch: [],
     tables: [],
+    instances: [],
   };
   const entries: GPUBindGroupLayoutEntry[] = [];
   const seen = new Set<number>();
   const slots = new Set<string>();
+  const instanceSlots = new Set<string>();
 
   for (const binding of pass.bindings as readonly PassBinding[]) {
     if (!Number.isInteger(binding.binding) || binding.binding < 0) {
@@ -219,6 +234,26 @@ function planBindings(
         plan.tables.push({ binding: binding.binding, data: binding.data });
         entries.push({ ...base, buffer: { type: "read-only-storage" } });
         break;
+
+      case "instance-data": {
+        if (binding.slot.length === 0) {
+          throw new PassCompileError(
+            `pass ${pass.id}: an instance-data binding has an empty slot name`,
+          );
+        }
+        if (instanceSlots.has(binding.slot)) {
+          throw new PassCompileError(
+            `pass ${pass.id}: instance-data slot "${binding.slot}" is bound twice in one pass`,
+          );
+        }
+        instanceSlots.add(binding.slot);
+        plan.instances.push({ binding: binding.binding, slot: binding.slot });
+        // Read-only: the node builds these bytes on the CPU and the shader
+        // samples them. A pass that wants to write per-node storage wants
+        // `scratch`, which is sized by rule and not carried across frames.
+        entries.push({ ...base, buffer: { type: "read-only-storage" } });
+        break;
+      }
     }
   }
 
@@ -260,12 +295,67 @@ function validateShape(pass: ComputePass, limits: GpuLimits): void {
 }
 
 /**
+ * The three rules a resampling pass has to satisfy.
+ *
+ * They are checked here, once per pass, rather than left to be discovered by
+ * whichever of them breaks first at run time. Each of the three is a wrong
+ * picture rather than an error if it is allowed through.
+ *
+ * - **It must read the colour input.** Both extent rules are relative to the
+ *   extent the pass reads, and a pass with no `input-color` has no such extent
+ *   for the rule to be relative to.
+ * - **It must not be `pointwise`.** `pointwise` means "reads only its own
+ *   pixel" and is the licence the layer gives to alias input and output; a pass
+ *   whose output is a different shape reads a *different* coordinate by
+ *   definition and can never alias.
+ * - **It must not declare scratch.** {@link ScratchSize} is a rule over one
+ *   extent, and a pass with two of them makes "per-pixel" ambiguous — the
+ *   ambiguity is worth forbidding rather than resolving, because no resampler
+ *   in the catalogue needs scratch and a silently wrong size is a buffer
+ *   overrun.
+ */
+function validateExtent(pass: ComputePass, plan: MutablePlan): void {
+  const rule = passExtentRule(pass);
+  // Narrowed on `kind` rather than through `resizes()`, which is a boolean and
+  // therefore tells the compiler nothing about which member this is.
+  if (rule.kind === "same") return;
+
+  if (rule.factorParam.length === 0) {
+    throw new PassCompileError(
+      `pass ${pass.id}: extent rule "${rule.kind}" names no factor parameter`,
+    );
+  }
+  if (plan.inputColor === null) {
+    throw new PassCompileError(
+      `pass ${pass.id}: declares extent rule "${rule.kind}", which is relative to the extent it reads, but binds no input-color`,
+    );
+  }
+  if (pass.access === "pointwise") {
+    throw new PassCompileError(
+      `pass ${pass.id}: declares extent rule "${rule.kind}" and access "pointwise"; a pass that writes a different shape than it reads is not reading its own pixel`,
+    );
+  }
+  if (plan.scratch.length > 0) {
+    throw new PassCompileError(
+      `pass ${pass.id}: declares extent rule "${rule.kind}" and ${plan.scratch.length} scratch binding(s); a scratch size rule is written against one extent and this pass has two`,
+    );
+  }
+}
+
+/**
  * How many workgroups to dispatch for a pass at a given resolution.
  *
  * `per-row` and `per-column` divide by the *whole* workgroup, not by its x
  * extent: a row-parallel pass declares `@workgroup_size(64)` and gets one
  * invocation per row, so the invocation count is what the dispatch has to
  * cover.
+ *
+ * `width` and `height` are the extent the dispatch must **cover**, which is the
+ * extent the pass *writes*. For every pass that declares no {@link PassExtent}
+ * that is also the extent it reads, so nothing about the call changed when
+ * resampling arrived; for a resampler, dispatching over the input would leave
+ * the tail of an upscaled output unwritten and would run invocations off the
+ * end of a downscaled one.
  */
 export function dispatchCounts(
   pass: ComputePass,
@@ -380,6 +470,7 @@ export class PassCompiler {
     validateUniformLayout(pass.id, pass.uniforms);
 
     const { plan, entries } = planBindings(descriptor, pass);
+    validateExtent(pass, plan);
 
     if (pass.uniforms.fields.length > 0 && plan.uniforms === null) {
       throw new PassCompileError(
@@ -449,6 +540,8 @@ export class PassCompiler {
       workgroup: pass.workgroupSize.join("x"),
       bindings: entries.length,
       uniformBytes: pass.uniforms.sizeBytes,
+      extent: passExtentRule(pass).kind,
+      instanceSlots: plan.instances.length,
       ms: Math.round((performance.now() - started) * 100) / 100,
     });
 
@@ -465,6 +558,7 @@ export class PassCompiler {
         uniforms: plan.uniforms,
         scratch: plan.scratch,
         tables,
+        instances: plan.instances,
       },
     };
   }
