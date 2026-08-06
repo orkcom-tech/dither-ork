@@ -32,6 +32,11 @@ Every toolchain version lives in `docker/wasm.Dockerfile` and nowhere else:
 | `wasm-pack` | `ARG WASM_PACK_VERSION` |
 | `cargo-watch` | `ARG CARGO_WATCH_VERSION` |
 
+Node's own pins live in `web/package-lock.json`, which is committed and installed
+with `npm ci`. `vitest` is pinned to an exact version rather than a range in
+`web/package.json`, because a test runner that resolves differently on two
+machines turns "the tests pass here" into a statement about the machine.
+
 The nightly pin is the one that matters. The WASM build needs nightly only for
 `-Z build-std`, and an unpinned `nightly` means a compiler released overnight
 can break the build with nothing in the repository having changed — a failure
@@ -82,6 +87,84 @@ Both services watch by default.
 File watching uses polling, because native filesystem events do not cross the
 Docker bind mount reliably on macOS and Windows hosts.
 
+## Tests
+
+Two suites, one per language, each run inside the container that owns its
+toolchain. Neither needs a browser: the Rust core has no web dependencies, and
+everything the web suite covers — the node registry, content hashing, the node
+cache — is deliberately free of `document`, `navigator` and `GPUDevice`. A test
+that starts needing a DOM is a signal that a layer has grown one.
+
+```bash
+# web — one shot, the form CI runs
+docker compose exec -T web sh -c 'npm test -- --run'
+
+# web — watch mode; re-runs the affected files as you edit
+docker compose exec web npm test
+
+# web — one file
+docker compose exec -T web sh -c 'npm test -- --run src/graph/cache.test.ts'
+
+# web — types, which the test files are checked by too
+docker compose exec -T web sh -c 'npm run typecheck'
+
+# core
+docker compose run --rm --entrypoint bash wasm -c 'cd /app/core && cargo test --all'
+```
+
+`npm test` is `vitest`, so the bare form watches and `-- --run` is the one-shot.
+Configuration is in `web/vitest.config.ts`, kept separate from `vite.config.ts`
+because everything that file sets up is about *serving* the app — cross-origin
+isolation headers, polled watching, the WASM package exclusion — and none of it
+should be able to change how tests run. Vitest prefers `vitest.config.ts` when it
+exists, so the two never merge.
+
+Test files live next to what they test, as `*.test.ts` under `web/src/`. There is
+no `tests/` directory and no separate tsconfig: `npm run typecheck` covers the
+tests at the same strictness as the source, which is why no file uses vitest's
+globals — `describe`, `it` and `expect` are imported.
+
+What the web suite covers today:
+
+| File | What it pins down |
+| --- | --- |
+| `src/registry/registry.test.ts` | Every way the node registry can reject a descriptor, and that one bad descriptor rejects the whole catalogue |
+| `src/registry/params.test.ts` | Defaults, validation and coercion of parameter *values* — what happens to a `.dork` file written by an older build |
+| `src/graph/hash.test.ts` | Content hashing: stable across key order and runs, changes for anything that changes pixels, changes for nothing else |
+| `src/graph/cache.test.ts` | The byte budget, LRU and transient eviction order, pinning, and the ownership rule that the cache frees each buffer once |
+| `src/graph/sha256.test.ts` | The published SHA-256 vectors, and both sides of every padding boundary |
+
+`registry.test.ts` ends with a coverage assertion built on a
+`Record<RegistryIssueCode, true>`: adding a rejection code to the validator
+without adding a test for it stops the file type-checking. Those codes are the
+guard rails the whole effect catalogue is written against, so an untested one is
+a rail that might not be there.
+
+> **Not yet wired into CI.** The `web` job in `.github/workflows/ci.yml` runs
+> `npm run typecheck` and `npm run build`; it needs an `npm test -- --run` step
+> between them. Until that lands, the web suite only runs where someone runs it.
+
+### Adding a dependency to a running stack
+
+`node_modules` is a named volume and the `web` entrypoint reinstalls it only at
+container start, when the lockfile hash stops matching the one recorded inside
+the volume. Restarting compose to pick up a new dependency is disruptive if
+anything else is mid-run, so do it in place instead:
+
+```bash
+# 1. edit web/package.json on the host
+# 2. resolve it inside the running container — this rewrites the bind-mounted
+#    lockfile, so the host copy is updated too
+docker compose exec -T web sh -c 'npm install --no-audit --no-fund'
+# 3. record the new hash so the entrypoint does not reinstall on next start
+docker compose exec -T web sh -c \
+  'sha256sum /app/web/package-lock.json | cut -d" " -f1 > /app/web/node_modules/.dither-ork-lock-hash'
+```
+
+Step 3 is bookkeeping, not correctness: skipping it costs one `npm ci` the next
+time the container starts. Skipping step 2 and editing the lockfile by hand does
+not work at all — the volume would still hold the old tree.
+
 ## Useful commands
 
 ```bash
@@ -89,6 +172,7 @@ docker compose up wasm              # build the core only, then watch
 docker compose up --build           # after changing a Dockerfile
 docker compose run --rm wasm cargo test --manifest-path /app/core/Cargo.toml
 docker compose run --rm web npm run typecheck
+docker compose exec -T web sh -c 'npm test -- --run'
 docker compose down -v              # also drops the cargo and node_modules caches
 docker compose logs -f wasm         # watch the build
 ```
@@ -121,6 +205,9 @@ rustup run nightly-2026-08-01 wasm-pack build core/crates/dither-wasm \
 ```bash
 # web — `ci`, not `install`, so what gets installed is the committed lockfile
 cd web && npm ci && npm run dev
+
+# web tests, same runner and same pinned version as in the container
+cd web && npm test -- --run
 ```
 
 `--out-dir` is resolved relative to the **crate** directory, not the working
@@ -167,7 +254,14 @@ named volume while it is empty, so a first-run install would otherwise stick
 forever. The `web` entrypoint hashes `package-lock.json` against the hash
 recorded at install time and reruns `npm ci` when they differ — check the `[web]`
 lines at the top of `docker compose logs web` to see which branch it took. If it
-reports "up to date" when it should not, the lockfile was not regenerated.
+reports "up to date" when it should not, the lockfile was not regenerated. Note
+that the check only runs at container *start*; to add a dependency to a stack
+that is already up, see "Adding a dependency to a running stack" above.
+
+**`vitest: not found`, or a test run that cannot resolve an import.**
+The `node_modules` volume predates the dependency. Run the three steps in
+"Adding a dependency to a running stack", or restart the stack and let the
+entrypoint reinstall.
 
 ## Conventions
 
@@ -181,3 +275,6 @@ reports "up to date" when it should not, the lockfile was not regenerated.
   explicit seed from the document. `Math.random()` in a render path is a defect.
 - **Adding an effect** means adding a registry descriptor with its surprise
   metadata. Registry validation fails the build without it.
+- **A behavioural claim that is not in a test file is not a claim.** Tests live
+  beside what they test as `web/src/**/*.test.ts` and `#[cfg(test)]` modules in
+  `core/`, and both suites run without a browser. See "Tests" above.
