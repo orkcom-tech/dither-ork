@@ -33,7 +33,11 @@ pub struct Kernel {
 
 macro_rules! tap {
     ($dx:expr, $dy:expr, $w:expr) => {
-        Tap { dx: $dx, dy: $dy, weight: $w }
+        Tap {
+            dx: $dx,
+            dy: $dy,
+            weight: $w,
+        }
     };
 }
 
@@ -120,7 +124,11 @@ pub fn dither(
     kernel: &Kernel,
     opts: Options,
 ) -> DitherResult {
-    assert_eq!(pixels.len(), width * height, "buffer does not match dimensions");
+    assert_eq!(
+        pixels.len(),
+        width * height,
+        "buffer does not match dimensions"
+    );
 
     let mut work: Vec<Rgba> = pixels.to_vec();
     let mut out = vec![Rgba::new(0.0, 0.0, 0.0, 0.0); pixels.len()];
@@ -169,7 +177,10 @@ pub fn dither(
         }
     }
 
-    DitherResult { pixels: out, indices }
+    DitherResult {
+        pixels: out,
+        indices,
+    }
 }
 
 #[cfg(test)]
@@ -207,7 +218,10 @@ mod tests {
         let (w, h) = (8usize, 8usize);
         let src = vec![Rgba::new(0.9, 0.9, 0.9, 1.0); w * h];
         let pal = Palette::from_srgb_rgb(builtin::MONO);
-        let opts = Options { strength: 0.0, ..Options::default() };
+        let opts = Options {
+            strength: 0.0,
+            ..Options::default()
+        };
         let res = dither(&src, w, h, &pal, &FLOYD_STEINBERG, opts);
         assert!(res.indices.iter().all(|&i| i == 1));
     }

@@ -1,0 +1,20 @@
+# Cloudflare Pages response headers. Vite copies public/ into dist/, so this
+# file ships at the site root, which is where Pages reads it from.
+#
+# The first two are not optional and not a hardening measure: the WASM thread
+# pool needs SharedArrayBuffer, browsers only expose SharedArrayBuffer to a
+# cross-origin-isolated document, and a document is cross-origin isolated only
+# with exactly this pair. Without them the startup capability check (F-UI-12)
+# reports SharedArrayBuffer as FAIL and the app refuses to start.
+#
+# This is also why GitHub Pages cannot host this application — it serves no
+# custom headers. See docs/ARCHITECTURE.md, "Hosting".
+#
+# COEP require-corp additionally blocks any cross-origin subresource that does
+# not send CORP. The app loads none — no CDN fonts, no third-party scripts, no
+# external images — and that has to stay true.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer

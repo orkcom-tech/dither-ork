@@ -1,0 +1,150 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Toolchain versions are not repeated here. They are read out of
+# docker/wasm.Dockerfile, which is the single place they are pinned, so CI and
+# local development cannot drift apart without the drift being a code change.
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  core:
+    name: core (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve pinned stable toolchain
+        id: pin
+        run: |
+          version=$(grep -oP '^FROM rust:\K[0-9]+\.[0-9]+' docker/wasm.Dockerfile)
+          echo "stable=${version}" >> "$GITHUB_OUTPUT"
+          echo "pinned stable: ${version}"
+
+      - name: Install toolchain
+        run: |
+          rustup toolchain install "${{ steps.pin.outputs.stable }}" \
+            --profile minimal --component rustfmt,clippy
+          rustup default "${{ steps.pin.outputs.stable }}"
+          rustc --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            core/target
+          key: core-${{ steps.pin.outputs.stable }}-${{ hashFiles('core/Cargo.lock') }}
+          restore-keys: core-${{ steps.pin.outputs.stable }}-
+
+      - run: cargo fmt --manifest-path core/Cargo.toml --all --check
+      - run: cargo clippy --manifest-path core/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path core/Cargo.toml --all
+
+  wasm:
+    name: wasm build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve pinned versions
+        id: pin
+        run: |
+          nightly=$(grep -oP '^ARG RUST_NIGHTLY=\K.+' docker/wasm.Dockerfile)
+          wasm_pack=$(grep -oP '^ARG WASM_PACK_VERSION=\K.+' docker/wasm.Dockerfile)
+          echo "nightly=${nightly}" >> "$GITHUB_OUTPUT"
+          echo "wasm_pack=${wasm_pack}" >> "$GITHUB_OUTPUT"
+          echo "pinned nightly: ${nightly}, wasm-pack: ${wasm_pack}"
+
+      - name: Install toolchain
+        run: |
+          rustup toolchain install "${{ steps.pin.outputs.nightly }}" \
+            --profile minimal --component rust-src
+          rustup target add wasm32-unknown-unknown \
+            --toolchain "${{ steps.pin.outputs.nightly }}"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            core/target
+          key: wasm-${{ steps.pin.outputs.nightly }}-${{ hashFiles('core/Cargo.lock') }}
+          restore-keys: wasm-${{ steps.pin.outputs.nightly }}-
+
+      - name: Install wasm-pack
+        run: |
+          if [ "$(wasm-pack --version 2>/dev/null | awk '{print $2}')" = "${{ steps.pin.outputs.wasm_pack }}" ]; then
+            echo "wasm-pack ${{ steps.pin.outputs.wasm_pack }} already present"
+          else
+            cargo install wasm-pack --locked --version "${{ steps.pin.outputs.wasm_pack }}"
+          fi
+
+      # Same flags as docker/build-wasm.sh. The atomics and bulk-memory target
+      # features plus -Z build-std are what wasm-bindgen-rayon needs; building
+      # them here is what proves the pinned nightly still works.
+      - name: Build
+        env:
+          RUSTFLAGS: -C target-feature=+atomics,+bulk-memory,+mutable-globals
+        run: |
+          rustup run "${{ steps.pin.outputs.nightly }}" wasm-pack build \
+            core/crates/dither-wasm \
+            --target web \
+            --out-dir ../../../web/src/wasm/pkg \
+            --out-name dither_wasm \
+            -- -Z build-std=panic_abort,std
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm-pkg
+          path: web/src/wasm/pkg
+          if-no-files-found: error
+
+  web:
+    name: web (typecheck, build)
+    runs-on: ubuntu-latest
+    # The web build resolves the generated WASM package, so it cannot run before
+    # that package exists. The ambient declaration in src/types keeps a clean
+    # checkout typechecking; it does not make the bundle resolvable.
+    needs: wasm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm-pkg
+          path: web/src/wasm/pkg
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+
+      - run: npm run typecheck
+        working-directory: web
+
+      - run: npm run build
+        working-directory: web
+
+      # The two headers are a hard requirement, and _headers is a plain text
+      # file with no schema — a typo in it fails silently in production, where
+      # the symptom is the capability check rejecting the app. Assert it here.
+      - name: Verify cross-origin isolation headers ship
+        run: |
+          headers=web/dist/_headers
+          test -f "$headers" || { echo "::error::$headers missing from the build output"; exit 1; }
+          grep -q 'Cross-Origin-Opener-Policy: same-origin' "$headers" \
+            || { echo "::error::COOP header missing or malformed"; exit 1; }
+          grep -q 'Cross-Origin-Embedder-Policy: require-corp' "$headers" \
+            || { echo "::error::COEP header missing or malformed"; exit 1; }
+          echo "both headers present in $headers"

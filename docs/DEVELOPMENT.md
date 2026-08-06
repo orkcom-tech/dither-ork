@@ -21,6 +21,27 @@ toolchain and builds `wasm-pack` and `cargo-watch` from source. Subsequent runs
 are fast: the cargo registry, the git cache and the build target directory are
 all named volumes and survive `down`.
 
+## Pinned toolchains
+
+Every toolchain version lives in `docker/wasm.Dockerfile` and nowhere else:
+
+| Pin | Where |
+| --- | --- |
+| Rust stable | the `FROM rust:<version>-bookworm` line |
+| Rust nightly | `ARG RUST_NIGHTLY` |
+| `wasm-pack` | `ARG WASM_PACK_VERSION` |
+| `cargo-watch` | `ARG CARGO_WATCH_VERSION` |
+
+The nightly pin is the one that matters. The WASM build needs nightly only for
+`-Z build-std`, and an unpinned `nightly` means a compiler released overnight
+can break the build with nothing in the repository having changed — a failure
+that is expensive to diagnose precisely because there is no local change to
+blame. CI reads these same values straight out of the Dockerfile, so local and
+CI cannot drift apart without the drift being a reviewable commit.
+
+To bump: edit the value, run `docker compose up --build`, and confirm the page
+still reaches the smoke test.
+
 What you should see:
 
 1. **Capabilities** — four rows. WebGPU and SharedArrayBuffer must both read
@@ -57,20 +78,42 @@ docker compose logs -f wasm         # watch the build
 
 ## Without Docker
 
-```bash
-# core
-rustup target add wasm32-unknown-unknown
-cargo install wasm-pack
-cd core && cargo test
-wasm-pack build crates/dither-wasm --target web \
-  --out-dir ../../web/src/wasm/pkg --out-name dither_wasm
+Supported, but you own the version pins yourself — read them out of
+`docker/wasm.Dockerfile` and match them, or expect to debug a difference the
+container does not have.
 
-# web
-cd web && npm install && npm run dev
+Run these from the repository root.
+
+```bash
+# core — tests run on stable, on the host target
+cargo test --manifest-path core/Cargo.toml --all
+
+# wasm — nightly, because of -Z build-std
+rustup toolchain install nightly-2026-08-01 --profile minimal --component rust-src
+rustup target add wasm32-unknown-unknown --toolchain nightly-2026-08-01
+cargo install wasm-pack --locked --version 0.15.0
 ```
 
-`cargo test` in `core/` runs on the host target, not WASM — the core has no web
+```bash
+RUSTFLAGS='-C target-feature=+atomics,+bulk-memory,+mutable-globals' \
+rustup run nightly-2026-08-01 wasm-pack build core/crates/dither-wasm \
+  --target web --out-dir ../../../web/src/wasm/pkg --out-name dither_wasm \
+  -- -Z build-std=panic_abort,std
+```
+
+```bash
+# web — `ci`, not `install`, so what gets installed is the committed lockfile
+cd web && npm ci && npm run dev
+```
+
+`--out-dir` is resolved relative to the **crate** directory, not the working
+directory, which is why it climbs three levels and not two.
+
+`cargo test` runs on the host target, not WASM — the core has no web
 dependencies, which is the point of that boundary.
+
+`npm run dev` outside Docker still sends COOP/COEP; those come from
+`web/vite.config.ts`, not from the container.
 
 ## Threads
 
@@ -100,6 +143,14 @@ this usually means the Rust build failed.
 
 **Rust rebuilds everything every time.**
 The `cargo-target` volume was dropped, most likely by `docker compose down -v`.
+
+**A dependency was added to `package.json` but the web service cannot find it.**
+It should not happen: `node_modules` is a named volume, and Docker only seeds a
+named volume while it is empty, so a first-run install would otherwise stick
+forever. The `web` entrypoint hashes `package-lock.json` against the hash
+recorded at install time and reruns `npm ci` when they differ — check the `[web]`
+lines at the top of `docker compose logs web` to see which branch it took. If it
+reports "up to date" when it should not, the lockfile was not regenerated.
 
 ## Conventions
 

@@ -74,6 +74,14 @@ impl DitherOutput {
 /// Decodes to linear light, dithers, and re-encodes. Returns an error rather
 /// than panicking on bad input, so a malformed call surfaces as a rejected
 /// promise instead of an aborted WASM instance.
+// Clippy is right, and this allow is a deferral rather than a disagreement:
+// eight positional parameters is already past the point of readability, and
+// F-ED-CTL still owes threshold jitter, per-channel-or-luma diffusion and an
+// error-clamp control, which would make it eleven. The fix is an options object
+// crossing the boundary, and it belongs in the same change that adds those
+// controls — doing it here would rewrite docs/API.md and the ambient
+// declaration for no behavioural gain. Remove this allow with that change.
+#[allow(clippy::too_many_arguments)]
 #[wasm_bindgen]
 pub fn dither_image(
     rgba: &[u8],
@@ -96,7 +104,7 @@ pub fn dither_image(
             w * h * 4
         )));
     }
-    if palette_rgb.is_empty() || palette_rgb.len() % 3 != 0 {
+    if palette_rgb.is_empty() || !palette_rgb.len().is_multiple_of(3) {
         return Err(JsError::new(
             "palette_rgb must be a non-empty multiple of 3 bytes",
         ));

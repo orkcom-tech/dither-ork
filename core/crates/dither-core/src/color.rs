@@ -40,7 +40,10 @@ pub fn linear_to_srgb(c: f32) -> f32 {
 
 /// Decode 8-bit sRGB RGBA bytes into a linear-light buffer.
 pub fn decode_srgb(bytes: &[u8]) -> Vec<Rgba> {
-    assert!(bytes.len() % 4 == 0, "RGBA buffer length must be a multiple of 4");
+    assert!(
+        bytes.len().is_multiple_of(4),
+        "RGBA buffer length must be a multiple of 4"
+    );
     bytes
         .chunks_exact(4)
         .map(|p| {

@@ -27,7 +27,10 @@ impl Palette {
 
     /// Build from packed 8-bit sRGB triplets (`[r, g, b, r, g, b, ...]`).
     pub fn from_srgb_rgb(bytes: &[u8]) -> Self {
-        assert!(bytes.len() % 3 == 0, "palette bytes must be a multiple of 3");
+        assert!(
+            bytes.len().is_multiple_of(3),
+            "palette bytes must be a multiple of 3"
+        );
         let colors = bytes
             .chunks_exact(3)
             .map(|c| {
