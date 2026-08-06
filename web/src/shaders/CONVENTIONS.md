@@ -1,9 +1,8 @@
 # WGSL conventions
 
-Roughly 48 of the 63 effects run as WebGPU compute passes. Five of them exist so
-far; the rest are added against the rules below. They are rules rather than
-suggestions because the alternative is 48 shaders that each need to be read
-before they can be bound.
+44 of the catalogue's 58 effects run as WebGPU compute passes, and all 44 exist.
+They are rules rather than suggestions because the alternative is 44 shaders
+that each need to be read before they can be bound.
 
 The contract these implement is `web/src/types/gpu.ts`. Read it first.
 
@@ -45,6 +44,27 @@ are fenced so the copies can be diffed mechanically:
 If the duplication ever becomes the thing that breaks, the fix is a build-time
 include step that rewrites line numbers, not runtime string assembly — and it is
 a decision to take deliberately rather than by drift.
+
+The blocks that exist, and what each one is:
+
+| Fence name | Shaders | Contents |
+| --- | --- | --- |
+| `colour and palette search` | 12 | OKLab/sRGB metric, nearest-entry search over `PaletteData` |
+| `clamped texel fetch` | 5 | `load_clamped`; clamp-to-edge, because out-of-bounds `textureLoad` returns zero and an unclamped kernel darkens a frame one radius wide |
+| `linear -> sRGB transfer` and friends | 10 | the transfer function, both directions |
+| `perceptual lightness` / `Rec.709 luminance` | 8 | `rec709_luminance`, `perceptual_lightness` (cube root), `lightness_to_linear_grey` (its exact inverse) |
+| `gaussian kernel geometry` | 3 | tap count, sigma = radius/3, weight; the truncation renormalises so a flat field survives at any radius |
+| `halftone dot areas` | 2 | closed-form dot area per shape; what makes a screen reproduce tone with no per-shape correction curve |
+| `edge handling` | 4 | clamp / wrap / mirror for the displacement effects |
+| `bilinear fetch` | 2 | fractional sampling written out, since there is no sampler on this path |
+| `seeded hash` / `seeded hashing` / `integer hash` | 10 | a PCG-style integer hash plus `hash2`/`hash3`/`hash01` |
+
+**The hash is the one that drifted.** Those three fence names hold three
+different implementations — each self-consistent within its own group, plus a
+fourth unfenced copy in `datamosh-smear.wgsl`. Every one of them is a
+deterministic function of pixel and seed, so no determinism rule is broken and
+no picture is wrong; but it is one thing written four ways and a new shader
+should not add a fifth. Copy the five-shader `seeded hash` block.
 
 ## Bind group 0, fixed role numbering
 
@@ -121,7 +141,47 @@ Builtins the compiler supplies — `width`, `height`, `normalized-time`, `seed`,
 `palette-size` — are declared in the layout like any other field. **Animated
 parameters do not read `normalized-time`**: a bound parameter arrives as the
 concrete number the modulator produced, so an animating shader reads the same
-field it always did.
+field it always did. No shader in the catalogue declares `normalized-time`, and
+that is the rule working rather than an omission.
+
+`seed` is likewise unused as a builtin: the eleven stochastic effects each
+declare an explicit `seed` **parameter** instead, which is what
+`web/src/types/registry.ts` says the glitch family should do — the seed is a
+control the user turns, not ambient state. The builtin stays for a node that
+needs the document seed without exposing one.
+
+## Enums cross as ordinals
+
+A shader receives an enum parameter as its **position in the descriptor's
+`values` list**, restated at the top of the WGSL as a `const` block:
+
+```wgsl
+const SHAPE_ROUND   : u32 = 0u;
+const SHAPE_SQUARE  : u32 = 1u;
+```
+
+Both sides therefore state the same fact, and both state the consequence: the
+list is **append-only**. Inserting a value in the middle renumbers every
+document already saved, and each of them then renders a different picture.
+
+A `switch` over the ordinals still needs a `default` arm because WGSL requires
+one. Write it as the last real case rather than as a catch-all: the packer
+refuses anything that is not a declared value, so no other ordinal can arrive,
+and a `default` that returns a neutral value would be a fallback branch for a
+condition that cannot occur.
+
+## Angles are in turns
+
+Anything a modulator might bind to — tile rotation, emboss light angle, drag
+angle, spiral rotation — is expressed in **turns**, not degrees or radians. A
+parameter ramping 0 → 1 then lands exactly where it started, so an animated
+rotation closes the loop by construction and the UI never has to know that 360
+is special.
+
+The halftone family's **screen angles are the exception and are in degrees**,
+because 15 / 75 / 0 / 45 is the requirement's wording and a printer's, and
+rewriting it as fractions of a turn would make the one number anybody checks
+unrecognisable.
 
 ## Dispatch and bounds
 

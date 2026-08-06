@@ -187,6 +187,36 @@
     <div id="ordered-status" class="status">not run</div>
     <div class="row" id="ordered"></div>
 
+    <h2>Pattern dithers — WebGPU compute path</h2>
+    <p class="note">
+      F-PT-01…08. Each one quantizes against the palette and emits the index
+      map, exactly as the ordered dithers do; what differs is the screen the
+      threshold comes from. Every figure states how much of the frame the node
+      actually changed, because a pattern dither that renders and changes
+      nothing is the failure this page exists to catch.
+    </p>
+    <div id="pattern-status" class="status">not run</div>
+    <div class="row" id="pattern"></div>
+
+    <h2>Special effects — WebGPU compute path</h2>
+    <p class="note">
+      F-SP-01…16. Preprocessing and post-processing nodes at their declared
+      defaults. Two of them (outline, dilate/erode) read the index map, so the
+      page runs a Bayer 4×4 quantizer immediately upstream of those and shows
+      the pair; anything else runs alone on the source.
+    </p>
+    <div id="special-status" class="status">not run</div>
+    <div class="row" id="special"></div>
+
+    <h2>Glitch effects — WebGPU compute path</h2>
+    <p class="note">
+      F-GL-01…17. Every one takes an explicit seed and is reproducible; nothing
+      here reads a clock. Defaults throughout, so what you see is what the
+      properties panel opens with.
+    </p>
+    <div id="glitch-status" class="status">not run</div>
+    <div class="row" id="glitch"></div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

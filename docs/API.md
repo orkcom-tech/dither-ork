@@ -282,15 +282,59 @@ values; a colour samples in OKLab, because sampling sRGB channels independently
 clumps around muddy mid-greys. Read the file for the full set — it is the
 authority and this section does not duplicate it.
 
+`execution` has exactly two values and needs no third; see
+docs/ARCHITECTURE.md, "The constraint everything follows from", for why, and for
+what F-GL-06 would cost.
+
+### What is registered
+
+58 effects, all validated:
+
+| Family | Count | Execution | Slot |
+| --- | --- | --- | --- |
+| `error-diffusion` | 14 | `wasm` | dither |
+| `ordered` | 5 | `gpu` | dither |
+| `pattern` | 8 | `gpu` | dither |
+| `special` | 15 | `gpu` | 12 preprocess, 3 postprocess |
+| `glitch` | 16 | `gpu` | postprocess |
+| `preprocess` | 0 | — | — |
+
+Totals: 14 `wasm`, 44 `gpu`; 12 preprocess, 27 dither, 19 postprocess. The
+`preprocess` **family** is empty because the F-PP requirements (internal
+resolution, levels, HSL, curves, seeded noise) have no descriptors yet — the
+preprocess **slot** is full of `special` and nothing else.
+
+Three of the spec's 61 named effects are deliberately absent: **F-ED-14**
+Ostromoukhov (its 256-row coefficient table has no closed form and a remembered
+one renders and is wrong), **F-GL-06** JPEG glitch (needs an encoder, and
+therefore an execution kind that does not exist), **F-SP-14** nearest-neighbour
+upscale (a resampling stage, not a pass — it belongs with F-PP-01 and F-EX-12).
+
+`web/src/registry/catalogue.test.ts` asserts every number in that table, runs
+the startup validator over the shipped descriptors, and checks that every `gpu`
+effect has a shader named after its id and that no shader is orphaned. An effect
+that stops being discovered fails the build instead of quietly leaving a gap in
+the stack panel.
+
 ### Adding an effect is adding one file
 
 One effect is one module under `web/src/effects/` whose name ends in
 `.effect.ts` and whose default export is a descriptor. `registry/discovery.ts`
 collects them with `import.meta.glob`, eagerly, at startup. Nothing central is
-edited, so two effects written in parallel cannot conflict — which matters when
-the catalogue is 63 independent contributions. Helper modules may sit in the
-same directory; the `.effect.ts` suffix is what distinguishes a descriptor from
-a helper.
+edited, so two effects written in parallel cannot conflict — which is not
+hypothetical: the catalogue arrived as nine parallel contributions and none of
+them touched a shared file.
+
+A parallel effect's module carries three more things beside the descriptor: the
+uniform layout, the `ComputePass` list, and the `GpuEffect` that wraps them. They
+live together because the parameter keys, the byte offsets and the shader's
+`struct Params` are the same fact written three times, and splitting them puts a
+rename one file away from a wrong picture with no error.
+
+Helper modules may sit in the same directory; the `.effect.ts` suffix is what
+distinguishes a descriptor from a helper. `effects/error-diffusion.ts` is one —
+the shared F-ED-CTL control set and the factory that stamps the 14 kernel
+descriptors from it.
 
 The glob matching nothing is itself a failure, because a renamed directory
 produces exactly that and would otherwise present as an app with no effects.
@@ -431,6 +475,47 @@ Working surfaces are `rgba16float` for colour and `r32uint` for the index map.
 Input and output are always different textures: `PassAccess` permits a
 `pointwise` pass to alias them but WebGPU does not, so `SurfaceChain`
 ping-pongs.
+
+### Getting from an effect id to its passes — **not built**
+
+There is no such lookup. The registry globs *descriptors*, and a descriptor says
+an effect runs on the GPU without saying where its passes are; each effect module
+exports its `GpuEffect` under a name of its own (`INVERT_GPU`,
+`blurGpuEffect`, `halftoneEffect()` — constants where the passes are static,
+factories where the effect builds a table first). `web/src/main.ts` therefore
+imports all thirty-nine by name.
+
+That is a real gap and it is stated here rather than papered over, because it is
+the first thing a document loader needs and because the obvious fix is not free:
+a conventional export picked up by the same glob would work for thirty-nine of
+the forty-four, and not for the five ordered dithers, whose passes cannot be
+built until the Rust core has handed over a threshold tile. Resolving that needs
+a decision about how an effect asks for build-time data, not another export.
+
+### Conventions the shaders settled on
+
+`web/src/shaders/CONVENTIONS.md` is the authority. Three things it did not
+predict, established while the catalogue was written and now in force:
+
+- **Angles are in turns, never degrees**, wherever a modulator might bind to
+  one — tile rotation, emboss light angle, drag angle, spiral rotation. A
+  parameter ramping 0 → 1 then closes the loop by construction and the UI never
+  has to know that 360 is special. Screen angles in the halftone family are the
+  exception and are in degrees, because 15/75/0/45 is the requirement's own
+  wording and a printer's.
+- **An enum reaches a shader as its ordinal**, restated as a `const` block at
+  the top of the WGSL against the descriptor's `values` order. Both sides say so,
+  and both say the list is append-only: inserting a value in the middle
+  renumbers every saved document.
+- **Shared blocks are fenced and duplicated**, per CONVENTIONS.md — 34 of the 44
+  shaders carry at least one. The palette search, the sRGB transfer, the clamped
+  texel fetch, the perceptual-lightness pair, the gaussian kernel geometry and
+  the halftone dot areas are each identical everywhere they appear. The seeded
+  hash is the one that is **not**: three variants exist under three fence names
+  (`seeded hash`, `seeded hashing`, `integer hash`), each self-consistent, plus
+  one unfenced copy in `datamosh-smear.wgsl`. All four are deterministic
+  functions of pixel and seed, so nothing is unseeded — but they are one thing
+  written four ways, and they should be one.
 
 ## 5. Render graph
 

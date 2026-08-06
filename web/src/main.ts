@@ -36,6 +36,7 @@ import {
   ORDERED_DITHER_UNIFORMS,
   ORDERED_PARAM_TYPES,
   orderedDitherDefaults,
+  orderedDitherSpec,
   packUniforms,
   planExecution,
   readColorSurface,
@@ -44,17 +45,82 @@ import {
   thresholdMatrix,
   uploadPalette,
   writeColorSurface,
+  type ScheduleUnit,
 } from "./gpu";
-import type { Palette } from "./types/document";
-import type { ScheduledPass } from "./types/gpu";
+import type { Palette, ParameterValue } from "./types/document";
+import type { GpuEffect, ScheduledPass } from "./types/gpu";
 import type { CpuColorSurface } from "./types/graph";
+import type { EffectDescriptor, EffectFamily, ParamDescriptor } from "./types/registry";
+
+// --- the parallel catalogue ---------------------------------------------
+//
+// Thirty-nine imports, named one by one, because there is no way to ask for
+// them collectively: `registry/discovery.ts` globs the *descriptors*, and a
+// descriptor says an effect runs on the GPU without saying where its passes
+// are. Nothing in the repository resolves an effect id to its `GpuEffect` — the
+// renderer does not need it yet because there is no document loader, and this
+// page is the first caller that wants all of them at once. Listing them here
+// keeps that gap visible and in one place rather than inventing a convention
+// the effect files were not written against. See docs/API.md section 4.
+
+import { BIT_CRUSH_GPU } from "./effects/bit-crush.effect";
+import { BLOCK_SHUFFLE_GPU } from "./effects/block-shuffle.effect";
+import { DILATE_ERODE_GPU } from "./effects/dilate-erode.effect";
+import { GRADIENT_MAP_GPU } from "./effects/gradient-map.effect";
+import { GRAIN_GPU } from "./effects/grain.effect";
+import { INVERT_GPU } from "./effects/invert.effect";
+import { LENS_DISTORTION_GPU } from "./effects/lens-distortion.effect";
+import { LIGHT_LEAK_GPU } from "./effects/light-leak.effect";
+import { OUTLINE_GPU } from "./effects/outline.effect";
+import { POSTERIZE_GPU } from "./effects/posterize.effect";
+import { SLICE_REPEAT_GPU } from "./effects/slice-repeat.effect";
+import { THRESHOLD_GPU } from "./effects/threshold.effect";
+import { VIGNETTE_GPU } from "./effects/vignette.effect";
+import { WAVE_WARP_GPU } from "./effects/wave-warp.effect";
+import { blurGpuEffect } from "./effects/blur.effect";
+import { channelSwapEffect } from "./effects/channel-swap.effect";
+import { chromaticAberrationGpuEffect } from "./effects/chromatic-aberration.effect";
+import { clusteredDotGpuEffect } from "./effects/clustered-dot.effect";
+import { cmykHalftoneEffect } from "./effects/cmyk-halftone.effect";
+import { columnDisplacementGpuEffect } from "./effects/column-displacement.effect";
+import { concentricRingsGpuEffect } from "./effects/concentric-rings.effect";
+import { crossHatchEffect } from "./effects/cross-hatch.effect";
+import { crtMaskEffect } from "./effects/crt-mask.effect";
+import { datamoshSmearEffect } from "./effects/datamosh-smear.effect";
+import { edgeDetectGpuEffect } from "./effects/edge-detect.effect";
+import { embossGpuEffect } from "./effects/emboss.effect";
+import { epsilonGlowGpuEffect } from "./effects/epsilon-glow.effect";
+import { ghostEchoEffect } from "./effects/ghost-echo.effect";
+import { glyphTileGpuEffect } from "./effects/glyph-tile.effect";
+import { halftoneEffect } from "./effects/halftone.effect";
+import { interlaceTearEffect } from "./effects/interlace-tear.effect";
+import { lineScreenEffect } from "./effects/line-screen.effect";
+import { noiseBurstEffect } from "./effects/noise-burst.effect";
+import { pixelSortGpuEffect } from "./effects/pixel-sort.effect";
+import { rgbSplitGpuEffect } from "./effects/rgb-split.effect";
+import { rowDisplacementGpuEffect } from "./effects/row-displacement.effect";
+import { scanlinesEffect } from "./effects/scanlines.effect";
+import { sharpenGpuEffect } from "./effects/sharpen.effect";
+import { spiralGpuEffect } from "./effects/spiral.effect";
 
 const log = logger("app", correlationId());
 
-/** Working size of the demo source. 160x100 upscaled 2x lands on 320x200. */
+/** Working size of the demo source. 160x124 upscaled 2x lands on 320x248. */
 const SOURCE_WIDTH = 160;
-const SOURCE_HEIGHT = 100;
+const SOURCE_HEIGHT = 124;
 const SCALE = 2;
+
+/**
+ * Height of the detail strip in the generated source.
+ *
+ * The strip is not decoration. Without it the source is smooth everywhere, and
+ * a smooth source cannot tell a working blur from a pass-through: both come back
+ * within a fraction of a level of the input, and so do sharpen, edge detect,
+ * emboss and chromatic aberration, because there is no high-frequency content
+ * for any of them to act on. Twenty-four rows of combs, checkerboards and one
+ * hard step give every neighbourhood effect something to prove itself against.
+ */
+const DETAIL_ROWS = 24;
 
 /**
  * Seed for the blue-noise tile.
@@ -195,17 +261,24 @@ function swatchStrip(colors: readonly number[]): HTMLElement {
 /**
  * The generated source.
  *
- * A hue sweep across x over a lightness ramp down y for the top two thirds, and
- * a neutral wedge with a slow band below it. One frame that exercises both
- * things a dither has to get right: choosing between palette entries of
- * different hue, and reproducing a flat tone that no entry can reach.
+ * Three registers, top to bottom: a hue sweep across x over a lightness ramp
+ * down y, a resolution chart of combs and checkerboards, and a neutral wedge
+ * with a slow band. One frame that exercises everything the catalogue has to
+ * get right — choosing between palette entries of different hue, reproducing a
+ * flat tone no entry can reach, and *responding to an edge*.
+ *
+ * The middle register is the one that earns its place on this page. A gradient
+ * is a poor witness for a neighbourhood effect: the derivative is near zero
+ * everywhere, so a blur, a sharpen, an edge detect and a no-op all return the
+ * input to within a fraction of a level and the page cannot tell them apart.
  *
  * Written in sRGB because that is what an image file would arrive as; the core
  * removes the transfer on the way in.
  */
 function sourceImage(width: number, height: number): ImageData {
   const data = new Uint8ClampedArray(width * height * 4);
-  const split = Math.round(height * (2 / 3));
+  const detailTop = Math.round((height - DETAIL_ROWS) * (2 / 3));
+  const detailEnd = detailTop + DETAIL_ROWS;
 
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
@@ -214,13 +287,19 @@ function sourceImage(width: number, height: number): ImageData {
       let g: number;
       let b: number;
 
-      if (y < split) {
+      if (y < detailTop) {
         const hue = (x / (width - 1)) * 360;
-        const value = 0.15 + 0.85 * (1 - y / Math.max(1, split - 1));
+        const value = 0.15 + 0.85 * (1 - y / Math.max(1, detailTop - 1));
         [r, g, b] = hsvToSrgb(hue, 0.85, value);
+      } else if (y < detailEnd) {
+        const v = detailValue(x, y - detailTop, width);
+        r = v;
+        g = v;
+        b = v;
       } else {
         const ramp = x / (width - 1);
-        const band = 0.5 + 0.5 * Math.sin(((y - split) / (height - split)) * Math.PI * 2);
+        const band =
+          0.5 + 0.5 * Math.sin(((y - detailEnd) / Math.max(1, height - detailEnd)) * Math.PI * 2);
         const v = ramp * (0.35 + 0.65 * band);
         r = v;
         g = v;
@@ -234,6 +313,34 @@ function sourceImage(width: number, height: number): ImageData {
     }
   }
   return new ImageData(data, width, height);
+}
+
+/**
+ * One texel of the detail strip, in six equal blocks across the width.
+ *
+ * Every block is hard-edged and every one of them is a different spatial
+ * frequency, because the frequencies are the point: a 1px comb dies under a
+ * radius-4 gaussian and survives a radius-1 one, a 4px checker survives both,
+ * and the single hard step is what an unsharp mask puts a halo on. Reading the
+ * six across one output tells you what a neighbourhood node actually did.
+ */
+function detailValue(x: number, row: number, width: number): number {
+  const block = Math.min(5, Math.floor((x / width) * 6));
+  const local = x - Math.floor((block * width) / 6);
+  switch (block) {
+    case 0:
+      return local % 2 === 0 ? 0.05 : 0.95; // 1px vertical comb
+    case 1:
+      return row % 2 === 0 ? 0.05 : 0.95; // 1px horizontal comb
+    case 2:
+      return (Math.floor(local / 2) + Math.floor(row / 2)) % 2 === 0 ? 0.05 : 0.95; // 2px checker
+    case 3:
+      return (Math.floor(local / 4) + Math.floor(row / 4)) % 2 === 0 ? 0.05 : 0.95; // 4px checker
+    case 4:
+      return local < Math.floor(width / 12) ? 0.05 : 0.95; // one hard step
+    default:
+      return (local + row) % 5 < 2 ? 0.05 : 0.95; // thin diagonals
+  }
 }
 
 /** HSV to sRGB, all components 0..1 except `h` in degrees. */
@@ -713,6 +820,517 @@ async function runOrdered(
   });
 }
 
+// --- every other parallel effect ----------------------------------------
+
+/**
+ * The thirty-nine parallel effects that are not ordered dithers.
+ *
+ * Some modules export a `GpuEffect` constant and some a factory, depending on
+ * whether the effect ships a table it has to build (a glyph sheet, a clustered
+ * screen). Both are resolved here so the runner below sees one shape.
+ */
+const PARALLEL_CATALOGUE: readonly GpuEffect[] = [
+  // pattern (F-PT)
+  halftoneEffect(),
+  cmykHalftoneEffect(),
+  lineScreenEffect(),
+  crossHatchEffect(),
+  concentricRingsGpuEffect(),
+  spiralGpuEffect(),
+  clusteredDotGpuEffect(),
+  glyphTileGpuEffect(),
+  // special (F-SP)
+  epsilonGlowGpuEffect,
+  blurGpuEffect,
+  sharpenGpuEffect,
+  edgeDetectGpuEffect,
+  embossGpuEffect,
+  POSTERIZE_GPU,
+  THRESHOLD_GPU,
+  INVERT_GPU,
+  GRADIENT_MAP_GPU,
+  OUTLINE_GPU,
+  DILATE_ERODE_GPU,
+  VIGNETTE_GPU,
+  LENS_DISTORTION_GPU,
+  LIGHT_LEAK_GPU,
+  GRAIN_GPU,
+  // glitch (F-GL)
+  pixelSortGpuEffect,
+  rowDisplacementGpuEffect,
+  columnDisplacementGpuEffect,
+  rgbSplitGpuEffect,
+  chromaticAberrationGpuEffect,
+  datamoshSmearEffect(),
+  scanlinesEffect(),
+  crtMaskEffect(),
+  WAVE_WARP_GPU,
+  SLICE_REPEAT_GPU,
+  BLOCK_SHUFFLE_GPU,
+  BIT_CRUSH_GPU,
+  channelSwapEffect(),
+  ghostEchoEffect(),
+  interlaceTearEffect(),
+  noiseBurstEffect(),
+];
+
+/** Which page section a family's figures go into. */
+const FAMILY_SECTION: Readonly<Record<string, string>> = {
+  pattern: "#pattern",
+  special: "#special",
+  glitch: "#glitch",
+};
+
+/**
+ * Every parameter at its declared default.
+ *
+ * Defaults rather than flattering values on purpose: this page is meant to show
+ * what the properties panel opens with, so a node whose default does nothing is
+ * a finding rather than something to paper over with a livelier setting.
+ */
+function defaultParams(descriptor: EffectDescriptor): Record<string, ParameterValue> {
+  const params: Record<string, ParameterValue> = {};
+  for (const param of descriptor.params) {
+    switch (param.type) {
+      case "float":
+      case "int":
+      case "seed":
+        params[param.key] = param.default;
+        break;
+      case "bool":
+        params[param.key] = param.default;
+        break;
+      case "enum":
+        params[param.key] = param.default;
+        break;
+      case "color":
+      case "curve":
+        // Neither has a uniform-field representation yet — `UniformFieldType`
+        // is scalars and vectors, and a colour reaches a shader as three
+        // separate float params where an effect needs one. Nothing is packed
+        // for them, so nothing is invented here either.
+        break;
+    }
+  }
+  return params;
+}
+
+function paramTypesOf(descriptor: EffectDescriptor): ReadonlyMap<string, ParamDescriptor> {
+  return new Map(descriptor.params.map((param) => [param.key, param]));
+}
+
+/**
+ * The same parameters pushed as far off their defaults as the surprise metadata
+ * allows.
+ *
+ * Used only when the default render came back identical to its input. Some
+ * defaults genuinely are the identity — a channel swap opens with every output
+ * reading its own channel, because a node that rearranged the picture the moment
+ * it was added would be a node you cannot add without committing — and a figure
+ * of the identity proves nothing about the shader behind it. Rather than
+ * hand-picking a flattering value per effect, this reads the surprise range the
+ * descriptor already declares (F-SM-04) and takes the end furthest from the
+ * default. That is a value the generator can really produce, so a picture drawn
+ * from it is a picture the app can really make.
+ */
+function surprisedParams(descriptor: EffectDescriptor): Record<string, ParameterValue> {
+  const params = defaultParams(descriptor);
+  for (const param of descriptor.params) {
+    switch (param.type) {
+      case "float":
+      case "int": {
+        const [low, high] = param.surprise.range;
+        params[param.key] =
+          Math.abs(low - param.default) >= Math.abs(high - param.default) ? low : high;
+        break;
+      }
+      case "bool":
+        params[param.key] = !param.default;
+        break;
+      case "enum": {
+        const other = param.surprise.values.find((option) => option.value !== param.default);
+        if (other !== undefined) params[param.key] = other.value;
+        break;
+      }
+      case "seed":
+      case "color":
+      case "curve":
+        break;
+    }
+  }
+  return params;
+}
+
+/**
+ * How much of the frame a node actually changed, and how bright it left it.
+ *
+ * The whole point of rendering all thirty-nine: an effect that compiles,
+ * validates and returns its input unchanged looks identical to one that works
+ * until you put the two frames side by side, and an effect that returns zeroes
+ * looks like a deliberate black. Both are stated numerically in every caption
+ * so they cannot be missed by eye.
+ */
+interface FrameDelta {
+  /** Fraction of pixels differing from the input by more than one 8-bit step. */
+  readonly changed: number;
+  /** Mean absolute 8-bit difference across RGB. */
+  readonly magnitude: number;
+  /** Mean sRGB luminance of the result, 0..1. */
+  readonly luminance: number;
+}
+
+function frameDelta(before: ImageData, after: ImageData): FrameDelta {
+  const pixels = Math.min(before.data.length, after.data.length) / 4;
+  let changed = 0;
+  let total = 0;
+  let luma = 0;
+  for (let i = 0; i < pixels; i += 1) {
+    const at = i * 4;
+    const dr = Math.abs((after.data[at] ?? 0) - (before.data[at] ?? 0));
+    const dg = Math.abs((after.data[at + 1] ?? 0) - (before.data[at + 1] ?? 0));
+    const db = Math.abs((after.data[at + 2] ?? 0) - (before.data[at + 2] ?? 0));
+    if (dr > 1 || dg > 1 || db > 1) changed += 1;
+    total += (dr + dg + db) / 3;
+    luma +=
+      (0.2126 * (after.data[at] ?? 0) +
+        0.7152 * (after.data[at + 1] ?? 0) +
+        0.0722 * (after.data[at + 2] ?? 0)) /
+      255;
+  }
+  const n = Math.max(1, pixels);
+  return { changed: changed / n, magnitude: total / n, luminance: luma / n };
+}
+
+function describeDelta(delta: FrameDelta): string {
+  return (
+    `changed ${(delta.changed * 100).toFixed(1)}% of pixels, ` +
+    `mean |Δ| ${delta.magnitude.toFixed(1)}/255, mean luma ${(delta.luminance * 100).toFixed(0)}%`
+  );
+}
+
+/**
+ * The Bayer 4×4 quantizer the two index-map consumers run behind.
+ *
+ * Outline (F-SP-10) and dilate/erode (F-SP-11) read the index map, and the
+ * validator already refuses to let such a node sit in the preprocess slot
+ * because nothing has quantized yet. On this page that means they cannot be
+ * shown alone: they need a real quantizer immediately upstream, so they get
+ * one, and it is the same compute path everything else on the page uses.
+ */
+async function quantizerUnit(
+  core: Core,
+  layer: GpuLayer,
+  width: number,
+  height: number,
+  paletteSize: number,
+): Promise<ScheduleUnit> {
+  const spec = orderedDitherSpec("bayer-4");
+  const ranks = core.bayerRanks(spec.tile);
+  const matrix = thresholdMatrix(spec.effectId, spec.tile, ranks);
+  const { descriptor, gpu } = createOrderedDither(spec, matrix);
+  await layer.compiler.compile(descriptor, gpu);
+
+  const nodeId = "catalogue/quantizer";
+  const pass = gpu.passes[0];
+  if (pass === undefined) throw new Error("bayer-4 declared no compute pass");
+  return {
+    nodeId,
+    execution: "gpu",
+    passes: [
+      {
+        nodeId,
+        pass,
+        uniforms: packUniforms(nodeId, ORDERED_DITHER_UNIFORMS, {
+          params: orderedDitherDefaults(),
+          paramTypes: ORDERED_PARAM_TYPES,
+          width,
+          height,
+          normalizedTime: 0,
+          seed: 0,
+          paletteSize,
+        }),
+        width,
+        height,
+      },
+    ],
+  };
+}
+
+/**
+ * Compile and run every parallel effect that is not an ordered dither.
+ *
+ * One node per effect, at its declared defaults, against the same source and
+ * the same palette as every other section. A failure is reported in place and
+ * the run continues, because the interesting output of this section is the list
+ * of effects that did *not* work, and stopping at the first one hides the rest.
+ */
+async function runParallelCatalogue(
+  core: Core,
+  layer: GpuLayer,
+  registry: EffectRegistry,
+  source: ImageData,
+  palette: BuiltinPalette,
+): Promise<void> {
+  const width = source.width;
+  const height = source.height;
+  const documentPalette: Palette = {
+    id: palette.id,
+    name: palette.name,
+    colors: Array.from(palette.srgb),
+    metric: "oklab",
+  };
+  const gpuPalette = uploadPalette(
+    layer.context,
+    documentPalette,
+    layer.buffers,
+    `catalogue:${palette.id}`,
+  );
+
+  const sourceTexture = layer.textures.acquire("rgba16float", width, height, "catalogue/source");
+  writeColorSurface(
+    layer.context,
+    sourceTexture,
+    toLinearSurface(source),
+    width,
+    height,
+    "catalogue/source",
+  );
+
+  const failures = new Map<EffectFamily, string[]>();
+  const rendered = new Map<EffectFamily, number>();
+  const suspicious = new Map<EffectFamily, string[]>();
+  const noteSuspicion = (family: EffectFamily, line: string): void => {
+    const list = suspicious.get(family) ?? [];
+    list.push(line);
+    suspicious.set(family, list);
+  };
+
+  /**
+   * Run one effect once, on its own pair of surface chains, and hand back both
+   * the result and whatever frame it should be measured against.
+   *
+   * Chains per render rather than per effect: an effect may be run twice (see
+   * the identity check below), and reusing a chain would feed the second run the
+   * first one's output instead of the source.
+   */
+  const renderNode = async (
+    descriptor: EffectDescriptor,
+    gpu: GpuEffect,
+    params: Readonly<Record<string, ParameterValue>>,
+    label: string,
+  ): Promise<{ image: ImageData; reference: ImageData; upstream: ImageData | null }> => {
+    const nodeId = `catalogue/${descriptor.id}/${label}`;
+    const color = new SurfaceChain(
+      layer.textures,
+      "rgba16float",
+      sourceTexture,
+      width,
+      height,
+      `${nodeId}/color`,
+    );
+    const index = new SurfaceChain(
+      layer.textures,
+      "r32uint",
+      null,
+      width,
+      height,
+      `${nodeId}/index`,
+    );
+
+    try {
+      // Outline and dilate/erode read an index map, so they need a real
+      // quantizer upstream. It runs and is read back first, because the frame
+      // those two must be measured against is the quantized one, not the
+      // photographic source — measuring them against the source would report the
+      // Bayer dither's own change as theirs.
+      let upstream: ImageData | null = null;
+      if (descriptor.requiresIndexMap) {
+        const quantizer = await quantizerUnit(core, layer, width, height, gpuPalette.count);
+        for (const batch of planExecution([quantizer]).batches) {
+          layer.executor.run(batch, { color, index, palette: gpuPalette });
+        }
+        const quantized = await readColorSurface(
+          layer.context,
+          layer.staging,
+          color.current,
+          width,
+          height,
+          `${nodeId}/upstream`,
+        );
+        upstream = toImageData(quantized.surface, width, height);
+      }
+
+      const unit: ScheduleUnit = {
+        nodeId,
+        execution: "gpu",
+        passes: gpu.passes.map((pass) => ({
+          nodeId,
+          pass,
+          uniforms: packUniforms(`${nodeId}/${pass.id}`, pass.uniforms, {
+            params,
+            paramTypes: paramTypesOf(descriptor),
+            width,
+            height,
+            // Still frame: t is pinned at the start of the loop. Nothing on this
+            // page animates and nothing reads a clock (F-AN-05).
+            normalizedTime: 0,
+            seed: 0x2f6a_1b3d,
+            paletteSize: gpuPalette.count,
+          }),
+          width,
+          height,
+        })),
+      };
+
+      for (const batch of planExecution([unit]).batches) {
+        layer.executor.run(batch, { color, index, palette: gpuPalette });
+      }
+
+      const readback = await readColorSurface(
+        layer.context,
+        layer.staging,
+        color.current,
+        width,
+        height,
+        nodeId,
+      );
+      const image = toImageData(readback.surface, width, height);
+      return { image, reference: upstream ?? source, upstream };
+    } finally {
+      const produced = color.hasContent ? color.current : null;
+      const producedIndex = index.hasContent ? index.current : null;
+      color.release();
+      index.release();
+      if (produced !== null && produced !== sourceTexture) layer.textures.release(produced);
+      if (producedIndex !== null) layer.textures.release(producedIndex);
+    }
+  };
+
+  try {
+    for (const gpu of PARALLEL_CATALOGUE) {
+      const descriptor = registry.get(gpu.effect);
+      if (descriptor === undefined) {
+        // A compute pass with no descriptor is an effect the catalogue does not
+        // know about, which means the UI could never offer it.
+        log.error("a compute pass names an effect the registry has no descriptor for", {
+          effect: gpu.effect,
+        });
+        continue;
+      }
+      const section = FAMILY_SECTION[descriptor.family];
+      if (section === undefined) {
+        log.error("no page section for family", {
+          effect: gpu.effect,
+          family: descriptor.family,
+        });
+        continue;
+      }
+
+      try {
+        await layer.compiler.compile(descriptor, gpu);
+
+        const run = await renderNode(descriptor, gpu, defaultParams(descriptor), "defaults");
+        if (run.upstream !== null) {
+          showCanvas(
+            section,
+            `↳ upstream of ${descriptor.name}: Bayer 4×4 quantizer, the frame it is measured against`,
+            run.upstream,
+            SCALE,
+          );
+        }
+
+        const delta = frameDelta(run.reference, run.image);
+        showCanvas(
+          section,
+          `${descriptor.name} — ${descriptor.requirement}, ` +
+            `${gpu.passes.length} pass(es), ${descriptor.params.length} param(s); ${describeDelta(delta)}`,
+          run.image,
+          SCALE,
+        );
+        rendered.set(descriptor.family, (rendered.get(descriptor.family) ?? 0) + 1);
+
+        // A node that returned its input, or that returned black, is exactly
+        // what this section exists to catch. Neither is left to the eye.
+        if (delta.luminance < 0.01) {
+          noteSuspicion(descriptor.family, `${descriptor.id} rendered an almost black frame`);
+        } else if (delta.changed < 0.005) {
+          // The identity at defaults is not automatically a defect — it is the
+          // right opening state for a rearrangement node — but a figure of the
+          // identity says nothing about the shader, so the effect is run again at
+          // the far end of its own surprise range and both are shown.
+          const moved = await renderNode(
+            descriptor,
+            gpu,
+            surprisedParams(descriptor),
+            "surprised",
+          );
+          const movedDelta = frameDelta(moved.reference, moved.image);
+          showCanvas(
+            section,
+            `↳ ${descriptor.name} at the far end of its surprise range, because its ` +
+              `defaults are the identity; ${describeDelta(movedDelta)}`,
+            moved.image,
+            SCALE,
+          );
+          noteSuspicion(
+            descriptor.family,
+            movedDelta.changed < 0.005
+              ? `${descriptor.id} returned its input unchanged at its defaults AND across its whole surprise range`
+              : `${descriptor.id} is the identity at its declared defaults (it does move — see the second figure)`,
+          );
+        }
+      } catch (error) {
+        const list = failures.get(descriptor.family) ?? [];
+        list.push(`${descriptor.id}: ${String(error)}`);
+        failures.set(descriptor.family, list);
+        log.error("catalogue effect failed", {
+          effect: descriptor.id,
+          error: String(error),
+        });
+      }
+    }
+  } finally {
+    layer.textures.release(sourceTexture);
+  }
+
+  for (const [family, selector] of Object.entries(FAMILY_SECTION)) {
+    const key = family as EffectFamily;
+    const declared = registry.byFamily(key).length;
+    const shown = rendered.get(key) ?? 0;
+    const broken = failures.get(key) ?? [];
+    const doubtful = suspicious.get(key) ?? [];
+    setStatus(
+      `${selector}-status`,
+      (broken.length === 0 && shown === declared
+        ? okMark("all rendered")
+        : failMark("incomplete")) +
+        ` — ${shown} of ${declared} ${escapeHtml(family)} effect(s) rendered.` +
+        (broken.length === 0
+          ? ""
+          : `<ul class="issues">${broken
+              .map((line) => `<li>${escapeHtml(line)}</li>`)
+              .join("")}</ul>`) +
+        (doubtful.length === 0
+          ? ""
+          : ` ${failMark("look at these")}:<ul class="issues">${doubtful
+              .map((line) => `<li>${escapeHtml(line)}</li>`)
+              .join("")}</ul>`),
+    );
+  }
+
+  const doubtfulTotal = [...suspicious.values()].flat();
+  if (doubtfulTotal.length > 0) {
+    log.error("effects whose output does not look like the named effect", {
+      effects: doubtfulTotal.join("; "),
+    });
+  }
+  log.info("parallel catalogue complete", {
+    effects: PARALLEL_CATALOGUE.length,
+    rendered: [...rendered.values()].reduce((a, b) => a + b, 0),
+    suspicious: doubtfulTotal.length,
+  });
+}
+
 function describeAdapter(layer: GpuLayer): string {
   const info = layer.context.adapterInfo;
   const parts = [info.vendor, info.architecture, info.device].filter(
@@ -828,6 +1446,10 @@ async function main(): Promise<void> {
       GpuLayer.create({ report }),
     );
     await runOrdered(core, layer, source, cga);
+    // Every other parallel effect, grouped by family. Separate from the ordered
+    // section because that one is the tile-and-table path specifically; this is
+    // the rest of the catalogue proving it renders at all.
+    await runParallelCatalogue(core, layer, registry, source, cga);
   } catch (error) {
     setStatus(
       "#ordered-status",

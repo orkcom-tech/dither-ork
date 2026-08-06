@@ -1,9 +1,17 @@
 # Architecture
 
 dither-ork is a browser application that reproduces the Dither Boy feature set
-for still images: 63 effects in a stackable reorderable pipeline, full colour
-with palette extraction, CMYK halftone, timeline animation with live playback,
-batch processing, and PNG / JPEG / SVG / GIF / MP4 export.
+for still images: the spec's 61 named effects in a stackable reorderable
+pipeline, full colour with palette extraction, CMYK halftone, timeline animation
+with live playback, batch processing, and PNG / JPEG / SVG / GIF / MP4 export.
+
+**58 of those 61 are built and registered.** By family: 14 error diffusion, 5
+ordered, 8 pattern, 16 glitch, 15 special. By execution: 14 WASM, 44 WebGPU. By
+slot: 12 preprocess, 27 dither, 19 postprocess. The three that are absent are
+absent on purpose and each is recorded where the decision was made — F-ED-14
+Ostromoukhov, F-GL-06 JPEG glitch, F-SP-14 nearest-neighbour upscale. The
+counts are asserted by `web/src/registry/catalogue.test.ts`, so an effect that
+silently stops being discovered fails the build rather than the eye.
 
 Video editing is out of scope and is a separate future application. Animated
 output is in scope, because frames are generated from a still source — that
@@ -16,10 +24,15 @@ propagated from pixels already processed, so the entire family — Floyd-Steinbe
 through Ostromoukhov — cannot be expressed as a shader. Every other effect in
 the catalogue is per-pixel independent.
 
-That splits the renderer in two:
+That splits the renderer in two. **Those two are the only execution kinds**, and
+the catalogue as built needs no third: everything that is not error diffusion is
+a compute pass. The one effect that would have forced a third — F-GL-06, JPEG
+glitch, which needs an encoder to re-compress and corrupt — is not implemented
+for exactly that reason, and adding it is a decision about the execution model
+rather than one more shader.
 
-- **~15 serial kernels** run on the CPU in WebAssembly, compiled from Rust.
-- **~48 parallel effects** run on the GPU as WebGPU compute passes.
+- **14 serial kernels** run on the CPU in WebAssembly, compiled from Rust.
+- **44 parallel effects** run on the GPU as WebGPU compute passes.
 - **The boundary between them is the performance ceiling.** Each serial node
   costs a GPU readback plus an upload. Two mitigations, both also correct for
   the look: consecutive parallel nodes are coalesced into a single GPU pass, and
@@ -222,11 +235,18 @@ core/                     Rust workspace, zero web dependencies
   fixtures/golden/        reference renders, one per fixture x palette x kernel
 web/
   public/_headers         COOP/COEP for production; shipped to the site root
-  src/effects/            one file per effect; the registry finds them by glob
+  src/effects/            one file per effect; the registry finds them by glob.
+                          A parallel effect's file carries three things that must
+                          agree byte for byte and therefore may not be separated:
+                          the registry descriptor, the uniform layout, and the
+                          `GpuEffect` its passes live in. The WGSL is the fourth
+                          and sits in src/shaders/ under the same id
   src/registry/           discovery, validation, search over the catalogue
   src/graph/              DAG scheduling, content hashing, node cache
   src/gpu/                device, compiler, resources, boundary, scheduler
-  src/gpu/effects/        per-effect pass definitions
+  src/gpu/effects/        pass definitions shared by a whole family — today only
+                          the five ordered dithers, which are one program with
+                          five tiles and would otherwise be five copies
   src/shaders/            WGSL, one file per effect, plus CONVENTIONS.md
   src/lib/                logging, capability check
   src/types/              .dork document schema, registry, graph and GPU contracts
@@ -251,12 +271,22 @@ Nothing in `core/` may know a browser exists.
 
 The list below is the strategy. What is built today: golden images for all 14
 registered diffusion kernels across four fixtures and two palettes, the colour
-correctness tests, and determinism across threads. The loop seam, the perf
-budget and the document round trip have nothing to test yet — there are no
-modulators, no timeline and no document loader.
+correctness tests, determinism across threads, and the catalogue test that runs
+the startup validator over the shipped descriptors and asserts the counts above.
+The loop seam, the perf budget and the document round trip have nothing to test
+yet — there are no modulators, no timeline and no document loader.
 
-- **Golden images per algorithm** — all 63, fixed inputs, stored references. The
-  only defence against a plausible-looking coefficient typo.
+**The 44 parallel effects have no goldens.** They are proven today by
+`web/src/main.ts`, which renders every one of them through the real compute path
+against a generated source and states, per effect, how much of the frame it
+changed and how bright it left it. That catches the failure a golden cannot be
+written for yet — an effect that compiles, validates, and returns its input or a
+black rectangle — but it is a human reading numbers and pictures, not CI. GPU
+goldens need the pinned environment described under Determinism, and they are
+the gap that matters most in this area.
+
+- **Golden images per algorithm** — all of them, fixed inputs, stored
+  references. The only defence against a plausible-looking coefficient typo.
 - **Colour correctness** — a linear ramp dithered to 1-bit must average back to
   input luminance within tolerance.
 - **Loop seam** — a document with every modulator kind bound asserts
@@ -292,12 +322,23 @@ Steps 1–2 are where the look is decided, so they come before any UI.
 **Where the repository is:** steps 1 and 2 are done bar Ostromoukhov (F-ED-14),
 whose 256-row coefficient table is not derivable and is left out rather than
 invented. Step 3 is built headless — hashing, cache, plan, animate — and is not
-yet driven by a document. Step 4 has the WebGPU layer and the five ordered
-dithers running end to end, with boundary instrumentation; halftone and pass
-coalescing across a real multi-node stack are not built. Step 6's extraction
-half exists in the core and at the WASM boundary; the library, editor and
-index-map operations do not. Nothing from step 5 onward is an application yet —
-`web/src/main.ts` is a proof page, not a UI.
+yet driven by a document. Step 4 is done: the WebGPU layer, all five ordered
+dithers and all eight pattern dithers run end to end with boundary
+instrumentation. Step 7 is done bar JPEG glitch (F-GL-06) and nearest-neighbour
+upscale (F-SP-14) — all 16 remaining glitch effects and all 15 remaining special
+effects are registered and render — **except for the goldens**, which the
+Testing section above records as the outstanding item. Step 6's extraction half
+exists in the core and at the WASM boundary; the library, editor and the
+palette-side index-map operations do not, though the two index-map *stack* nodes
+(outline F-SP-10, dilate/erode F-SP-11) do. Nothing from step 5 onward is an
+application yet — `web/src/main.ts` is a proof page, not a UI.
+
+One consequence of building step 7 before step 5 is now load-bearing and is
+recorded under "GPU pass layer" in docs/API.md: **nothing resolves an effect id
+to its `GpuEffect`.** Each effect file exports its passes under its own name and
+the proof page names all thirty-nine by hand. That is fine while the only caller
+is a page that wants all of them; it is the first thing a document loader will
+need, and it is not written yet.
 
 ## Known technical risks
 
