@@ -1,0 +1,452 @@
+/*
+ * The timeline — F-AN-07 to F-AN-11.
+ *
+ * Two columns, one grid: a fixed head column that names each track and a lane
+ * column that is the loop. The playhead is one absolutely positioned rule over
+ * the lane column, placed from a `--playhead` fraction in `calc()`, so moving it
+ * costs one custom property rather than a re-layout of every row.
+ *
+ * No colour literals; every value is a token from `../theme.css` (F-UI-09).
+ */
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  font-size: var(--text-sm);
+  /* Width of the head column. Read by the playhead's calc(). */
+  --track-head: 188px;
+  --playhead: 0;
+}
+
+/* --- transport -------------------------------------------------------- */
+
+.timeline__bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-raised);
+}
+
+.timeline__transport {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.timeline__readout {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.timeline__readout b {
+  color: var(--fg);
+  font-size: var(--text-sm);
+  letter-spacing: 0;
+}
+
+.timeline__group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 8px;
+  border-left: 1px solid var(--rule);
+}
+
+.timeline__spacer {
+  flex: 1 1 auto;
+}
+
+.timeline__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.timeline__state--degraded {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+/* --- a small numeric entry -------------------------------------------- */
+
+.timeline__entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.timeline__entry input {
+  width: 4.5em;
+  height: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--fg);
+  font-size: var(--text-sm);
+  letter-spacing: 0;
+  text-align: right;
+}
+
+.timeline__entry input.timeline__entry--wide {
+  width: 6em;
+}
+
+.timeline__select {
+  height: 20px;
+  padding: 0 2px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--fg);
+  font-size: var(--text-sm);
+}
+
+/* --- notices ----------------------------------------------------------- */
+
+.timeline__notice {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--rule);
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.timeline__notice--warn {
+  color: var(--warn);
+}
+
+.timeline__notice--fail {
+  color: var(--fail);
+}
+
+.timeline__notice button {
+  flex: 0 0 auto;
+}
+
+/* --- the sheet --------------------------------------------------------- */
+
+.timeline__sheet {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-color: var(--rule-strong) transparent;
+  scrollbar-width: thin;
+}
+
+/*
+ * The playhead's containing block. It has to be this rather than the scroll
+ * container: an absolutely positioned child of a scrolling box is sized against
+ * the *visible* height, so a playhead anchored there would stop at the fold and
+ * scroll away from the rows it belongs to.
+ */
+.timeline__content {
+  position: relative;
+  min-height: 100%;
+}
+
+.timeline__row {
+  display: grid;
+  grid-template-columns: var(--track-head) 1fr;
+  border-bottom: 1px solid var(--rule);
+}
+
+.timeline__row--selected {
+  background: var(--bg-inset);
+}
+
+/* --- the ruler --------------------------------------------------------- */
+
+.timeline__ruler-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  border-right: 1px solid var(--rule);
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.timeline__ruler {
+  position: relative;
+  height: 22px;
+  cursor: ew-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.timeline__tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--rule-strong);
+}
+
+.timeline__tick-label {
+  position: absolute;
+  top: 2px;
+  padding-left: 3px;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  pointer-events: none;
+}
+
+/* --- a track ----------------------------------------------------------- */
+
+.timeline__head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  border-right: 1px solid var(--rule);
+  min-width: 0;
+}
+
+.timeline__head--off .timeline__name {
+  color: var(--fg-faint);
+  text-decoration: line-through;
+}
+
+.timeline__chevron,
+.timeline__flag,
+.timeline__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.timeline__chevron:hover,
+.timeline__flag:hover,
+.timeline__action:hover {
+  color: var(--fg);
+  border-color: var(--accent-dim);
+}
+
+.timeline__flag[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+.timeline__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  border: none;
+  background: none;
+  color: var(--fg);
+  cursor: pointer;
+  padding: 0;
+}
+
+.timeline__name small {
+  color: var(--fg-faint);
+}
+
+.timeline__gain {
+  width: 3.2em;
+  height: 18px;
+  padding: 0 3px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--fg);
+  font-size: var(--text-xs);
+  text-align: right;
+}
+
+/* --- a lane ------------------------------------------------------------ */
+
+.timeline__lane {
+  position: relative;
+  height: 34px;
+  touch-action: none;
+  user-select: none;
+}
+
+.timeline__lane--keyframe {
+  cursor: crosshair;
+}
+
+.timeline__lane--off {
+  opacity: 0.4;
+}
+
+.timeline__curve {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.timeline__curve path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.timeline__curve line {
+  stroke: var(--rule-strong);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+.timeline__key {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -5px 0 0 -5px;
+  border: 1px solid var(--accent);
+  border-radius: 1px;
+  background: var(--bg);
+  transform: rotate(45deg);
+  cursor: ew-resize;
+  padding: 0;
+}
+
+.timeline__key--selected {
+  background: var(--accent);
+}
+
+.timeline__key--hold {
+  border-radius: 0;
+  transform: none;
+  width: 7px;
+  height: 12px;
+  margin: -6px 0 0 -4px;
+}
+
+.timeline__range {
+  position: absolute;
+  right: 3px;
+  top: 1px;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  pointer-events: none;
+}
+
+/* --- expanded controls -------------------------------------------------- */
+
+.timeline__controls {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 8px 6px;
+  border-top: 1px dashed var(--rule);
+  background: var(--bg-sunken);
+}
+
+.timeline__controls .nf {
+  width: 180px;
+}
+
+/* --- the playhead ------------------------------------------------------- */
+
+.timeline__playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--accent);
+  pointer-events: none;
+  left: calc(var(--track-head) + var(--playhead) * (100% - var(--track-head)));
+}
+
+.timeline__playhead::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 7px;
+  height: 5px;
+  background: var(--accent);
+}
+
+/* --- empty state -------------------------------------------------------- */
+
+.timeline__empty {
+  padding: 10px 12px;
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  max-width: 68ch;
+}
+
+.timeline__empty b {
+  color: var(--fg);
+}
+
+/* --- the bind picker ---------------------------------------------------- */
+
+.timeline__picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-sunken);
+}
+
+.timeline__picker-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.timeline__picker-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 120px;
+  overflow: auto;
+  scrollbar-color: var(--rule-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.timeline__picker-list .ui-button {
+  text-transform: none;
+  letter-spacing: 0;
+}

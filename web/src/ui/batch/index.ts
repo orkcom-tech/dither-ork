@@ -29,6 +29,7 @@ import { logger } from "../../lib/log";
 import type { EffectRegistry } from "../../registry";
 import type { EditorSession } from "../../state";
 import type { PaletteStore } from "../palette";
+import type { TimelineStore } from "../timeline";
 import { BatchButton } from "./BatchButton";
 
 const log = logger("batch");
@@ -48,6 +49,13 @@ export interface BatchControlsDependencies {
   readonly report: CapabilityReport;
   /** The palette editor's store — F-BA-04's per-image mode reads its settings. */
   readonly palette: PaletteStore;
+  /**
+   * The timeline, because the recipe a batch applies is one *frame* of the
+   * document and the playhead is what says which. Without it an animated
+   * document fails every item in the queue: `document.bindings` is non-empty and
+   * `buildRenderGraph` refuses it. See `frameDocument` in `ui/timeline`.
+   */
+  readonly timeline: TimelineStore;
 }
 
 /**
@@ -72,6 +80,7 @@ export function registerBatchControls(deps: BatchControlsDependencies): void {
         registry: deps.registry,
         report: deps.report,
         palette: deps.palette,
+        timeline: deps.timeline,
       }),
   });
   log.info("batch registered");

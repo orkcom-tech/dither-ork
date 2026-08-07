@@ -117,12 +117,64 @@ export function shouldYield(since: number): boolean {
 /**
  * Hand the thread back so a paint and a click can happen.
  *
- * `setTimeout` rather than a resolved promise: a microtask does not let the
+ * A macrotask rather than a resolved promise: a microtask does not let the
  * browser paint, so a progress bar driven by microtask yields never moves.
+ *
+ * ## Why not `setTimeout(0)`
+ *
+ * It was `setTimeout(resolve, 0)`, and that is a real defect rather than a
+ * stylistic one. **Browsers clamp timers in a background tab to about one
+ * second.** These loops yield every 8 ms of work (see {@link shouldYield}), so
+ * a PNG encode that yields sixty times takes sixty seconds instead of half of
+ * one — as soon as the person switches tabs, which is exactly what somebody does
+ * while waiting for a long export or a batch of thirty images. Measured: a
+ * 900x700 PNG in a background tab had not finished encoding after two minutes.
+ *
+ * A `MessageChannel` message is an ordinary macrotask on the same task queue and
+ * is **not** clamped, so the yield stays a yield when the tab is hidden. It
+ * still lets the browser paint when the tab is visible, which is the property
+ * the microtask lacked and the reason a timer was reached for in the first
+ * place. `scheduler.yield()` would be better still and is not in every browser
+ * this application supports, so it is used when it is there.
+ *
+ * The port pair is created once and reused: one per yield would allocate two
+ * objects per 8 ms of encoding.
  */
+const yieldChannel: MessageChannel | null =
+  typeof MessageChannel === "function" ? new MessageChannel() : null;
+
+const yieldWaiting: (() => void)[] = [];
+
+if (yieldChannel !== null) {
+  yieldChannel.port1.onmessage = (): void => {
+    // Drained one at a time rather than all at once: each waiter is a separate
+    // slice of work, and running them in one task would defeat the yield.
+    const next = yieldWaiting.shift();
+    next?.();
+  };
+  yieldChannel.port1.start();
+}
+
+interface SchedulerWithYield {
+  readonly scheduler?: { readonly yield?: () => Promise<void> };
+}
+
 export function yieldToHost(): Promise<void> {
+  const scheduler = (globalThis as SchedulerWithYield).scheduler;
+  if (typeof scheduler?.yield === "function") return scheduler.yield();
+
+  const channel = yieldChannel;
+  if (channel === null) {
+    // No `MessageChannel` — not a browser this application runs in, but a
+    // `vitest` environment can be one. The clamp does not apply outside a
+    // background tab, so the timer is correct here.
+    return new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  }
   return new Promise((resolve) => {
-    setTimeout(resolve, 0);
+    yieldWaiting.push(resolve);
+    channel.port2.postMessage(0);
   });
 }
 

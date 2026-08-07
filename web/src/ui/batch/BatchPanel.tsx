@@ -38,6 +38,7 @@ import type { CapabilityReport } from "../../lib/capabilities";
 import type { EffectRegistry } from "../../registry";
 import type { EditorSession } from "../../state";
 import type { PaletteStore } from "../palette";
+import { frameDocument, type TimelineStore } from "../timeline";
 import { QueueList } from "./QueueList";
 import {
   batchDecoderFor,
@@ -83,6 +84,11 @@ export interface BatchPanelProps {
   readonly registry: EffectRegistry;
   readonly report: CapabilityReport;
   readonly palette: PaletteStore;
+  /**
+   * The timeline, because the recipe a batch applies is one *frame* of the
+   * document and the playhead is what says which. See `frameDocument`.
+   */
+  readonly timeline: TimelineStore;
   readonly settings: BatchSettings;
   readonly onSettings: (settings: BatchSettings) => void;
   /**
@@ -109,6 +115,7 @@ export function BatchPanel({
   registry,
   report,
   palette,
+  timeline,
   settings,
   onSettings,
   inputs,
@@ -281,7 +288,13 @@ export function BatchPanel({
 
     const started = createBatchRun({
       items: inputs,
-      document: session.store.getSnapshot().document,
+      // The frame at the playhead when the document is animated — a batch is one
+      // recipe over many images, and the recipe is the picture on screen. It is
+      // also what makes an animated document batchable at all: once tracks are
+      // written back to `document.bindings`, `buildRenderGraph` refuses the raw
+      // document, so passing it here would fail every item in the queue with a
+      // message addressed to a programmer.
+      document: frameDocument(timeline, session.store.getSnapshot().document),
       presetName,
       settings,
       output: target,

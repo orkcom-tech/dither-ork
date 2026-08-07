@@ -154,7 +154,8 @@ grown one.
 model is unit-tested and every render stage is tested; a click reaching a
 mutation reaching a frame is checked by a person with a browser and by nothing
 else. Before claiming a UI change works, open the page and use it — that is the
-acceptance test, and it is where this round's defects were found.
+acceptance test, and it is where this round's defects were found. The manual
+probe below is the tool for the parts of that you cannot see by looking.
 
 The third is the **GPU golden set**, and it needs a browser because a WGSL
 compute pass has nowhere else to run. It is documented under "GPU golden images"
@@ -222,6 +223,69 @@ because an effect that disappears is silent in every other way. Adding an effect
 means editing four numbers in that file and the matching table in docs/API.md;
 if the temptation is ever to remove the assertion instead, that is the moment it
 was doing its job.
+
+## The manual browser probe
+
+`web/test/probe/` drives the **running application** from the browser console.
+It is not part of any suite and not part of the build; it exists for the claims
+a `vitest` run structurally cannot make — whether the main thread stays free
+during a real render, whether a modulator's movement reaches actual pixels,
+whether the bytes an export produced are a valid file.
+
+Stage it (it writes into `web/public/probe/`, which is gitignored, because
+everything in `public/` is copied into `dist/` and the fixtures are megabytes of
+test images):
+
+```bash
+docker compose exec -T web sh -c 'cd /app/web && node test/probe/stage.cjs'
+```
+
+Then, in the console on <http://localhost:5173>:
+
+```js
+await import("/probe/probe.js");
+
+// Each step is started, not awaited: a driver that awaits a long call over a
+// remote debugging channel loses the answer when the channel drops.
+__probe.startAll([
+  ["reset"],
+  ["openImage", "/probe/images/big.png", "big.png"],
+  ["responsiveness", ["brightness-contrast", "floyd-steinberg", "scanlines"]],
+  ["animates"],
+  ["roundTrip"],
+  ["seam"],
+  ["gif"],
+  ["batch"],
+]);
+
+__probe.state;    // { running, done, failed }
+__probe.results;  // every answer so far, also logged as `PROBE <step> <json>`
+```
+
+The steps, and what each is evidence *of*:
+
+| Step | Evidence |
+| --- | --- |
+| `responsiveness` | The render is off the main thread. Two independent instruments: a `MessageChannel` ticker and a `PerformanceObserver` on `longtask`. It also busts the node cache first, so what is timed is a render and not a cache walk, and performs real DOM reads and store writes throughout. |
+| `animates` | A bound parameter reaches the picture — the values at four frames, *and* the count of differing pixels between two rendered frames. |
+| `playback` | The transport advances and the timeline owns the viewport. |
+| `roundTrip` | A track made in the editor survives `encodeDorkFile` → `parseDorkFile` → `loadDocument` and becomes a track again. |
+| `seam` / `brokenSeam` / `seamValidatorDirect` | F-AN-06 at all three layers: the plan builder, the timeline's `planError`, and the export gate — each naming the binding. |
+| `surpriseSeed` | The same seed reproduces the same document, and a different seed does not. |
+| `gif` | The exported bytes parse as a GIF, with the expected frame count, delay and global colour table — read by a parser written inside the probe, because verifying the encoder with the encoder's own report proves nothing. |
+| `batch` | Per-item status, and that one unreadable file fails alone. |
+
+Two things to know when reading its numbers:
+
+- **`requestAnimationFrame` is useless as an instrument here.** A window that is
+  not being painted — a background tab, or a remote-controlled pane whose stream
+  has stopped — reports zero frames and measures nothing. That is why the probe
+  uses a `MessageChannel`, which is an ordinary macrotask and is not tied to
+  compositing.
+- **`setTimeout` is clamped to about a second in a hidden tab**, so any timing
+  that goes through `sleep()` is a floor and not a measurement. This is the same
+  clamp that made the export yield a defect — see "Known technical risks" in
+  docs/ARCHITECTURE.md.
 
 ## GPU golden images
 

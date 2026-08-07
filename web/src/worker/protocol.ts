@@ -164,6 +164,71 @@ export interface TraceResult {
 }
 
 /**
+ * The animated GIF encoder (F-EX-04), as three calls rather than one.
+ *
+ * A GIF is built frame by frame and a 60-frame loop at document resolution is
+ * more index map than anyone wants to hold twice, so the encoder is **stateful
+ * inside the worker** and the caller holds a handle to it. One call taking every
+ * frame at once would mean a full `frames x width x height` buffer on the main
+ * thread as well as the one in WASM, for no gain: the frames are produced one at
+ * a time by the render queue anyway.
+ *
+ * The handle is a number rather than an object because that is all that survives
+ * `postMessage`. It is claimed by `gif-begin`, fed by `gif-frame`, and consumed
+ * by exactly one of `gif-finish` or `gif-abandon` — the worker frees the WASM
+ * handle in both, and a handle that reaches neither is linear memory held until
+ * the worker dies. `ui/export/animated.ts` is the only caller and it abandons in
+ * a `finally`.
+ */
+export interface GifBeginParams {
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface GifBeginResult {
+  readonly handle: number;
+}
+
+export interface GifFrameParams {
+  readonly handle: number;
+  /** One palette index per pixel, row-major. Transferred, not copied. */
+  readonly indices: Uint8Array;
+}
+
+export interface GifFrameResult {
+  readonly frames: number;
+  /** Bytes of index map the worker is holding for this animation. */
+  readonly bufferedBytes: number;
+}
+
+export interface GifFinishParams {
+  readonly handle: number;
+  /** Packed 8-bit sRGB triplets. Becomes the global colour table verbatim. */
+  readonly paletteRgb: Uint8Array;
+  readonly delayCentiseconds: number;
+  readonly loopForever: boolean;
+  /** A palette index, or any negative number for "no transparent entry". */
+  readonly transparentIndex: number;
+}
+
+export interface GifFinishResult {
+  readonly bytes: Uint8Array;
+  readonly frames: number;
+  readonly byteLength: number;
+  readonly paletteEntries: number;
+  readonly tableEntries: number;
+  readonly minCodeSize: number;
+  readonly croppedFrames: number;
+  readonly pixelsWritten: number;
+  readonly transparent: boolean;
+  readonly ms: number;
+}
+
+export interface GifAbandonParams {
+  readonly handle: number;
+}
+
+/**
  * Every call the worker answers, as one table.
  *
  * A map rather than a union of message shapes, because the client's `call`
@@ -175,6 +240,10 @@ export interface WorkerCalls {
   "set-source": { readonly params: SetSourceParams; readonly result: SetSourceResult };
   render: { readonly params: RenderParams; readonly result: RenderResult };
   trace: { readonly params: TraceParams; readonly result: TraceResult };
+  "gif-begin": { readonly params: GifBeginParams; readonly result: GifBeginResult };
+  "gif-frame": { readonly params: GifFrameParams; readonly result: GifFrameResult };
+  "gif-finish": { readonly params: GifFinishParams; readonly result: GifFinishResult };
+  "gif-abandon": { readonly params: GifAbandonParams; readonly result: null };
   dispose: { readonly params: null; readonly result: null };
 }
 

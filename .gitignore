@@ -10,6 +10,11 @@ web/node_modules/
 web/dist/
 npm-debug.log*
 
+# The manual browser probe, staged out of web/test/probe/ by `stage.cjs`.
+# Everything in public/ is copied into dist/, and the fixtures are megabytes of
+# test images that have no business in a production build.
+web/public/probe/
+
 # Editors / OS
 .DS_Store
 .idea/

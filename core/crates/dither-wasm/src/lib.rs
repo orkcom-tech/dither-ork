@@ -9,6 +9,7 @@
 
 use dither_core::color::{decode_srgb, encode_srgb, Rgba};
 use dither_core::diffusion::{self, Options};
+use dither_core::encode;
 use dither_core::noise;
 use dither_core::palette::{builtin, Metric, Palette};
 use dither_core::quantize;
@@ -1008,4 +1009,179 @@ pub fn trace_svg(
         svg: traced.to_svg(),
         report: *traced.report(),
     })
+}
+
+// ---------------------------------------------------------------------------
+// Animated GIF (F-EX-04)
+// ---------------------------------------------------------------------------
+
+/// A GIF being built, one frame at a time.
+///
+/// Stateful for the reason the core's own encoder is: the caller renders frames
+/// one after another and cannot hold them all, and a single call taking every
+/// frame at once would need a flat `frames x width x height` buffer on the JS
+/// side *as well as* the one in here. Each [`pushFrame`](GifAnimation::push_frame)
+/// copies one frame across and the caller's buffer is free again immediately.
+///
+/// The frames must still be buffered on *this* side — the global colour table is
+/// written before them and its size fixes the LZW code width — and the core
+/// states that ceiling and refuses past it rather than failing an allocation.
+#[wasm_bindgen]
+pub struct GifAnimation {
+    inner: encode::GifEncoder,
+}
+
+#[wasm_bindgen]
+impl GifAnimation {
+    /// Start an animation of this extent. Throws on a size GIF cannot describe.
+    #[wasm_bindgen(constructor)]
+    pub fn new(width: u32, height: u32) -> Result<GifAnimation, JsError> {
+        let inner = encode::GifEncoder::new(width as usize, height as usize)
+            .map_err(|error| JsError::new(&error.to_string()))?;
+        Ok(GifAnimation { inner })
+    }
+
+    /// Frames pushed so far.
+    #[wasm_bindgen(getter, js_name = frameCount)]
+    pub fn frame_count(&self) -> usize {
+        self.inner.frame_count()
+    }
+
+    /// Bytes of index map held. Logged by the caller so the memory cost of a
+    /// long loop is visible in the console rather than only in the task manager.
+    #[wasm_bindgen(getter, js_name = bufferedBytes)]
+    pub fn buffered_bytes(&self) -> f64 {
+        self.inner.buffered_bytes() as f64
+    }
+
+    /// Add one frame's index map, in playback order.
+    ///
+    /// One palette index per pixel, row-major, `width * height` bytes — the same
+    /// layout `DitherOutput::indices` produces, narrowed to `u8` because a GIF
+    /// colour table holds 256 entries and an index that does not fit one is not
+    /// a GIF.
+    #[wasm_bindgen(js_name = pushFrame)]
+    pub fn push_frame(&mut self, indices: &[u8]) -> Result<(), JsError> {
+        self.inner
+            .push(indices)
+            .map_err(|error| JsError::new(&error.to_string()))
+    }
+
+    /// Write the file.
+    ///
+    /// `palette_rgb` is packed 8-bit sRGB triplets and becomes the global colour
+    /// table **verbatim** — F-EX-04's "used directly, no second quantization" is
+    /// this call not having anywhere to quantize. `transparent_index` is the one
+    /// entry drawn as nothing, or a negative number for none, since
+    /// `wasm_bindgen` has no `Option<u8>` that survives as a plain JS number.
+    #[wasm_bindgen(js_name = finish)]
+    pub fn finish(
+        &self,
+        palette_rgb: &[u8],
+        delay_centiseconds: u16,
+        loop_forever: bool,
+        transparent_index: i32,
+    ) -> Result<EncodedGif, JsError> {
+        if transparent_index > i32::from(u8::MAX) {
+            return Err(JsError::new(&format!(
+                "the transparent index must be a palette index or negative for none, got \
+                 {transparent_index}"
+            )));
+        }
+        let options = encode::GifOptions {
+            delay_centiseconds,
+            loop_forever,
+            transparent_index: if transparent_index < 0 {
+                None
+            } else {
+                Some(transparent_index as u8)
+            },
+        };
+        let encoded = self
+            .inner
+            .finish(palette_rgb, options)
+            .map_err(|error| JsError::new(&error.to_string()))?;
+        Ok(EncodedGif {
+            bytes: encoded.bytes,
+            report: encoded.report,
+        })
+    }
+}
+
+/// A finished GIF and what producing it did.
+///
+/// The report travels with the bytes rather than being logged inside the core,
+/// for the same reason `ExtractedPalette`'s and `TracedSvg`'s do: `dither-core`
+/// has no logger, and a crate that must not know a browser exists must not pick
+/// the browser's logging story either.
+#[wasm_bindgen]
+pub struct EncodedGif {
+    bytes: Vec<u8>,
+    report: encode::GifReport,
+}
+
+#[wasm_bindgen]
+impl EncodedGif {
+    /// The file. Cloned out, so the caller may hold it after this object is
+    /// dropped.
+    #[wasm_bindgen(getter)]
+    pub fn bytes(&self) -> Vec<u8> {
+        self.bytes.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn frames(&self) -> usize {
+        self.report.frames
+    }
+
+    /// Size of the finished file. Measured, because there is no formula for the
+    /// size of an LZW-compressed dither — see the note at the top of
+    /// `dither-core/src/encode.rs`.
+    #[wasm_bindgen(getter, js_name = byteLength)]
+    pub fn byte_length(&self) -> usize {
+        self.report.bytes
+    }
+
+    /// Entries the caller supplied.
+    #[wasm_bindgen(getter, js_name = paletteEntries)]
+    pub fn palette_entries(&self) -> usize {
+        self.report.palette_entries
+    }
+
+    /// Entries actually written — the palette padded up to a power of two.
+    #[wasm_bindgen(getter, js_name = tableEntries)]
+    pub fn table_entries(&self) -> usize {
+        self.report.table_entries
+    }
+
+    /// LZW minimum code size, which is the colour table's bit depth. The number
+    /// that says whether a four-colour picture was written as a four-colour one.
+    #[wasm_bindgen(getter, js_name = minCodeSize)]
+    pub fn min_code_size(&self) -> u8 {
+        self.report.min_code_size
+    }
+
+    /// Frames written as a sub-rectangle rather than in full. Zero for a dither,
+    /// where every pixel moves on every frame, and that is worth being able to
+    /// see rather than assume.
+    #[wasm_bindgen(getter, js_name = croppedFrames)]
+    pub fn cropped_frames(&self) -> usize {
+        self.report.cropped_frames
+    }
+
+    /// Pixels written across every frame after cropping — the denominator for an
+    /// honest bytes-per-pixel figure.
+    ///
+    /// `f64` rather than `u64`: a pixel count cannot reach the point where a
+    /// double loses precision, and a `BigInt` in a log line is friction for
+    /// nothing. The same argument `TracedSvg` makes.
+    #[wasm_bindgen(getter, js_name = pixelsWritten)]
+    pub fn pixels_written(&self) -> f64 {
+        self.report.pixels_written as f64
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn transparent(&self) -> bool {
+        self.report.transparent
+    }
 }

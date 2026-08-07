@@ -6,6 +6,7 @@
 
 pub mod color;
 pub mod diffusion;
+pub mod encode;
 pub mod fixture;
 pub mod noise;
 pub mod palette;

@@ -42,7 +42,12 @@
 import { GpuLayer } from "../gpu";
 import { correlationId, logger } from "../lib/log";
 import { loadEffectRegistry, loadGpuEffects } from "../registry";
-import { DocumentRenderer, loadDitherCore, type DitherCore } from "../state/render";
+import {
+  DocumentRenderer,
+  loadDitherCore,
+  type CoreGifAnimation,
+  type DitherCore,
+} from "../state/render";
 import type { CapabilityReport } from "../lib/capabilities";
 import {
   RenderAbandoned,
@@ -50,6 +55,13 @@ import {
   sourceBytes,
   type CallMessage,
   type CallResult,
+  type GifAbandonParams,
+  type GifBeginParams,
+  type GifBeginResult,
+  type GifFinishParams,
+  type GifFinishResult,
+  type GifFrameParams,
+  type GifFrameResult,
   type InitResult,
   type RenderParams,
   type RenderResult,
@@ -257,10 +269,102 @@ function trace(params: TraceParams): TraceResult {
   return { svg: traced.svg, report: traced.report, ms };
 }
 
+// --- animated GIF (F-EX-04) ---------------------------------------------
+
+/**
+ * The GIF encoders in flight, by handle.
+ *
+ * Outside the render queue, like `trace`, and for the same reason: LZW touches
+ * neither the device nor the node cache, so it has nothing to serialise against.
+ * Unlike `trace` it is not one long call — the work is spread across one message
+ * per frame, and each one is short, so an export's GIF encode interleaves with
+ * preview renders instead of blocking them.
+ *
+ * A map rather than a single slot because nothing here may assume there is only
+ * one: two dialogs, or an estimate running beside an export, are ordinary.
+ */
+const gifs = new Map<number, CoreGifAnimation>();
+let nextGifHandle = 1;
+
+function gifBegin(params: GifBeginParams): GifBeginResult {
+  const { core } = requireLive("start a GIF");
+  const handle = nextGifHandle;
+  nextGifHandle += 1;
+  gifs.set(handle, core.gifAnimation(params.width, params.height));
+  log.info("gif animation started", {
+    handle,
+    width: params.width,
+    height: params.height,
+  });
+  return { handle };
+}
+
+function requireGif(handle: number, what: string): CoreGifAnimation {
+  const animation = gifs.get(handle);
+  if (animation === undefined) {
+    // Named rather than ignored: a handle the worker does not have means the
+    // caller finished or abandoned it already, and silently accepting the frame
+    // would produce a file missing frames nobody could account for.
+    throw new Error(
+      `the render worker has no GIF animation ${handle}, so it cannot ${what}; it was ` +
+        `finished, abandoned, or never started`,
+    );
+  }
+  return animation;
+}
+
+function gifFrame(params: GifFrameParams): GifFrameResult {
+  const animation = requireGif(params.handle, "take a frame");
+  animation.push(params.indices);
+  return animation.state();
+}
+
+function gifFinish(params: GifFinishParams): GifFinishResult {
+  const animation = requireGif(params.handle, "be finished");
+  const started = performance.now();
+  try {
+    const encoded = animation.finish(
+      params.paletteRgb,
+      params.delayCentiseconds,
+      params.loopForever,
+      params.transparentIndex,
+    );
+    const ms = Math.round((performance.now() - started) * 100) / 100;
+    log.info("gif encoded", {
+      handle: params.handle,
+      frames: encoded.frames,
+      bytes: encoded.byteLength,
+      paletteEntries: encoded.paletteEntries,
+      tableEntries: encoded.tableEntries,
+      minCodeSize: encoded.minCodeSize,
+      croppedFrames: encoded.croppedFrames,
+      ms,
+    });
+    return { ...encoded, ms };
+  } finally {
+    // `finish` frees the handle whether it succeeded or threw, so the entry goes
+    // either way; leaving it would let a retry reach a freed handle.
+    gifs.delete(params.handle);
+  }
+}
+
+function gifAbandon(params: GifAbandonParams): null {
+  const animation = gifs.get(params.handle);
+  if (animation === undefined) return null;
+  animation.abandon();
+  gifs.delete(params.handle);
+  log.info("gif animation abandoned", { handle: params.handle });
+  return null;
+}
+
 function dispose(): null {
   if (disposed) return null;
   disposed = true;
   queue.clear("the render worker is shutting down");
+  // Any GIF still being built holds WASM linear memory for its whole index
+  // buffer. A dialog closed mid-encode is the ordinary way to get here.
+  for (const animation of gifs.values()) animation.abandon();
+  gifs.clear();
   live?.renderer.dispose();
   live?.layer.destroy();
   live = null;
@@ -272,11 +376,19 @@ function dispose(): null {
 
 /** What of a reply is transferred rather than copied. */
 function transferables(kind: WorkerCallKind, value: unknown): Transferable[] {
-  if (kind !== "render") return [];
-  const result = value as RenderResult;
-  if (result.image.kind === "bitmap") return [result.image.bitmap];
-  // The frame's samples leave this thread rather than being duplicated on it.
-  return [result.image.data.buffer as ArrayBuffer];
+  if (kind === "render") {
+    const result = value as RenderResult;
+    if (result.image.kind === "bitmap") return [result.image.bitmap];
+    // The frame's samples leave this thread rather than being duplicated on it.
+    return [result.image.data.buffer as ArrayBuffer];
+  }
+  if (kind === "gif-finish") {
+    // A finished GIF is the whole file. `bytes` is already a copy out of WASM
+    // memory, so transferring it costs nothing here and saves a structured
+    // clone of several megabytes on the way over.
+    return [(value as GifFinishResult).bytes.buffer as ArrayBuffer];
+  }
+  return [];
 }
 
 async function run(message: CallMessage): Promise<CallResult<WorkerCallKind>> {
@@ -289,6 +401,14 @@ async function run(message: CallMessage): Promise<CallResult<WorkerCallKind>> {
       return render(message.id, message.params as RenderParams);
     case "trace":
       return trace(message.params as TraceParams);
+    case "gif-begin":
+      return gifBegin(message.params as GifBeginParams);
+    case "gif-frame":
+      return gifFrame(message.params as GifFrameParams);
+    case "gif-finish":
+      return gifFinish(message.params as GifFinishParams);
+    case "gif-abandon":
+      return gifAbandon(message.params as GifAbandonParams);
     case "dispose":
       return dispose();
   }

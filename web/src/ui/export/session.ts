@@ -50,6 +50,8 @@ import type {
 } from "../../export";
 import { logger } from "../../lib/log";
 import type { DocumentSnapshot, EditorSession } from "../../state";
+import type { DitherDocument } from "../../types/document";
+import { frameDocument, type TimelineStore } from "../timeline";
 import { isAbandoned, type RenderResult } from "../../worker";
 
 const log = logger("export");
@@ -99,11 +101,31 @@ export function vectorTracerFor(session: EditorSession): VectorTracer {
   };
 }
 
-export function exportSourceFor(session: EditorSession): ExportImageSource {
+/**
+ * The document a still export renders.
+ *
+ * **The frame at the playhead, when the document is animated.** An animated
+ * document has no single picture: `buildRenderGraph` refuses it as written, and
+ * the honest answer to "export this as a PNG" is the frame on screen, which is
+ * the one the timeline is drawing. Anything else would either fail or export a
+ * frame nobody was looking at.
+ *
+ * A document with no tracks has no plan and comes through untouched, which is
+ * every still document and the overwhelming majority of exports.
+ */
+function documentToExport(session: EditorSession, timeline: TimelineStore): DitherDocument {
+  return frameDocument(timeline, session.store.getSnapshot().document);
+}
+
+export function exportSourceFor(
+  session: EditorSession,
+  timeline: TimelineStore,
+): ExportImageSource {
   // Memoised against the store's own snapshot identity. `useSyncExternalStore`
   // compares with `Object.is`, so a subject rebuilt on every read renders
   // forever — the same contract the document store itself documents.
   let lastSnapshot: DocumentSnapshot | null = null;
+  let lastTimelineRevision = -1;
   let lastSubject: ExportSubject | null = null;
 
   const build = (snapshot: DocumentSnapshot): ExportSubject | null => {
@@ -124,15 +146,19 @@ export function exportSourceFor(session: EditorSession): ExportImageSource {
       width: image.width,
       height: image.height,
       soloNodeName,
-      revision: snapshot.revision,
+      // The playhead is part of what would be exported when the document is
+      // animated, so the estimate has to be re-measured when it moves.
+      revision: snapshot.revision * 1_000_003 + timeline.getSnapshot().revision,
     };
   };
 
   return {
     subject(): ExportSubject | null {
       const snapshot = session.store.getSnapshot();
-      if (snapshot !== lastSnapshot) {
+      const timelineRevision = timeline.getSnapshot().revision;
+      if (snapshot !== lastSnapshot || timelineRevision !== lastTimelineRevision) {
         lastSnapshot = snapshot;
+        lastTimelineRevision = timelineRevision;
         lastSubject = build(snapshot);
       }
       return lastSubject;
@@ -148,7 +174,7 @@ export function exportSourceFor(session: EditorSession): ExportImageSource {
       }
 
       const { id, frame } = session.render.renderCancellable({
-        document: snapshot.document,
+        document: documentToExport(session, timeline),
         solo: snapshot.soloNodeId,
         // Always the document's own resolution. F-UI-03's reduction is a
         // property of the preview, and a file rendered at 40% would be a
@@ -199,7 +225,14 @@ export function exportSourceFor(session: EditorSession): ExportImageSource {
     },
 
     subscribe(listener: () => void): () => void {
-      return session.store.subscribe(listener);
+      // Both stores: when the document is animated, moving the playhead changes
+      // which frame a still export would write.
+      const offDocument = session.store.subscribe(listener);
+      const offTimeline = timeline.subscribe(listener);
+      return () => {
+        offDocument();
+        offTimeline();
+      };
     },
   };
 }

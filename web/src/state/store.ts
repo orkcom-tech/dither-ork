@@ -363,8 +363,21 @@ export class DocumentStore {
     this.#commit(mutate.setClock(this.document, clock), "Clock");
   }
 
-  setBindings(bindings: readonly Binding[]): void {
-    this.#commit(mutate.setBindings(this.document, bindings), "Bindings");
+  /**
+   * Replace the document's modulator bindings (F-AN-02).
+   *
+   * `continuous` coalesces, exactly as it does for a parameter: dragging a
+   * modulator's amount dispatches on every pointer move, and one undo step per
+   * pixel of travel is an undo stack nobody can use. The timeline passes it for
+   * the two edits that are drags and withholds it for bind and unbind, which are
+   * discrete acts a person expects to be able to undo one at a time.
+   */
+  setBindings(bindings: readonly Binding[], options: CommitOptions = {}): void {
+    this.#commit(
+      mutate.setBindings(this.document, bindings),
+      "Bindings",
+      options.continuous === true ? "bindings" : null,
+    );
   }
 
   // --- history (F-ST-04) -----------------------------------------------

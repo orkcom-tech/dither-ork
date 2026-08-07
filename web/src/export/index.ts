@@ -157,11 +157,13 @@ export { UNTITLED_BASE, baseName, exportFileName } from "./filename";
 
 export {
   chooseDestination,
+  chooseDestinationForType,
   deliveryCapability,
   writeToDestination,
   type DeliveryCapability,
   type DeliveryKind,
   type Destination,
+  type DestinationType,
 } from "./destination";
 
 export {

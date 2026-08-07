@@ -22,10 +22,18 @@
  * ## What is refused
  *
  * A document carrying **modulator bindings** is refused rather than rendered
- * without them. Bindings resolve to concrete parameter values per frame, and
- * the modulator shapes (F-CL/F-MO) are not implemented in this build; rendering
- * the document with its unbound defaults would produce a picture that is not
- * the document, and would do it silently.
+ * without them, and that refusal is permanent rather than a gap waiting to be
+ * filled. This function is document -> graph; a binding is not a value it can
+ * compile, because the value depends on a frame and on a modulator shape.
+ * Compiling the document with its unbound authored values would produce a
+ * picture that is not the document, and would do it silently.
+ *
+ * The resolution happens **upstream**, in `web/src/animation/plan.ts`:
+ * `documentAtFrame` evaluates every binding for a frame and returns an ordinary
+ * document carrying none, which comes through here unremarkably. So the animated
+ * path and this refusal are not in tension — the refusal is what guarantees the
+ * animated path was taken. Both callers take it: `ui/timeline/preview.ts` for
+ * the live preview and `ui/export/animated.ts` for an animated export.
  */
 
 import type { DitherDocument } from "../../types/document";
@@ -60,9 +68,10 @@ export function buildRenderGraph(
   if (document.bindings.length > 0) {
     throw new DocumentError(
       "invalid-value",
-      `this document has ${document.bindings.length} modulator binding(s), and no modulator ` +
-        `is implemented in this build. It is refused rather than rendered as though the ` +
-        `bindings were not there.`,
+      `this document has ${document.bindings.length} modulator binding(s), which resolve to a ` +
+        `value only for a particular frame. Compile documentAtFrame(plan, frame) instead — it ` +
+        `returns the same document with every binding replaced by the number it produced. It ` +
+        `is refused rather than rendered as though the bindings were not there.`,
       { bindings: document.bindings.length },
     );
   }

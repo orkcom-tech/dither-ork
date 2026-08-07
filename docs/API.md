@@ -498,6 +498,52 @@ normalizedTime(clock, frame) === (frame % clock.frames) / clock.frames  // never
 Documents are versioned. A newer `schema` than the build understands is
 **refused**, not read on a best-effort basis.
 
+### `bindings` is the only animation the schema carries
+
+`bindings` holds **modulators** and nothing else. Two things that animate are
+not in it, and both are stated here rather than discovered:
+
+- **Keyframe tracks (F-AN-08)** live in `web/src/ui/timeline/model.ts` for the
+  session. They survive an edit and do **not** survive a save, a share link or a
+  reload. The timeline panel says so.
+- **Temporal variation (F-AN-04)** — stepping a node's seed or pattern offset per
+  frame — is a plan option (`AnimationOptions.variations`), not a document field.
+  `web/src/animation/temporal.ts` implements and tests it; nothing sets it.
+
+Modulator bindings round-trip in both directions. A document that arrives with
+them becomes timeline tracks (`TimelineStore.#adopt`), and a track a person makes
+becomes bindings (`TimelineStore.#publish` → `store.setBindings`), so an
+animation made in the editor is in the `.dork`, the autosave and the share link.
+
+One consequence worth stating because it caught this code: **a still export of an
+animated document is the frame at the playhead.** Once tracks are written back,
+`store.document` carries bindings and `buildRenderGraph` refuses it, so
+`exportSourceFor` takes the timeline and resolves the playhead's frame. It is
+also the right answer independently — the honest response to "export this as a
+PNG" is the picture on screen.
+
+### Who may hand a bound document to the renderer: nobody
+
+`state/render/graph.ts`'s `buildRenderGraph` **throws** on a document whose
+`bindings` is non-empty, and that is permanent rather than a gap. It compiles a
+document to a graph; a binding's value depends on a frame and a modulator shape,
+so there is nothing for it to compile, and compiling the authored value instead
+would draw a picture that is not the document.
+
+The resolution happens upstream, and there is exactly one way in:
+
+```ts
+const plan = planAnimation(document, registry, { timing, variations });   // animation/plan.ts
+const seam = validateLoopSeam(plan, { hashForFrame });                    // F-AN-06, before exporting
+const frameDocument = documentAtFrame(plan, frame);                       // bindings resolved, list empty
+const graph = buildRenderGraph(frameDocument, { width, height, quality, frame, solo });
+```
+
+`ui/timeline/evaluate.ts` wraps this with the keyframe tracks and exposes the
+same two names, which is what the live preview (`ui/timeline/preview.ts`) and the
+animated export (`ui/export/animated.ts`) both call. Anything else that wants a
+frame of an animated document goes through one of those two.
+
 ---
 
 ## 4. GPU pass layer
@@ -892,6 +938,45 @@ class RenderService {
     indices: Uint16Array; width: number; height: number;
     paletteRgb: Uint8Array; settings: VectorTraceSettings;
   }): Promise<{ svg: string; report: VectorTraceReport; ms: number }>;
+
+  /**
+   * F-EX-04, as three calls rather than one.
+   *
+   * The encoder is a `wasm-bindgen` handle and may only be held in the worker,
+   * and a GIF is built frame by frame — a 60-frame loop at document resolution
+   * is more index map than anyone wants to hold twice, so one call taking every
+   * frame would mean a full `frames x width x height` buffer on this thread as
+   * well as the one in WASM. The handle is a number because that is all that
+   * survives `postMessage`.
+   *
+   * It is claimed by `gifBegin`, fed by `gifFrame`, and consumed by exactly one
+   * of `gifFinish` or `gifAbandon`; both free the WASM handle, and a handle that
+   * reaches neither is linear memory held until the worker dies.
+   * `ui/export/animated.ts` is the only caller and it abandons in a `finally`.
+   *
+   * Outside the render queue, like `trace`, and for the same reason: LZW touches
+   * neither the device nor the node cache. Unlike `trace` it is not one long
+   * call — one short message per frame — so a GIF encode interleaves with
+   * preview renders instead of blocking them.
+   */
+  gifBegin(params: { width: number; height: number }): Promise<number>;
+  /**
+   * One frame's index map, one byte per pixel, row-major.
+   *
+   * **Copied, not transferred.** `replicateIndices` returns its input unchanged
+   * at scale 1, so the array handed over can be one the palette builder still
+   * owns; detaching it would leave the encoder reading a zero-length array on
+   * the next frame.
+   */
+  gifFrame(params: { handle: number; indices: Uint8Array }):
+    Promise<{ frames: number; bufferedBytes: number }>;
+  /** `paletteRgb` becomes the global colour table verbatim — there is nowhere to quantize. */
+  gifFinish(params: {
+    handle: number; paletteRgb: Uint8Array; delayCentiseconds: number;
+    loopForever: boolean; transparentIndex: number;
+  }): Promise<GifFinishResult>;
+  /** Never rejects: the only correct place to call it is a `finally`. */
+  gifAbandon(handle: number): Promise<void>;
 
   dispose(): Promise<void>;
 }

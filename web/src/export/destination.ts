@@ -104,10 +104,37 @@ export async function chooseDestination(
   suggestedName: string,
   format: ExportFormat,
 ): Promise<Destination | null> {
+  const info = formatInfo(format);
+  return chooseDestinationForType(suggestedName, {
+    label: info.label,
+    mime: info.mime,
+    extension: info.extension,
+  });
+}
+
+/**
+ * What the picker needs to describe a file type.
+ *
+ * The three fields both format tables already carry, named here so the picker
+ * is not coupled to either of them: `ExportFormat` is the four still formats and
+ * an animated GIF is none of them. `export/animated/settings.ts` has its own
+ * table with the same three fields, and `ui/export/AnimatedExportPanel.tsx`
+ * passes them straight through.
+ */
+export interface DestinationType {
+  readonly label: string;
+  readonly mime: string;
+  readonly extension: string;
+}
+
+/** {@link chooseDestination}, for a file type that is not a still image format. */
+export async function chooseDestinationForType(
+  suggestedName: string,
+  type: DestinationType,
+): Promise<Destination | null> {
   const picker = savePicker();
   if (picker === null) return { kind: "download", name: suggestedName };
 
-  const info = formatInfo(format);
   try {
     const handle = await picker({
       suggestedName,
@@ -116,8 +143,8 @@ export async function chooseDestination(
       id: "dither-ork-export",
       types: [
         {
-          description: `${info.label} image`,
-          accept: { [info.mime]: [`.${info.extension}`] },
+          description: `${type.label} file`,
+          accept: { [type.mime]: [`.${type.extension}`] },
         },
       ],
     });

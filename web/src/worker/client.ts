@@ -52,6 +52,11 @@ import {
   sourceBytes,
   type CallParams,
   type CallResult,
+  type GifBeginParams,
+  type GifFinishParams,
+  type GifFinishResult,
+  type GifFrameParams,
+  type GifFrameResult,
   type InitResult,
   type RenderParams,
   type RenderResult,
@@ -219,6 +224,59 @@ export class RenderService {
       ms: Math.round((performance.now() - started) * 100) / 100,
     });
     return result;
+  }
+
+  /**
+   * Start an animated GIF (F-EX-04). The handle is fed by {@link gifFrame} and
+   * consumed by exactly one of {@link gifFinish} or {@link gifAbandon}.
+   */
+  async gifBegin(params: GifBeginParams): Promise<number> {
+    const result = await this.#call("gif-begin", params);
+    return result.handle;
+  }
+
+  /**
+   * Add one frame's index map.
+   *
+   * The array is **copied** rather than transferred. `replicateIndices` returns
+   * its input unchanged at scale 1, so the buffer handed here can be one the
+   * palette builder still owns, and detaching it would leave the encoder reading
+   * a zero-length array on the next frame. One clone of `width * height` bytes
+   * per frame is the price of not having to reason about that at every caller.
+   */
+  gifFrame(params: GifFrameParams): Promise<GifFrameResult> {
+    return this.#call("gif-frame", params);
+  }
+
+  /** Write the file and release the worker-side handle. */
+  async gifFinish(params: GifFinishParams): Promise<GifFinishResult> {
+    const started = performance.now();
+    const result = await this.#call("gif-finish", params);
+    log.info("gif returned from the render worker", {
+      frames: result.frames,
+      bytes: result.byteLength,
+      tableEntries: result.tableEntries,
+      workerMs: result.ms,
+      ms: Math.round((performance.now() - started) * 100) / 100,
+    });
+    return result;
+  }
+
+  /**
+   * Throw away a GIF that will not be finished.
+   *
+   * Never rejects for a handle the worker no longer has, because the only
+   * correct place to call it is a `finally` that also runs after a successful
+   * finish — and a cleanup path that can throw is a cleanup path that hides the
+   * error it was cleaning up after.
+   */
+  async gifAbandon(handle: number): Promise<void> {
+    if (this.#disposed) return;
+    try {
+      await this.#call("gif-abandon", { handle });
+    } catch (error) {
+      log.warn("a GIF animation could not be abandoned", { handle, error: String(error) });
+    }
   }
 
   async dispose(): Promise<void> {

@@ -26,7 +26,13 @@ export {
   type DiffusionRequest,
   type DiffusionResult,
 } from "./wasm-backend";
-export { loadDitherCore, type CoreKernel, type DitherCore } from "./core";
+export {
+  loadDitherCore,
+  type CoreGifAnimation,
+  type CoreGifResult,
+  type CoreKernel,
+  type DitherCore,
+} from "./core";
 export { RenderSurfaces } from "./surfaces";
 export {
   DocumentRenderer,

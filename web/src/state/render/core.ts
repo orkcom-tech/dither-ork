@@ -44,6 +44,53 @@ export interface CoreKernel {
 }
 
 /**
+ * What the core's GIF writer reports, with the handle already gone.
+ *
+ * Field for field what `EncodedGif` carries, read out once and copied, for the
+ * reason this whole file exists: every getter on a `wasm-bindgen` handle copies
+ * out of linear memory, and a value read after `free()` reads memory the
+ * allocator has given to something else.
+ */
+export interface CoreGifResult {
+  readonly bytes: Uint8Array;
+  readonly frames: number;
+  readonly byteLength: number;
+  readonly paletteEntries: number;
+  readonly tableEntries: number;
+  readonly minCodeSize: number;
+  readonly croppedFrames: number;
+  readonly pixelsWritten: number;
+  readonly transparent: boolean;
+}
+
+/**
+ * One GIF being built (F-EX-04).
+ *
+ * Stateful across calls, because the caller renders frames one at a time and
+ * cannot hold them all. The handle it wraps lives for the whole animation, which
+ * is the one exception to "read it once and free it immediately" in this file —
+ * so the two ways it can end are both here and both free it: {@link finish}
+ * writes the file, {@link abandon} throws the frames away. A caller that does
+ * neither leaks WASM linear memory for the lifetime of the worker, so every path
+ * through `worker/render.worker.ts` calls one of them.
+ */
+export interface CoreGifAnimation {
+  /** One frame's index map, one byte per pixel, in playback order. */
+  push(indices: Uint8Array): void;
+  /** Frames pushed so far, and the bytes of index map held for them. */
+  state(): { readonly frames: number; readonly bufferedBytes: number };
+  /** Write the file and release the handle. The animation is over either way. */
+  finish(
+    paletteRgb: Uint8Array,
+    delayCentiseconds: number,
+    loopForever: boolean,
+    transparentIndex: number,
+  ): CoreGifResult;
+  /** Release the handle without writing anything. Safe to call twice. */
+  abandon(): void;
+}
+
+/**
  * Everything the application asks of the core, with the handles already gone.
  *
  * `ThresholdRankSource` is part of it rather than beside it because the ordered
@@ -72,6 +119,17 @@ export interface DitherCore extends ThresholdRankSource, DiffusionPort {
     paletteRgb: Uint8Array,
     settings: VectorTraceSettings,
   ): TracedDocument;
+  /**
+   * Start an animated GIF (F-EX-04).
+   *
+   * Here for the same reason `traceSvg` is: the result is a `wasm-bindgen`
+   * handle, and this is the one file allowed to hold one. `worker/
+   * render.worker.ts` is the only caller, and `ui/export/animated.ts` is what
+   * turns the worker's answer back into `export/animated/gif.ts`'s `GifCore`.
+   *
+   * Throws on an extent GIF cannot describe — the format's dimensions are 16-bit.
+   */
+  gifAnimation(width: number, height: number): CoreGifAnimation;
 }
 
 /** Load and initialise the core. Called once, at boot. */
@@ -99,6 +157,7 @@ export async function loadDitherCore(): Promise<DitherCore> {
     dither: (request) => runDither(mod, request),
     traceSvg: (indices, width, height, paletteRgb, settings) =>
       runTrace(mod, indices, width, height, paletteRgb, settings),
+    gifAnimation: (width, height) => startGif(mod, width, height),
   };
 }
 
@@ -169,6 +228,75 @@ function runDither(mod: CoreModule, request: DiffusionRequest): DiffusionResult 
   } finally {
     options.free();
   }
+}
+
+/**
+ * One animated GIF (F-EX-04).
+ *
+ * The handle outlives the call that made it, which nothing else in this file
+ * does — a GIF is built frame by frame and the frames arrive over many messages.
+ * That makes the free a discipline rather than a `finally`, so it is enforced
+ * here instead of being left to the caller: `#released` makes both endings
+ * idempotent, and every subsequent call throws by name rather than reaching into
+ * freed memory and producing a picture out of whatever is there now.
+ */
+function startGif(mod: CoreModule, width: number, height: number): CoreGifAnimation {
+  const animation = new mod.GifAnimation(width, height);
+  let released = false;
+
+  const live = (what: string): void => {
+    if (released) {
+      throw new Error(`this GIF animation has already been ${what === "push" ? "finished or abandoned" : "released"}, so it cannot ${what}`);
+    }
+  };
+
+  return {
+    push(indices: Uint8Array): void {
+      live("push");
+      animation.pushFrame(indices);
+    },
+    state() {
+      live("report");
+      return { frames: animation.frameCount, bufferedBytes: animation.bufferedBytes };
+    },
+    finish(paletteRgb, delayCentiseconds, loopForever, transparentIndex): CoreGifResult {
+      live("finish");
+      // Freed on the way out whether the encode succeeded or threw: an oversized
+      // palette throws from in there, and the animation's own buffer is the
+      // largest thing this module ever holds.
+      try {
+        const encoded = animation.finish(
+          paletteRgb,
+          delayCentiseconds,
+          loopForever,
+          transparentIndex,
+        );
+        try {
+          return {
+            bytes: encoded.bytes,
+            frames: encoded.frames,
+            byteLength: encoded.byteLength,
+            paletteEntries: encoded.paletteEntries,
+            tableEntries: encoded.tableEntries,
+            minCodeSize: encoded.minCodeSize,
+            croppedFrames: encoded.croppedFrames,
+            pixelsWritten: encoded.pixelsWritten,
+            transparent: encoded.transparent,
+          };
+        } finally {
+          encoded.free();
+        }
+      } finally {
+        released = true;
+        animation.free();
+      }
+    },
+    abandon(): void {
+      if (released) return;
+      released = true;
+      animation.free();
+    },
+  };
 }
 
 /**

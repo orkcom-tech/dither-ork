@@ -9,6 +9,7 @@ import type { CapabilityReport } from "../../lib/capabilities";
 import type { EffectRegistry } from "../../registry";
 import type { EditorSession } from "../../state";
 import type { PaletteStore } from "../palette";
+import type { TimelineStore } from "../timeline";
 import { BatchPanel } from "./BatchPanel";
 import "./batch.css";
 
@@ -44,6 +45,8 @@ export interface BatchButtonProps {
   readonly registry: EffectRegistry;
   readonly report: CapabilityReport;
   readonly palette: PaletteStore;
+  /** The timeline, because a batch applies one *frame* of the document. */
+  readonly timeline: TimelineStore;
 }
 
 export function BatchButton({
@@ -51,6 +54,7 @@ export function BatchButton({
   registry,
   report,
   palette,
+  timeline,
 }: BatchButtonProps): React.ReactElement {
   const [open, setOpen] = React.useState(false);
   const [settings, setSettings] = React.useState<BatchSettings>(DEFAULT_BATCH_SETTINGS);
@@ -112,6 +116,7 @@ export function BatchButton({
             registry={registry}
             report={report}
             palette={palette}
+            timeline={timeline}
             settings={settings}
             onSettings={setSettings}
             inputs={inputs}

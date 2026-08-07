@@ -6,6 +6,13 @@ import {
   type ExportSettings,
   type VectorTracer,
 } from "../../export";
+import {
+  DEFAULT_ANIMATED_SETTINGS,
+  type AnimatedFrameSource,
+  type AnimatedSettings,
+  type GifCore,
+} from "../../export/animated";
+import { AnimatedExportPanel } from "./AnimatedExportPanel";
 import { ExportPanel } from "./ExportPanel";
 import "./export.css";
 
@@ -44,11 +51,37 @@ export interface ExportButtonProps {
   readonly source: ExportImageSource;
   /** The core's SVG tracer (F-EX-08). */
   readonly tracer: VectorTracer;
+  /** The document as a loop (F-EX-04, 05, 06). */
+  readonly animated: AnimatedFrameSource;
+  /** The core's GIF encoder, which only the animated GIF format reads. */
+  readonly gif: GifCore;
+  /** Why the loop cannot be exported, or `null`. See `AnimatedExportPanelProps`. */
+  readonly animatedBlockReason: () => string | null;
 }
 
-export function ExportButton({ source, tracer }: ExportButtonProps): React.ReactElement {
+/**
+ * Still or animated.
+ *
+ * One dialog with a switch rather than two toolbar buttons: it is one action —
+ * "write this out" — and which of the two a person wants depends on whether the
+ * document has a track, which is not something a toolbar can show. The switch
+ * also puts the two side by side, which is where the answer to "why is the
+ * animated one greyed out" belongs.
+ */
+type ExportMode = "still" | "animated";
+
+export function ExportButton({
+  source,
+  tracer,
+  animated,
+  gif,
+  animatedBlockReason,
+}: ExportButtonProps): React.ReactElement {
   const [open, setOpen] = React.useState(false);
+  const [mode, setMode] = React.useState<ExportMode>("still");
   const [settings, setSettings] = React.useState<ExportSettings>(DEFAULT_EXPORT_SETTINGS);
+  const [animatedSettings, setAnimatedSettings] =
+    React.useState<AnimatedSettings>(DEFAULT_ANIMATED_SETTINGS);
   const [cancelJob, setCancelJob] = React.useState<(() => void) | null>(null);
   const dialogRef = React.useRef<HTMLDialogElement>(null);
 
@@ -63,6 +96,10 @@ export function ExportButton({ source, tracer }: ExportButtonProps): React.React
     setSettings(next);
   }, []);
 
+  const onAnimatedSettings = React.useCallback((next: AnimatedSettings) => {
+    setAnimatedSettings(next);
+  }, []);
+
   const onRunning = React.useCallback((cancel: (() => void) | null) => {
     // Stored as a thunk: `useState` calls a function argument to derive the
     // next state, so a bare function would be invoked instead of kept.
@@ -74,7 +111,7 @@ export function ExportButton({ source, tracer }: ExportButtonProps): React.React
       <button
         type="button"
         className="ui-button"
-        title="Export the picture as PNG, JPEG, WebP or SVG"
+        title="Export the picture as PNG, JPEG, WebP or SVG, or the loop as GIF, APNG, WebP, video or a sequence"
         data-testid="open-export"
         onClick={() => setOpen(true)}
       >
@@ -94,6 +131,30 @@ export function ExportButton({ source, tracer }: ExportButtonProps): React.React
       >
         <header className="xp-dialog__head">
           <span className="xp-dialog__title">export</span>
+          <div className="xp__group">
+            <button
+              type="button"
+              className="ui-button"
+              aria-pressed={mode === "still"}
+              disabled={cancelJob !== null}
+              title="One picture — PNG, JPEG, WebP or SVG"
+              data-testid="export-mode-still"
+              onClick={() => setMode("still")}
+            >
+              still
+            </button>
+            <button
+              type="button"
+              className="ui-button"
+              aria-pressed={mode === "animated"}
+              disabled={cancelJob !== null}
+              title="The whole loop — GIF, APNG, animated WebP, video or a frame sequence"
+              data-testid="export-mode-animated"
+              onClick={() => setMode("animated")}
+            >
+              animated
+            </button>
+          </div>
           <button
             type="button"
             className="ui-button"
@@ -108,13 +169,23 @@ export function ExportButton({ source, tracer }: ExportButtonProps): React.React
             close
           </button>
         </header>
-        {open ? (
+        {open && mode === "still" ? (
           <ExportPanel
             source={source}
             tracer={tracer}
             settings={settings}
             onSettings={onSettings}
             onRunning={onRunning}
+          />
+        ) : null}
+        {open && mode === "animated" ? (
+          <AnimatedExportPanel
+            source={animated}
+            gif={gif}
+            settings={animatedSettings}
+            onSettings={onAnimatedSettings}
+            onRunning={onRunning}
+            blockReason={animatedBlockReason}
           />
         ) : null}
       </dialog>

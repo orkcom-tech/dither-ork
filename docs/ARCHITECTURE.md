@@ -555,22 +555,40 @@ of the page, not of the engine, and it is the page's next job.
 
 ## Testing
 
-The list below is the strategy. What is built today: 112 Rust tests including
+The list below is the strategy. What is built today: 157 Rust tests including
 golden images for all 15 registered diffusion kernels across four fixtures and
-two palettes; 715 TypeScript tests including the catalogue test that runs the
-startup validator over the shipped descriptors and asserts the counts above, the
-`.dork` round trip, the document store and its history, the image intake, and
-the pure halves of the viewport and every panel; and golden images for the
-parallel catalogue at two parameter sets each. The loop seam and the perf budget
-have nothing to test yet — there are no modulators and no timeline.
+two palettes, and the GIF encoder's own set; 1,610 TypeScript tests including the
+catalogue test that runs the startup validator over the shipped descriptors and
+asserts the counts above, the `.dork` round trip, the document store and its
+history, the image intake, the animation core's clock, modulators, seam and
+plan, the timeline's keyframes and playback arithmetic, the batch queue and
+naming, the animated containers, and the pure halves of the viewport and every
+panel; and golden images for the parallel catalogue at two parameter sets each.
 
-**What no automated test covers, and it is the important gap:** nothing drives
-the assembled application. Every panel's *model* is unit-tested and every
-render *stage* is tested, and the wiring between them — a click reaching a
-mutation reaching a frame — is checked by a person with a browser. That is how
-the three defects in this round were found and it is not a substitute for a
-test. A headless browser run against the real page is the next thing the test
-strategy needs.
+**What no automated test covers, and it is still the important gap:** nothing
+*automated* drives the assembled application. Every panel's model is unit-tested
+and every render stage is tested; the wiring between them — a click reaching a
+mutation reaching a frame — is checked by a person with a browser.
+
+`web/test/probe/` is the harness that person uses. It is a plain ES module
+loaded from the console against the DEV debug handle, and it imports the real
+source modules from the dev server rather than restating any of them, so what it
+exercises is the wiring and not a copy of it. It measures the things a unit test
+structurally cannot:
+
+- **Main-thread occupancy during a render**, from two independent instruments: a
+  `MessageChannel` ping-pong (not clamped by tab visibility, unlike `setTimeout`,
+  and not tied to compositing, unlike `requestAnimationFrame`) and a
+  `PerformanceObserver` on `longtask`.
+- **That a bound parameter reaches the picture**, by rendering two frames of the
+  loop and counting differing pixels rather than trusting that the number moved.
+- **That an exported GIF is a GIF**, with a container reader written inside the
+  probe — verifying the encoder against the encoder's own report would prove
+  nothing about the file.
+
+It is not a substitute for an automated run. A headless browser driving the real
+page is still the next thing the test strategy needs; the probe is what makes
+that run's assertions obvious once somebody writes it.
 
 **Both halves of the catalogue now have goldens.** The CPU set is
 `core/fixtures/golden/`, compared byte for byte. The GPU set is
@@ -673,10 +691,53 @@ nearest-neighbour scale, a measured size estimate, progress with a cancel that
 stops work, clipboard, `.dork` save and open in both variants, the preset
 library on OPFS with a starter set, and share links.
 
-The **animated** half of export (F-EX-04 through F-EX-07, and the PNG sequence
-and sprite sheet) is not built and cannot be until the clock and the modulators
-are, because there is nothing yet to render a second frame *of*. Steps 8, 9, 13
-and 14 — clock, modulators, timeline, batch, Surprise Me — have not started.
+**Steps 8, 9, 13 and 14 are now built too** — the clock, the modulators, the
+timeline, batch and Surprise Me — and with them the **animated** half of export
+(F-EX-04 through F-EX-07, plus the PNG sequence and the sprite sheet).
+
+Three seams were left open when those landed in parallel, and all three were the
+same shape — a module built correctly against an interface nobody had joined:
+
+- **`state/render/graph.ts` refuses a document carrying bindings, permanently and
+  by design.** It compiles a document to a graph, and a binding is not a value it
+  can compile. `animation/plan.ts`'s `documentAtFrame` resolves bindings to
+  concrete numbers and hands over a document carrying none, so the refusal is
+  what *guarantees* the animated path was taken rather than something the
+  animated path had to get past. What did not exist was the other half: the
+  session's own render pump kept handing the raw document over and putting a
+  spurious failure on screen, so it now leaves an animated document to the
+  timeline, which is its pump (`state/session.ts`, `request()`).
+- **Surprise Me's capability probe asked the wrong question.** It asked whether
+  `buildRenderGraph` accepts bindings — it does not and never will — and
+  concluded the build had no modulators, so F-SM-09 was disabled in a build where
+  animation works. It now probes the real path: `planAnimation`, then
+  `documentAtFrame` at two frames, then compile, then check the value actually
+  moved.
+- **The timeline was a one-way street.** A document arriving with bindings became
+  tracks; a track a person made never became a binding, so saving a `.dork`,
+  autosaving or copying a share link silently discarded the whole animation.
+  `TimelineStore` now writes its modulator tracks back through
+  `store.setBindings`, guarded on the tracks array's identity so playback's
+  per-frame dispatches do not commit, and claiming the array as adopted before
+  handing it over so the notification does not loop.
+
+What remains of animation is **F-AN-04, temporal variation** — stepping a node's
+seed or pattern offset per frame rather than interpolating a parameter. The
+evaluator is written and tested (`animation/temporal.ts`, `TEMPORAL_MODES`);
+nothing in the UI reaches it and `.dork` has no field for it, so it is a plan
+option that no caller sets.
+
+`graph/animate.ts`'s `renderAnimation` is also **not used**, and the reason is
+structural rather than an oversight. It hashes every frame up front, identifies
+the nodes whose hash never changes, and *pins* them so an LRU under budget
+pressure cannot evict the shared prefix to hold one frame's throwaway tail. Its
+interface is a `graphForFrame` callback in and an `onFrame` callback out, and
+neither survives `postMessage`. Using it would mean moving the animation planner
+into the render worker and adding a streaming channel to a protocol that is one
+message per call. The animated export instead renders each frame as an ordinary
+`lane: "export"` call, which gets the cache hits — `ContentHashInput` excludes
+the frame index and `DocumentRenderer` retains every node's output, so a node
+that did not move is a hit — but not the pinning guarantee.
 
 Two gaps this section used to record are closed. **Nothing resolved an effect id
 to its `GpuEffect`**: now every `gpu` effect module exports
@@ -727,8 +788,26 @@ rather than what it was.
 - **Memory**: float buffers plus index maps plus a node cache at high
   resolution. Requires the explicit cache budget.
 - **GIF compresses dither noise poorly** — LZW hates high-entropy data, which is
-  exactly what a dither produces. Managed by the pre-export size estimate and by
-  offering APNG/WebP/MP4.
+  exactly what a dither produces. Measured: a 640x480 two-colour 48-frame loop
+  is 622 kB, about 13 kB a frame, against roughly 15 kB for the PNG of one
+  frame — so the LZW is doing something, but a dither is close to its worst
+  case. Managed by writing the smallest legal code width (a two-colour picture
+  gets a 2-bit minimum code size, not 8), by cropping frames to what changed
+  when the animation has no transparent index, and by offering APNG/WebP/MP4.
+  The animated panel deliberately does **not** show a size estimate: the honest
+  one costs three real renders through the real encoder every time a control
+  moves, and there is no formula for the size of an LZW-compressed dither to
+  model instead.
+- **A long export or batch used to crawl in a background tab, and did not have
+  to.** The encoders yield every 8 ms of work so a progress bar can move, and
+  the yield was `setTimeout(resolve, 0)` — which browsers clamp to about one
+  second when the tab is hidden. Measured before the fix: a five-image batch
+  where two items took 26 s and 36 s and one never finished at all. The yield is
+  now `scheduler.yield()` where it exists and a `MessageChannel` message
+  otherwise, neither of which is clamped; the same batch finishes in 4.8 s. The
+  risk this records is the general one: **any cooperative yield built on a timer
+  stops being a yield the moment the tab loses focus**, which is exactly when a
+  long job is running.
 - **SVG trace output size** in pixel-perfect mode — real and measured: a
   160x120 four-colour Floyd-Steinberg traces to 3210 contours and 16144 points,
   64.6 kB. Managed by the minimum-feature-size filter (the same picture at 64

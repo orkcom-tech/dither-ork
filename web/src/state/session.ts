@@ -355,6 +355,27 @@ export async function createEditorSession(
       sentKey = null;
       return;
     }
+
+    // F-AN-09. An animated document's picture is a function of a playhead this
+    // pump does not have, and `buildRenderGraph` refuses a document that still
+    // carries bindings — so asking for one here produces a `DocumentError` and
+    // an error banner for a document that is perfectly renderable. The timeline
+    // resolves the bindings to concrete values and is the pump while any exist;
+    // it takes the viewport through `attachViewport(null)`, but it does so on
+    // its own subscription, which runs after this one. Skipping is what stops
+    // that ordering from putting a spurious failure on screen.
+    //
+    // `sentKey` is cleared rather than set, so the frame is asked for again the
+    // moment the last binding goes and the pump is this one once more.
+    if (snapshot.document.bindings.length > 0) {
+      sentKey = null;
+      log.debug("preview left to the timeline: the document is animated", {
+        reason,
+        bindings: snapshot.document.bindings.length,
+      });
+      return;
+    }
+
     const key = renderKey(snapshot);
     if (key === sentKey) return;
     sentKey = key;

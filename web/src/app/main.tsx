@@ -6,11 +6,12 @@ import { correlationId, logger } from "../lib/log";
 import { createEditorSession, type EditorSession } from "../state";
 import { registerBatchControls } from "../ui/batch";
 import { registerDocumentsToolbar } from "../ui/documents";
-import { registerExportControls } from "../ui/export";
+import { animatedSourceFor, gifCoreFor, registerExportControls } from "../ui/export";
 import { paletteStore } from "../ui/palette";
 import { registerStackPanel } from "../ui/stack";
 import { registerPropertiesPanel } from "../ui/properties";
 import { registerSurpriseControls } from "../ui/surprise";
+import { registerTimelinePanel, type TimelineStore } from "../ui/timeline";
 import type { Viewport } from "../viewport";
 import { App } from "./App";
 import { StartupFailureScreen } from "./StartupFailureScreen";
@@ -131,7 +132,19 @@ async function start(): Promise<void> {
     href: window.location.href,
     hash: window.location.hash,
   });
-  registerExportControls(session);
+  // The timeline is built before export registers, because export takes it:
+  // `document.bindings` carries modulators and nothing else, and a keyframe
+  // track lives only in the timeline's own state, so the animated export reads
+  // the plan from here rather than exporting half of a keyframed loop. Slot
+  // position is decided by the `order` each registration carries, not by the
+  // order of these calls, so moving this up changes nothing on screen.
+  //
+  // It takes the whole session rather than just the store, because unlike the
+  // other three panels it draws: while a track exists the picture is a function
+  // of the playhead, so it becomes the render pump and hands the viewport back
+  // when the last track goes. See `ui/timeline/preview.ts`.
+  const timeline = registerTimelinePanel({ session, registry: outcome.registry });
+  registerExportControls({ session, timeline });
   // Batch after export: you make one picture right and then apply it to the
   // folder, which is the order the two are reached in.
   registerBatchControls({
@@ -139,6 +152,7 @@ async function start(): Promise<void> {
     registry: outcome.registry,
     report: outcome.report,
     palette: paletteStore,
+    timeline,
   });
   // Surprise Me last of the start group. It is the only one of the six that can
   // rewrite the whole document, so it sits at the far end rather than next to
@@ -165,7 +179,7 @@ async function start(): Promise<void> {
         theme={theme}
         onViewport={(viewport) => {
           session.attachViewport(viewport);
-          installDebugHandle(session, viewport);
+          installDebugHandle(session, viewport, timeline);
         }}
       />
     </React.StrictMode>,
@@ -184,7 +198,11 @@ async function start(): Promise<void> {
  * It is a handle on things that already exist. Nothing here is a code path the
  * application takes.
  */
-function installDebugHandle(session: EditorSession, viewport: Viewport | null): void {
+function installDebugHandle(
+  session: EditorSession,
+  viewport: Viewport | null,
+  timeline: TimelineStore,
+): void {
   if (!import.meta.env.DEV) return;
   const globalScope = globalThis as typeof globalThis & {
     __ditherOrk?: Record<string, unknown>;
@@ -197,6 +215,14 @@ function installDebugHandle(session: EditorSession, viewport: Viewport | null): 
     theme,
     registerPanel,
     registerToolbarItem,
+    // The timeline and the two animated-export adapters, so the animated path
+    // can be exercised from the console the way the viewport already can be.
+    // Built the same way `registerExportControls` builds them, over the same
+    // session and the same timeline store, so what they reach is the wiring the
+    // dialog uses rather than a parallel copy of it.
+    timeline,
+    animated: animatedSourceFor({ session, timeline }),
+    gif: gifCoreFor(session),
   };
   log.debug("debug handle installed on globalThis.__ditherOrk", {
     viewport: viewport !== null,
