@@ -193,8 +193,26 @@ jobs:
       # The runner's checkout is bind-mounted the same way the goldens do it:
       # the image carries a browser and nothing else, so the harness comes from
       # the commit being deployed rather than from a baked-in copy.
+      #
+      # Retried for the same reason the header check above is: for a few seconds
+      # after an upload the production alias and the edge are not yet agreed on
+      # which deployment they are serving, and a page fetched in that window can
+      # reference assets from the other one. That is a real window and visitors
+      # can land in it — it is why `web/public/404.html` exists and why the
+      # failure now names itself — but it is not a verdict on the build, so this
+      # waits it out rather than reporting a deployment as broken because it was
+      # observed mid-swap. A build that is actually dead fails all three.
       - name: Verify the deployed application starts
         run: |
-          docker run --rm -v "$PWD/web:/app/web" \
-            -e DITHER_ORK_BOOT_URL="$PRODUCTION_URL" \
-            dither-ork-gpu-golden node test/boot/run.mjs
+          for attempt in 1 2 3; do
+            if docker run --rm -v "$PWD/web:/app/web" \
+                 -e DITHER_ORK_BOOT_URL="$PRODUCTION_URL" \
+                 dither-ork-gpu-golden node test/boot/run.mjs; then
+              exit 0
+            fi
+            echo "attempt ${attempt}: the deployment did not boot — retrying in 20s"
+            sleep 20
+          done
+          echo "::error::$PRODUCTION_URL does not start. The upload succeeded and the"
+          echo "::error::application is dead; the transcript above says what stopped it."
+          exit 1

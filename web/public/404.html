@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>dither-ork — not found</title>
+    <!--
+      This file exists to make the host tell the truth, and it is load bearing.
+
+      Cloudflare Pages, with no 404 page in the output, answered every request
+      it could not match with `index.html` at **HTTP 200 and Content-Type
+      text/html**. For a page that is a mild annoyance. For a hashed asset it is
+      a defect with no symptom worth reading:
+
+        GET /assets/render.worker-OLD.js  ->  200 text/html  (the app's own page)
+
+      A module worker handed HTML cannot parse it, so the browser refuses the
+      script and fires an `error` event at the `Worker` that carries **no
+      message at all** — not an empty one, a plain `Event` where every field is
+      undefined. That is where "render worker error: undefined" came from, and
+      why a dead render worker looked like nothing in particular.
+
+      A client asks for an asset that is not in the current deployment whenever
+      it is holding markup from the previous one — the seconds during a deploy
+      while the production alias moves, most of all. The window cannot be closed
+      from here: hashed filenames plus a host that serves one deployment at a
+      time means a page loaded across the swap references files that are gone.
+      What can be fixed is the answer. With this file Pages returns a real 404,
+      the failure names itself, and reloading resolves it.
+
+      Kept deliberately close to index.html's pre-script block — same tokens,
+      same font stack — so it is the same application even when it is saying no.
+      Change them together.
+    -->
+    <style>
+      :root {
+        color-scheme: dark;
+        background: #131519;
+        color: #e3e6ec;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        font:
+          13px/1.7 ui-sans-serif,
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          "Helvetica Neue",
+          Arial,
+          sans-serif;
+      }
+      main {
+        padding: 3rem 2rem;
+        max-width: 62ch;
+      }
+      h1 {
+        font-size: 1.35rem;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        margin: 0 0 1rem;
+      }
+      p {
+        margin: 0 0 1rem;
+      }
+      a {
+        color: #7fb7ff;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.95em;
+        color: #b9c0cd;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Not found</h1>
+      <p>There is nothing at this address.</p>
+      <p>
+        If you were using the application and it stopped, this is most likely a
+        file from a previous build: dither-ork ships its code under content
+        hashed names, and a page that was loaded while a new version went out
+        will ask for files that are no longer there.
+        <strong>Reloading fixes it.</strong>
+      </p>
+      <p>
+        <a href="/">Open dither-ork</a> &middot;
+        <a href="https://github.com/orkcom-tech/dither-ork">Source and issues</a>
+      </p>
+    </main>
+  </body>
+</html>

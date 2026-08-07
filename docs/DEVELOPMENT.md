@@ -637,6 +637,17 @@ effect, exporting a file — still a person with a browser, as above. The check
 answers exactly one question, which is the one nothing else was answering: does
 the thing that was built start.
 
+It also cannot see the **deploy window**. Assets ship under content-hashed
+names and Pages serves one deployment at a time, so for a few seconds after an
+upload a page fetched from the edge can reference files from the other
+deployment. Before `web/public/404.html` existed, Pages answered those requests
+with `index.html` at **HTTP 200 and `text/html`** — and a module worker handed
+HTML fails with a `Worker` `error` event carrying no message at all, which is
+where `render worker error: undefined` came from. The 404 page makes the host
+answer honestly; the window itself is a property of hashed assets on a
+single-deployment host and reloading is what closes it. The deploy job retries
+its boot check three times for exactly this reason.
+
 ### Adding a dependency to a running stack
 
 `node_modules` is a named volume and the `web` entrypoint reinstalls it only at
