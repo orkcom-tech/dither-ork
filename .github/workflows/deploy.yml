@@ -176,6 +176,45 @@ jobs:
           curl -sSI --max-time 20 "$PRODUCTION_URL/"
           exit 1
 
+      # A path this deployment does not have must answer 404 — not 200 with the
+      # application's own page.
+      #
+      # With no 404 page in the output, Pages served `index.html` for every
+      # unmatched request, at HTTP 200 and `text/html`. That is invisible until
+      # the path in question is a script: a module worker handed HTML cannot
+      # parse it, so the browser refuses it and fires an `error` event at the
+      # `Worker` carrying **no message at all**, and the application dies at
+      # startup with nothing to report. Clients ask for assets that are not in
+      # the current deployment routinely — every page loaded while the alias is
+      # moving does — so this is not hypothetical, it is the deploy window.
+      #
+      # `web/public/404.html` is what makes the host answer honestly, and this
+      # asserts that it is doing so. Not a build-output check: whether the file
+      # ships is one question and whether Cloudflare uses it is another, and it
+      # is the second one that decides what a visitor gets.
+      - name: Verify a missing path is a 404 and not the application
+        run: |
+          probe="$PRODUCTION_URL/assets/this-path-is-not-in-the-build.js"
+          status=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$probe" || true)
+          if [ "$status" = "404" ]; then
+            echo "a path that is not in the deployment answers 404"
+            exit 0
+          fi
+          echo "::error::$probe answered HTTP $status rather than 404."
+          echo "::error::Pages is serving the application for unmatched paths, so a request"
+          echo "::error::for a stale asset returns HTML with a 200. A module worker given"
+          echo "::error::HTML fails with an error event that carries no message, and the app"
+          echo "::error::dies at startup unable to say why. Check that web/public/404.html is"
+          echo "::error::in the build output and that the project's not_found_handling is not"
+          echo "::error::set to single-page-application."
+          exit 1
+
+      # The GPU goldens' browser image — one pinned Chrome in this repository,
+      # not two. It carries a browser and nothing else, so the harness is
+      # bind-mounted from the checkout below rather than baked in.
+      - name: Build the pinned browser image
+        run: docker build -t dither-ork-gpu-golden web/test/gpu-golden
+
       # The headers being served proves the response is configured. It does not
       # prove the application starts — a deployment whose worker chunk is not
       # executable serves perfect headers and a dead page, which is what this
@@ -187,12 +226,6 @@ jobs:
       # production URL works" is not a question a pre-deploy check can answer.
       # A failure here is a live deployment that needs rolling back, and saying
       # so loudly is the whole point.
-      - name: Build the pinned browser image
-        run: docker build -t dither-ork-gpu-golden web/test/gpu-golden
-
-      # The runner's checkout is bind-mounted the same way the goldens do it:
-      # the image carries a browser and nothing else, so the harness comes from
-      # the commit being deployed rather than from a baked-in copy.
       #
       # Retried for the same reason the header check above is: for a few seconds
       # after an upload the production alias and the edge are not yet agreed on

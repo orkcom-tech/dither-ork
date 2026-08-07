@@ -152,6 +152,9 @@ export function describeWorkerScriptResponse(
   if (status >= 400) {
     return `fetching it returned HTTP ${status}, so the file is not at that path in this build`;
   }
+  // The JavaScript MIME types HTML lists as executable for a module script.
+  // Anything else is refused by strict MIME checking, which is the whole
+  // failure being described here — so the list is the spec's, not a guess.
   const type = contentType === null ? null : (contentType.split(";")[0] ?? "").trim().toLowerCase();
   const executable =
     type !== null &&
@@ -159,8 +162,7 @@ export function describeWorkerScriptResponse(
       type === "application/javascript" ||
       type === "application/x-javascript" ||
       type === "text/ecmascript" ||
-      type === "application/ecmascript" ||
-      type === "module");
+      type === "application/ecmascript");
   if (!executable) {
     return (
       `fetching it returned HTTP ${status} with content type ` +
