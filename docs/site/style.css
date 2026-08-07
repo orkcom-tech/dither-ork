@@ -1,0 +1,331 @@
+/*
+ * One stylesheet, no font files, no client-side JavaScript.
+ *
+ * The pages are long technical documents read on a laptop by somebody who came
+ * looking for one command. So: a measured column, a contents rail that is
+ * sticky on a wide screen and a plain list on a narrow one, tables that scroll
+ * inside themselves rather than pushing the page sideways, and code that never
+ * reflows. Nothing animates and nothing loads over the network.
+ *
+ * Colours come from the app's own dark surface, so the two read as one project,
+ * and both schemes are defined because a documentation site is opened as often
+ * from a light editor as from a dark one.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #fbfaf8;
+  --surface: #f2efe9;
+  --line: #ddd7cc;
+  --ink: #22201c;
+  --ink-soft: #5c574e;
+  --accent: #9a4b1f;
+  --code-bg: #f2efe9;
+  --measure: 42rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16150f;
+    --surface: #1e1d16;
+    --line: #34322a;
+    --ink: #e8e4d8;
+    --ink-soft: #a09a89;
+    --accent: #d98b4a;
+    --code-bg: #12110c;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+code,
+pre,
+.mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+}
+
+.skip:focus {
+  left: 0.5rem;
+  top: 0.5rem;
+  z-index: 10;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+}
+
+/* --- chrome ----------------------------------------------------------- */
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1.5rem;
+  padding: 0.9rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.wordmark {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.wordmark span {
+  color: var(--ink-soft);
+  font-weight: 400;
+}
+
+header nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+header nav a {
+  color: var(--ink-soft);
+  text-decoration: none;
+  padding-bottom: 2px;
+  border-bottom: 2px solid transparent;
+}
+
+header nav a:hover {
+  color: var(--ink);
+}
+
+header nav a[aria-current="page"] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+.away {
+  margin-left: auto;
+  display: flex;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.away a {
+  color: var(--accent);
+}
+
+main {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2rem;
+  padding: 2rem 1.5rem 4rem;
+}
+
+@media (min-width: 60rem) {
+  main {
+    grid-template-columns: 15rem minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .toc {
+    position: sticky;
+    top: 1.5rem;
+    max-height: calc(100vh - 3rem);
+    overflow-y: auto;
+  }
+}
+
+.toc {
+  font-size: 0.88rem;
+  border-left: 2px solid var(--line);
+  padding-left: 1rem;
+}
+
+.toc p {
+  margin: 0 0 0.5rem;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+}
+
+.toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.toc li {
+  margin: 0.3rem 0;
+}
+
+.toc a {
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+
+.toc a:hover {
+  color: var(--accent);
+}
+
+/* --- article ---------------------------------------------------------- */
+
+article {
+  max-width: var(--measure);
+  min-width: 0;
+}
+
+article > *:first-child {
+  margin-top: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  scroll-margin-top: 1.5rem;
+}
+
+h1 {
+  font-size: 2rem;
+  margin: 0 0 1.25rem;
+}
+
+h2 {
+  font-size: 1.4rem;
+  margin: 2.75rem 0 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+h3 {
+  font-size: 1.12rem;
+  margin: 1.9rem 0 0.6rem;
+}
+
+h4,
+h5,
+h6 {
+  font-size: 1rem;
+  margin: 1.5rem 0 0.5rem;
+}
+
+p,
+ul,
+ol {
+  margin: 0 0 1rem;
+}
+
+li {
+  margin: 0.35rem 0;
+}
+
+a {
+  color: var(--accent);
+}
+
+a.req {
+  text-decoration-style: dotted;
+  white-space: nowrap;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 2rem 0;
+}
+
+strong {
+  font-weight: 650;
+}
+
+/* --- code and tables -------------------------------------------------- */
+
+code {
+  font-size: 0.9em;
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0.05em 0.32em;
+}
+
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  margin: 0 0 1.25rem;
+}
+
+pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+/* Wide content scrolls inside its own box; the page never scrolls sideways. */
+.scroll {
+  overflow-x: auto;
+  margin: 0 0 1.25rem;
+}
+
+table {
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  min-width: 100%;
+}
+
+th,
+td {
+  border: 1px solid var(--line);
+  padding: 0.45rem 0.7rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: var(--surface);
+  font-weight: 650;
+}
+
+td .mono,
+td code {
+  white-space: nowrap;
+}
+
+/* --- footer ----------------------------------------------------------- */
+
+footer {
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  padding: 1.25rem 1.5rem;
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+footer p {
+  margin: 0 0 0.35rem;
+  max-width: var(--measure);
+}

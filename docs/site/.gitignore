@@ -1,0 +1,3 @@
+# Build output. Reproduced by `node docs/site/build.mjs` from the documents in
+# docs/, which are the only source of truth for it.
+dist/
