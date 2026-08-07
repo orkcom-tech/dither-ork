@@ -104,7 +104,7 @@ const NOISE_BURST_PARAMS: readonly ParamDescriptor[] = [
     // and per-frame variation is the temporal-variation system's job, where it
     // can be made periodic in the loop length rather than merely different.
     animatable: false,
-    hint: "Which corruption. Every seed is as good as every other; the same seed always gives the same bursts.",
+    description: "Which corruption. Every seed is as good as every other; the same seed always gives the same bursts.",
     default: 0,
     surprise: { weight: 1 },
   },
@@ -113,7 +113,7 @@ const NOISE_BURST_PARAMS: readonly ParamDescriptor[] = [
     label: "Density",
     type: "float",
     animatable: true,
-    hint: "Fraction of cells that burst.",
+    description: "Fraction of cells that burst.",
     legal: [0, 1],
     default: 0.15,
     step: 0.01,
@@ -130,7 +130,7 @@ const NOISE_BURST_PARAMS: readonly ParamDescriptor[] = [
     label: "Burst size",
     type: "float",
     animatable: true,
-    hint: "Height of one cell in pixels, and its width before the aspect ratio is applied.",
+    description: "Height of one cell in pixels, and its width before the aspect ratio is applied.",
     legal: [1, MAX_CELL_SIZE],
     default: 24,
     surprise: {
@@ -146,7 +146,7 @@ const NOISE_BURST_PARAMS: readonly ParamDescriptor[] = [
     label: "Burst aspect",
     type: "float",
     animatable: true,
-    hint: "Cell width relative to its height. Above 1 gives horizontal streaks, below 1 vertical slivers.",
+    description: "Cell width relative to its height. Above 1 gives horizontal streaks, below 1 vertical slivers.",
     legal: [MIN_ASPECT, MAX_ASPECT],
     // Square. The aspect is a departure from the plain reading of "size", so
     // the default is the value at which it is not doing anything.
@@ -164,7 +164,7 @@ const NOISE_BURST_PARAMS: readonly ParamDescriptor[] = [
     label: "Intensity",
     type: "float",
     animatable: true,
-    hint: "How completely the noise replaces the image inside a bursting cell.",
+    description: "How completely the noise replaces the image inside a bursting cell.",
     legal: [0, 1],
     // Full replacement: a burst is data that was lost, not data that was
     // dimmed. Partial intensity is the deliberate softening.
@@ -183,7 +183,7 @@ const NOISE_BURST_PARAMS: readonly ParamDescriptor[] = [
     label: "Noise colour",
     type: "enum",
     animatable: false,
-    hint: "Per channel gives coloured static; monochrome gives one grey level per pixel.",
+    description: "Per channel gives coloured static; monochrome gives one grey level per pixel.",
     values: [
       { value: "rgb", label: "Per channel" },
       { value: "mono", label: "Monochrome" },
@@ -205,6 +205,12 @@ const NOISE_BURST_PARAMS: readonly ParamDescriptor[] = [
 export default defineEffect({
   id: "noise-burst",
   name: "Noise burst",
+  summary:
+    "Replaces scattered rectangular regions of the picture with static.",
+  description:
+    "The frame is tiled into cells, and each cell draws one number from the seed and its own grid position, bursting if that number falls under the density. Inside a bursting cell the picture is replaced by seeded noise. Cell selection and pixel noise are drawn through different constants from the same seed, so turning density up does not reshuffle the noise inside cells that were already bursting. Aspect stretches the cells into wide streaks or narrow slivers, which recovers the part of free-floating rectangles that carries the look.",
+  keywords: ["noise", "burst", "static", "corruption", "corrupt", "snow", "dropout", "blocks", "interference", "damage", "tv static", "dead pixels"],
+  concept: "glitch",
   requirement: "F-GL-17",
   slot: "postprocess",
   family: "glitch",

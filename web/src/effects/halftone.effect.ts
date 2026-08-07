@@ -96,6 +96,12 @@ export const HALFTONE_UNIFORMS: UniformLayout = {
 const descriptor = defineEffect({
   id: "halftone",
   name: "Halftone",
+  summary:
+    "The printing dot: a rotated grid of dots whose area grows as the picture gets darker.",
+  description:
+    "Tone is carried by how much of each cell is covered rather than by how dark the ink is, which is exactly how a printed photograph works. Cell size sets the ruling — small cells read as continuous tone, large ones as pattern — and the screen angle rotates the dot grid about the image centre, with 45° the classical choice because the grid is least visible there. Round, square, diamond and elliptical dots all reproduce tone identically and differ only in the shape of the ink and in where neighbouring dots merge. For the four-colour print look use CMYK halftone; this one screens against the document palette.",
+  keywords: ["halftone", "dot", "dots", "print", "printing", "newspaper", "comic", "screen", "ben day", "dot screen", "pop art"],
+  concept: "halftone-screen",
   requirement: "F-PT-01",
   slot: "dither",
   family: "pattern",
@@ -105,7 +111,7 @@ const descriptor = defineEffect({
       key: HALFTONE_PARAM.cellSize,
       label: "Cell size",
       type: "float",
-      hint: "Pixels per screen cell. Small cells read as tone, large ones as pattern.",
+      description: "Pixels per screen cell. Small cells read as tone, large ones as pattern.",
       animatable: true,
       legal: [1, 256],
       default: 8,
@@ -121,7 +127,7 @@ const descriptor = defineEffect({
       // Degrees rather than turns, unlike the ordered dithers' tile rotation:
       // screen angles are quoted in degrees everywhere in print, and F-PT-02's
       // defaults are literally 15/75/0/45.
-      hint: "Rotation of the dot grid, in degrees about the image centre.",
+      description: "Rotation of the dot grid, in degrees about the image centre.",
       animatable: true,
       legal: [-180, 180],
       default: 45,
@@ -133,6 +139,8 @@ const descriptor = defineEffect({
       key: HALFTONE_PARAM.dotShape,
       label: "Dot shape",
       type: "enum",
+      description:
+        "The figure the ink is drawn as, and therefore where neighbouring dots merge in the shadows: a round dot's neighbours touch past about 78% coverage and the white that is left shrinks as four-cornered stars, a diamond joins along its two axes first, an ellipse staggers the two joins so the merge is spread across a wider tonal range, and a square simply tiles. All four reproduce tone exactly — the shapes are analytic areas, so none of them needs a correction curve. Square reads as a mosaic rather than as a screen at any real cell size.",
       // Not animatable: a modulator binds a numeric parameter, and stepping
       // through shapes mid-loop is a cut rather than a modulation.
       animatable: false,
@@ -159,7 +167,7 @@ const descriptor = defineEffect({
       key: HALFTONE_PARAM.dotAspect,
       label: "Dot aspect",
       type: "float",
-      hint: "Elongation of the elliptical dot. Only the Ellipse shape reads it.",
+      description: "Elongation of the elliptical dot. Only the Ellipse shape reads it.",
       animatable: true,
       legal: [0.25, 4],
       default: 1.6,
@@ -172,7 +180,7 @@ const descriptor = defineEffect({
       key: HALFTONE_PARAM.coverage,
       label: "Dot gain",
       type: "float",
-      hint: "Grows every dot by the same area. 0 reproduces tone exactly.",
+      description: "Grows every dot by the same area. 0 reproduces tone exactly.",
       animatable: true,
       legal: [-0.5, 0.5],
       default: 0,
@@ -182,7 +190,7 @@ const descriptor = defineEffect({
       key: HALFTONE_PARAM.spread,
       label: "Spread",
       type: "float",
-      hint: "Screen strength. 0 is plain quantization, 1 reproduces tone exactly.",
+      description: "Screen strength. 0 is plain quantization, 1 reproduces tone exactly.",
       animatable: true,
       legal: [0, 2],
       default: 1,
@@ -194,7 +202,7 @@ const descriptor = defineEffect({
       type: "float",
       // Along the screen's own axes, not the image's, so the control keeps
       // meaning the same thing as the angle animates.
-      hint: "Shifts the screen along its first axis, in cells.",
+      description: "Shifts the screen along its first axis, in cells.",
       animatable: true,
       legal: [-1024, 1024],
       default: 0,
@@ -204,7 +212,7 @@ const descriptor = defineEffect({
       key: HALFTONE_PARAM.offsetY,
       label: "Offset Y",
       type: "float",
-      hint: "Shifts the screen along its second axis, in cells.",
+      description: "Shifts the screen along its second axis, in cells.",
       animatable: true,
       legal: [-1024, 1024],
       default: 0,

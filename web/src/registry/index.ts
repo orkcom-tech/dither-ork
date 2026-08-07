@@ -45,11 +45,20 @@ export {
   type GpuEffectResolver,
 } from "./gpu-effects";
 export {
+  describeMiss,
   matchesFilter,
+  searchCatalogue,
   searchEffects,
+  type CatalogueSearch,
   type EffectFilter,
   type EffectSearchResult,
+  type SearchMiss,
 } from "./search";
+export {
+  UNBUILT_FEATURES,
+  unbuiltFor,
+  type UnbuiltFeature,
+} from "./unbuilt";
 export {
   coerceParams,
   defaultParams,

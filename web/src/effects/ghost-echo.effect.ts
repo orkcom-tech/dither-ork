@@ -97,7 +97,7 @@ const GHOST_ECHO_PARAMS: readonly ParamDescriptor[] = [
     // image, and every frame either side of it is a different picture rather
     // than a stage of one movement. Offset and decay are the animation axes.
     animatable: false,
-    hint: "How many delayed images follow the original.",
+    description: "How many delayed images follow the original.",
     legal: [1, MAX_COPIES],
     default: 3,
     surprise: {
@@ -113,7 +113,7 @@ const GHOST_ECHO_PARAMS: readonly ParamDescriptor[] = [
     label: "Offset X",
     type: "float",
     animatable: true,
-    hint: "Horizontal step between copies, in pixels. Positive puts the ghosts to the right.",
+    description: "Horizontal step between copies, in pixels. Positive puts the ghosts to the right.",
     legal: [-MAX_OFFSET, MAX_OFFSET],
     default: 8,
     surprise: {
@@ -129,7 +129,7 @@ const GHOST_ECHO_PARAMS: readonly ParamDescriptor[] = [
     label: "Offset Y",
     type: "float",
     animatable: true,
-    hint: "Vertical step between copies, in pixels. Positive puts the ghosts below.",
+    description: "Vertical step between copies, in pixels. Positive puts the ghosts below.",
     legal: [-MAX_OFFSET, MAX_OFFSET],
     // Zero by default: the horizontal ghost is the one the effect is named
     // after, and a purely horizontal default makes the offset pair read as
@@ -148,7 +148,7 @@ const GHOST_ECHO_PARAMS: readonly ParamDescriptor[] = [
     label: "Decay",
     type: "float",
     animatable: true,
-    hint: "Weight of each copy relative to the one before it. 1 makes every copy as strong as the original.",
+    description: "Weight of each copy relative to the one before it. 1 makes every copy as strong as the original.",
     // 0 is legal and is the identity — every echo weighted to nothing. It is
     // the honest bottom of the range rather than a value to hide.
     legal: [0, 1],
@@ -169,7 +169,7 @@ const GHOST_ECHO_PARAMS: readonly ParamDescriptor[] = [
     // A choice, not a quantity: binding a modulator to it would turn a sine
     // into a stutter of hard cuts.
     animatable: false,
-    hint: "Average keeps the image's own brightness; add lets the copies pile up and bloom.",
+    description: "Average keeps the image's own brightness; add lets the copies pile up and bloom.",
     values: [
       { value: "average", label: "Average" },
       { value: "add", label: "Add" },
@@ -190,6 +190,12 @@ const GHOST_ECHO_PARAMS: readonly ParamDescriptor[] = [
 export default defineEffect({
   id: "ghost-echo",
   name: "Ghost / echo",
+  summary:
+    "Offset copies of the picture trailing behind it, each one weaker than the last.",
+  description:
+    "The pixel plus a number of delayed images of itself, each one step further along the offset vector and each decayed relative to the one before — the analogue broadcast ghost the effect is named after. Average normalises the weights, so the picture keeps its own brightness and the result reads as a smear; add does not normalise, so the copies pile up and bloom where they overlap. Neither is derivable from the other by a slider, which is why both are here. No seed: the copies sit at fixed multiples of one offset and there is nothing to reroll.",
+  keywords: ["ghost", "echo", "trail", "copies", "double", "multiple exposure", "broadcast", "antenna", "reflection", "smear", "motion blur", "after image"],
+  concept: "glitch",
   requirement: "F-GL-15",
   slot: "postprocess",
   family: "glitch",

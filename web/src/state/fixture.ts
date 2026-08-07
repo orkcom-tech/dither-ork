@@ -20,6 +20,10 @@ import { createEffectRegistry, type EffectRegistry } from "../registry";
 export const TEST_LEVELS: EffectDescriptor = {
   id: "test-levels",
   name: "Test Levels",
+  summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+  description:
+    "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+  keywords: ["fixture", "test"],
   requirement: "F-PP-03",
   slot: "preprocess",
   family: "preprocess",
@@ -28,6 +32,8 @@ export const TEST_LEVELS: EffectDescriptor = {
     {
       key: "amount",
       label: "Amount",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "float",
       animatable: true,
       legal: [0, 2],
@@ -37,6 +43,8 @@ export const TEST_LEVELS: EffectDescriptor = {
     {
       key: "invert",
       label: "Invert",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "bool",
       animatable: false,
       default: false,
@@ -45,6 +53,8 @@ export const TEST_LEVELS: EffectDescriptor = {
     {
       key: "mode",
       label: "Mode",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "enum",
       animatable: false,
       values: [
@@ -70,6 +80,10 @@ export const TEST_LEVELS: EffectDescriptor = {
 export const TEST_DIFFUSION: EffectDescriptor = {
   id: "test-diffusion",
   name: "Test Diffusion",
+  summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+  description:
+    "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+  keywords: ["fixture", "test"],
   requirement: "F-ED-01",
   slot: "dither",
   family: "error-diffusion",
@@ -78,6 +92,8 @@ export const TEST_DIFFUSION: EffectDescriptor = {
     {
       key: "strength",
       label: "Strength",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "float",
       animatable: true,
       legal: [0, 1],
@@ -94,6 +110,10 @@ export const TEST_DIFFUSION: EffectDescriptor = {
 export const TEST_INVERT: EffectDescriptor = {
   id: "test-invert",
   name: "Test Invert",
+  summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+  description:
+    "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+  keywords: ["fixture", "test"],
   requirement: "F-SP-01",
   slot: "postprocess",
   family: "special",

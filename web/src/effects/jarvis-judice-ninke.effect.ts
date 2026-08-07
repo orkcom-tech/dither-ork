@@ -16,5 +16,10 @@ import { errorDiffusionEffect } from "./error-diffusion";
 export default errorDiffusionEffect({
   id: "jarvis-judice-ninke",
   name: "Jarvis-Judice-Ninke",
+  summary:
+    "Twelve taps over three rows — the widest reach in the family, and the softest grain.",
+  description:
+    "Spreading the error that widely averages out the texture and softens edges along with it, at three times Floyd–Steinberg's taps per pixel. Reach for it when you want a dither that reads as tone rather than as texture and you do not mind losing some edge definition. Stucki has the same footprint with sharper weights if you want the reach without the softness.",
+  keywords: ["jarvis", "judice", "ninke", "jjn", "smooth", "soft", "wide", "three row"],
   requirement: "F-ED-03",
 });

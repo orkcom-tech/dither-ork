@@ -67,7 +67,7 @@ const THRESHOLD: ParamDescriptor = {
   animatable: true,
   // Lightness, not linear luminance: the slider has to mean what the eye sees
   // it mean, and 0.5 linear is already a light grey on screen.
-  hint: "Lightness above which a pixel emits. The ramp reaches full at white, so there is no contour.",
+  description: "Lightness above which a pixel emits. The ramp reaches full at white, so there is no contour.",
   // Stops short of 1: at 1 nothing is above the threshold and the control has
   // switched the effect off, which is what an intensity of 0 is for.
   legal: [0, 0.95],
@@ -88,7 +88,7 @@ const RADIUS: ParamDescriptor = {
   label: "Radius",
   type: "float",
   animatable: true,
-  hint: "How far the light spreads, in pixels. Truncation half-width of the gaussian.",
+  description: "How far the light spreads, in pixels. Truncation half-width of the gaussian.",
   // The ceiling is the same number as MAX_BLUR_RADIUS in the shader, so a
   // document can never ask for a radius the loop bound silently refuses.
   legal: [0, 64],
@@ -110,7 +110,7 @@ const INTENSITY: ParamDescriptor = {
   label: "Intensity",
   type: "float",
   animatable: true,
-  hint: "Gain on the blurred light before it is blended back.",
+  description: "Gain on the blurred light before it is blended back.",
   legal: [0, 4],
   default: 1,
   step: 0.05,
@@ -129,7 +129,7 @@ const BLEND: ParamDescriptor = {
   label: "Blend",
   type: "enum",
   animatable: false,
-  hint: "Additive is physical light adding up. Screen approaches white instead of arriving at it.",
+  description: "Additive is physical light adding up. Screen approaches white instead of arriving at it.",
   // Append-only. The shader sees the ordinal, so inserting a value in the
   // middle silently renumbers every document already saved.
   values: [
@@ -153,6 +153,12 @@ const BLEND: ParamDescriptor = {
 export default defineEffect({
   id: "epsilon-glow",
   name: "Epsilon glow",
+  summary:
+    "Makes the bright parts of the picture bleed light into their surroundings — the neon and phosphor bloom.",
+  description:
+    "Everything above a lightness threshold is taken, spread with a gaussian and added back, so highlights grow a soft halo the way a bright source does through a lens or off a CRT phosphor. Threshold decides what counts as a light source, radius how far it spreads, intensity how strong the added light is, and blend whether the light adds physically or screens towards white. Put it after the dither: the soft halo then sits over hard dithered pixels, which is the look it exists for, whereas before the dither the halo is quantized into the pattern and disappears. Over a dark two-colour palette this is what produces a neon result, and that combination is not discoverable from either control alone.",
+  keywords: ["glow", "neon", "bloom", "halo", "light", "glare", "haze", "phosphor", "luminous", "shine", "radiance", "emissive", "soft light"],
+  concept: "optical",
   requirement: "F-SP-01",
   slot: "postprocess",
   family: "special",

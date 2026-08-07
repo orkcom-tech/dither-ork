@@ -84,7 +84,7 @@ export const NN_UPSCALE_PARAMS: readonly ParamDescriptor[] = [
     key: NN_UPSCALE_PARAM.factor,
     label: "Factor",
     type: "int",
-    hint: "Each texel becomes a block this many texels on a side. Pair it with Internal resolution to keep the output size.",
+    description: "Each texel becomes a block this many texels on a side. Pair it with Internal resolution to keep the output size.",
     // Not animatable, for the same reason F-PP-01's factor is not: the extent
     // rule reads this value to size a texture, so a modulator sweeping it would
     // reallocate the chain every frame and change the shape of the buffer an
@@ -144,6 +144,12 @@ export const NN_UPSCALE_GPU: GpuEffect = {
 export default defineEffect({
   id: "nn-upscale",
   name: "Nearest upscale",
+  summary:
+    "Multiplies the frame by a whole number, replicating each pixel into a hard block.",
+  description:
+    "The other half of the internal-resolution pair: run the middle of the stack small, then bring the frame back to size with the chunk intact. It carries the index map up alongside the colours, which is the only way to resample an indexed frame at all — and it is why the node requires one, so it is legal only downstream of a quantizer. Nearest and integer-only is not a limitation but the requirement: any smoothing would average palette colours into ones the palette does not contain, and a fractional factor would make some source pixels physically bigger than others. It cannot follow CMYK halftone, which emits no index map.",
+  keywords: ["upscale", "scale", "enlarge", "nearest neighbour", "nearest neighbor", "pixelate", "blocky", "zoom", "integer scale", "resize", "chunky", "pixel art"],
+  concept: "working-resolution",
   requirement: "F-SP-14",
   slot: "postprocess",
   family: "special",

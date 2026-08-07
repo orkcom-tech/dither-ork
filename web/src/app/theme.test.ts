@@ -1,6 +1,32 @@
 import { describe, expect, it } from "vitest";
 
-import { THEME_MODES, isThemeMode, labelForMode, nextMode, resolveTheme } from "./theme";
+import {
+  DEFAULT_MODE,
+  THEME_MODES,
+  isThemeMode,
+  labelForMode,
+  nextMode,
+  resolveTheme,
+} from "./theme";
+
+describe("the default mode", () => {
+  /**
+   * A guard rather than a tautology. Dark is a decision made for a stated
+   * reason — a light ground around an image raises its apparent contrast and
+   * cools its midtones, so the same document is judged differently on two
+   * machines if the app follows the OS. This test is what makes changing that
+   * back to `system` a deliberate act with a failing test attached, rather than
+   * a tidy-up nobody notices.
+   */
+  it("opens dark rather than following the operating system", () => {
+    expect(DEFAULT_MODE).toBe("dark");
+    expect(resolveTheme(DEFAULT_MODE, false)).toBe("dark");
+  });
+
+  it("is still one of the modes the control can cycle to", () => {
+    expect(THEME_MODES).toContain(DEFAULT_MODE);
+  });
+});
 
 describe("resolveTheme", () => {
   it("follows the system preference in system mode", () => {

@@ -1,0 +1,145 @@
+/*
+ * Design tokens — F-UI-09.
+ *
+ * Every colour, type face and metric the application spends. Nothing anywhere
+ * reads a literal colour; that is what makes F-UI-09's user-editable themes a
+ * matter of writing values rather than of touching components.
+ *
+ *
+ * ## Why the chrome is neutral graphite and the green is a state colour
+ *
+ * This is not taste and it is not a retreat from the brand. The product's whole
+ * subject is what happens to a picture when colour is taken away from it, and
+ * the eye adapts to whatever surrounds what it is looking at. A green interface
+ * around an image biases how that image's palette reads — greens look tame,
+ * magentas look violent — which is fatal in a tool whose job is colour
+ * reduction. Every serious colour tool ships a neutral chrome for this reason.
+ *
+ * So: **the image is the only saturated thing on screen.** The graphite is
+ * neutral with a slight cool bias rather than a pure grey, because a pure grey
+ * next to a photograph reads as a dead spot and takes on the complement of
+ * whatever it is beside.
+ *
+ * The ork green survives as `--accent`, and it means exactly one thing: **this
+ * is live**. The selected node, a value that is being moved, a track that is
+ * playing, the Surprise button. If green appears anywhere that is not a state,
+ * it is a bug in the stylesheet that put it there, not a preference.
+ *
+ *
+ * ## Why dark is the committed default
+ *
+ * `--dark-is-deliberate`: dark is chosen, not a light theme somebody forgot to
+ * write. A light ground around an image raises its apparent contrast and cools
+ * its midtones, so tone decisions made against a light chrome do not survive
+ * being looked at anywhere else. That is why {@link readStoredMode} in
+ * `app/theme.ts` defaults to `dark` rather than to the OS preference.
+ *
+ * The light theme below is not a mistake either: F-UI-09 requires light, dark
+ * and user-editable themes, and somebody working from a printed reference has
+ * the same argument running the other way. It is available and it is not the
+ * default. **Please do not "fix" the dark default.**
+ *
+ *
+ * ## Why there are two type families
+ *
+ * Sans for anything a person reads as language — labels, headings, prose,
+ * button text. Mono for anything a person reads as a quantity — parameter
+ * values, dimensions, timings, counts, ids and codes. Mono earns its place
+ * exactly where digits have to align in a column and nowhere else; used
+ * throughout it makes an instrument read as a terminal.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces, back to front. Neutral graphite, biased very slightly cool. */
+  --bg: #131519;
+  --bg-raised: #191c21;
+  --bg-sunken: #0d0f12;
+  --bg-inset: #21252b;
+
+  /* Ink. */
+  --fg: #e3e6ec;
+  --fg-dim: #9ba3b0;
+  --fg-faint: #6e7686;
+
+  /* Lines. `--rule-hover` is the edge a control takes when it is pointed at or
+     focused. It is neutral on purpose: a green edge under every cursor is how
+     an interface reads as coloured even when nothing on it is selected. */
+  --rule: #262a31;
+  --rule-strong: #343945;
+  --rule-hover: #4a505d;
+
+  /* State. The only saturated chrome colour, and it means "live". */
+  --accent: #8bdc5f;
+  --accent-dim: #4e7a38;
+  --accent-fg: #0b1408;
+  --focus: #8bdc5f;
+
+  /* Verdicts. */
+  --ok: #8bdc5f;
+  --warn: #e5b451;
+  --fail: #ec6f6f;
+
+  /* The checkerboard behind transparency (F-UI-05). Neutral, so it does not
+     tint the image it is showing through. */
+  --checker-a: #1d2026;
+  --checker-b: #16191d;
+
+  --shadow: 0 8px 24px rgb(0 0 0 / 50%);
+
+  /* Type. Two families, each with one job — see the note above. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --text-xs: 10px;
+  --text-sm: 11px;
+  --text-md: 13px;
+  --text-lg: 15px;
+
+  /* Metrics the shell and the panels share. */
+  --panel-header-h: 26px;
+  --toolbar-h: 34px;
+  --statusbar-h: 24px;
+  --splitter-size: 5px;
+  --radius: 2px;
+  --gap: 8px;
+}
+
+/*
+ * Light. Required by F-UI-09; not the default, for the reason at the top of
+ * this file. Same structure, same neutrality — the accent is darkened until it
+ * carries text contrast on a pale ground rather than being brightened, because
+ * a light chrome with a bright accent is two saturated things on screen.
+ */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #eceef1;
+  --bg-raised: #f6f7f9;
+  --bg-sunken: #e0e3e8;
+  --bg-inset: #ffffff;
+
+  --fg: #1a1d22;
+  --fg-dim: #565d68;
+  --fg-faint: #858d99;
+
+  --rule: #d6dae0;
+  --rule-strong: #b9bfc9;
+  --rule-hover: #8d95a1;
+
+  --accent: #2f7a1f;
+  --accent-dim: #6f9c5e;
+  --accent-fg: #f6f7f9;
+  --focus: #2f7a1f;
+
+  --ok: #2f7a1f;
+  --warn: #8a6210;
+  --fail: #a72a2a;
+
+  --checker-a: #d9dde2;
+  --checker-b: #cbd0d7;
+
+  --shadow: 0 8px 24px rgb(20 24 30 / 18%);
+}

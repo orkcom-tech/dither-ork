@@ -100,7 +100,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CRT_MASK_PARAM.geometry,
     label: "Mask geometry",
     type: "enum",
-    hint: "Which tube family's mask to draw. Aperture grille has no vertical structure.",
+    description: "Which tube family's mask to draw. Aperture grille has no vertical structure.",
     // Not animatable: crossfading between two lattices produces a third
     // pattern that is neither, and a modulator on an ordinal would step through
     // them as though they were a scale.
@@ -123,7 +123,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CRT_MASK_PARAM.pitch,
     label: "Triad pitch",
     type: "float",
-    hint: "Width of one R/G/B triad, in pixels. 3 puts one pixel under each phosphor.",
+    description: "Width of one R/G/B triad, in pixels. 3 puts one pixel under each phosphor.",
     animatable: true,
     // Below 3 the three phosphors share fewer than three pixels and the mask
     // turns into colour noise; above ~48 it is decorative stripes rather than a
@@ -146,7 +146,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     // Inert for the aperture grille, and that is a property of the geometry
     // rather than an oversight: a grille's stripes are continuous from the top
     // of the tube to the bottom, so there is no vertical period to set.
-    hint: "Vertical period as a multiple of the pitch. 1 is the physical delta lattice. Ignored by the aperture grille.",
+    description: "Vertical period as a multiple of the pitch. 1 is the physical delta lattice. Ignored by the aperture grille.",
     animatable: true,
     legal: [0.5, 8],
     default: 1,
@@ -162,7 +162,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CRT_MASK_PARAM.duty,
     label: "Phosphor size",
     type: "float",
-    hint: "Phosphor size relative to its cell. 1 makes them touch; below that the gaps are unlit mask.",
+    description: "Phosphor size relative to its cell. 1 makes them touch; below that the gaps are unlit mask.",
     animatable: true,
     // Above 1 the phosphors overlap, which no real mask does but which is the
     // only way to keep the geometry visible at a large pitch without also
@@ -180,7 +180,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CRT_MASK_PARAM.strength,
     label: "Strength",
     type: "float",
-    hint: "How much light the unlit mask takes. 1 passes nothing between the phosphors.",
+    description: "How much light the unlit mask takes. 1 passes nothing between the phosphors.",
     animatable: true,
     legal: [0, 1],
     // Not 1. A full-strength mask costs two thirds of the picture's light and
@@ -200,7 +200,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     type: "float",
     // Also the anti-aliasing control: a hard-edged lattice sampled on a pixel
     // grid at a non-integer pitch beats against it.
-    hint: "Width of each phosphor's edge, as a fraction of its own half-width. 0 is a hard edge.",
+    description: "Width of each phosphor's edge, as a fraction of its own half-width. 0 is a hard edge.",
     animatable: true,
     legal: [0, 1],
     default: 0.3,
@@ -215,7 +215,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CRT_MASK_PARAM.boost,
     label: "Brightness boost",
     type: "float",
-    hint: "Multiplies the masked picture back up. A full-strength mask costs about two thirds of the light.",
+    description: "Multiplies the masked picture back up. A full-strength mask costs about two thirds of the light.",
     animatable: true,
     legal: [1, 3],
     // 1 is the unmodified physics. Compensation is a decision, and it is one
@@ -238,7 +238,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     // The primary registration control, and the reason it is animatable: a mask
     // one pixel off the pixel grid is a different picture, and drifting it is
     // what makes a still image look like a live tube.
-    hint: "Shifts the mask horizontally, in pixels.",
+    description: "Shifts the mask horizontally, in pixels.",
     animatable: true,
     legal: [-1024, 1024],
     default: 0,
@@ -254,7 +254,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CRT_MASK_PARAM.offsetY,
     label: "Offset Y",
     type: "float",
-    hint: "Shifts the mask vertically, in pixels. Ignored by the aperture grille.",
+    description: "Shifts the mask vertically, in pixels. Ignored by the aperture grille.",
     animatable: true,
     legal: [-1024, 1024],
     default: 0,
@@ -308,6 +308,12 @@ export const CRT_MASK_PARAM_TYPES: ReadonlyMap<string, ParamDescriptor> = new Ma
 export default defineEffect({
   id: CRT_MASK_ID,
   name: "CRT mask",
+  summary:
+    "The phosphor mask of a CRT — aperture-grille stripes, shadow-mask dots, or slot-mask slots.",
+  description:
+    "Three tube families in one effect, because a tube has one mask and a stack never wants two of them at once. Pitch is the width of one red/green/blue triad, so 3 puts one pixel under each phosphor; phosphor size decides whether they touch or leave unlit gaps, and strength how much light those gaps take. A full-strength mask costs about two thirds of the light, which is what the brightness boost puts back. Stacked with scanlines and a little lens distortion this is most of a CRT.",
+  keywords: ["crt", "mask", "aperture grille", "shadow mask", "slot mask", "trinitron", "phosphor", "tv", "monitor", "retro", "arcade", "triad", "subpixel"],
+  concept: "glitch",
   requirement: "F-GL-09",
   slot: "postprocess",
   family: "glitch",

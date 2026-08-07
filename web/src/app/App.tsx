@@ -211,9 +211,59 @@ function ThemeControl({ theme }: { readonly theme: ThemeController }): React.Rea
 }
 
 /**
+ * Where the source lives. Taken from the repository's own remote, so it is the
+ * address of the thing the user is running rather than a guess.
+ */
+const SOURCE_URL = "https://github.com/orkcom-tech/dither-ork";
+
+/**
+ * The documentation.
+ *
+ * There is no separate documentation *site* yet, so this points at the docs
+ * directory in the source repository, which is where docs/ARCHITECTURE.md,
+ * docs/API.md and docs/DEVELOPMENT.md actually are. When a site exists this is
+ * the one line that changes. Inventing a hostname that resolves to nothing
+ * would be worse than linking somewhere real and slightly less convenient.
+ */
+const DOCS_URL = "https://github.com/orkcom-tech/dither-ork/tree/main/docs";
+
+/**
+ * The attribution copy.
+ *
+ * The second clause is required and is the whole reason the line is worth
+ * showing: somebody who arrives at a free tool from a company that sells things
+ * is entitled to know, without asking, that the free thing is free and that it
+ * is not a demo of something else.
+ */
+const ATTRIBUTION =
+  "dither-ork is free; the other products are not, and none of them require this one.";
+
+/**
  * The status bar, and the place non-fatal capability degradation is stated for
  * the whole session (F-UI-12). OPFS or File System Access being absent never
  * stops anything, and it never goes unsaid either.
+ *
+ * ## Why the ORKCOM mark is not drawn here
+ *
+ * The visual direction asks for the company logo in this bar, linking to the
+ * company site. Two inputs for that do not exist yet, and neither can be
+ * invented without shipping something false.
+ *
+ * **The link has no destination.** No company URL appears in the README, the
+ * package manifest, the docs or the git remote. A hostname guessed from the
+ * GitHub organisation is a link that may 404, which is worse than no link.
+ *
+ * **The mark has no web-ready asset.** The design does exist, at
+ * `docs/images/orkcom.jpeg`, but it is a JPEG on an opaque white ground with
+ * roughly a third of the frame as margin. Dropped into a 24px dark bar it is a
+ * white rectangle with a four-pixel mark inside it. Cropping and keying out the
+ * white would be producing a *different* file and calling it the logo, which is
+ * the one thing the direction says not to do.
+ *
+ * So the attribution ships as words, which is true and which works. When a
+ * transparent SVG or PNG lands under `web/public/` and the company URL is
+ * known, this span becomes an `<a href={COMPANY_URL}>` with an `<img>` of the
+ * mark in front of the words; nothing else in this file has to move.
  */
 function StatusBar({
   viewport,
@@ -244,34 +294,85 @@ function StatusBar({
 
   return (
     <footer className="shell__status">
-      <span>
-        zoom <b>{view === null ? "—" : formatZoom(view.effectiveScale)}</b>
-      </span>
-      <span>
-        preview{" "}
-        <b className={quality?.degraded === true ? "shell__status-warn" : undefined}>
-          {quality === null
+      <Stat label="zoom" value={view === null ? "—" : formatZoom(view.effectiveScale)} />
+      {/*
+        F-UI-03. `quality.degraded` is what the worker actually did, not an
+        intention: it is true only while a frame is being shown at a reduced
+        resolution. It must stay that way — a badge that is on when the preview
+        is full is a badge nobody believes the next time it is right.
+      */}
+      <Stat
+        label="preview"
+        value={
+          quality === null
             ? "—"
             : quality.degraded
-              ? `reduced (${Math.round(quality.displayedScale * 100)}%)`
-              : "full"}
-        </b>
-      </span>
-      <span>
-        effects <b>{registry.size}</b>
-      </span>
+              ? `reduced ${Math.round(quality.displayedScale * 100)}%`
+              : "full"
+        }
+        warn={quality?.degraded === true}
+      />
+      <Stat label="effects" value={String(registry.size)} />
       {report.adapterInfo === undefined ? null : (
-        <span>
-          gpu <b>{describeAdapter(report.adapterInfo)}</b>
-        </span>
+        <Stat label="gpu" value={describeAdapter(report.adapterInfo)} />
       )}
+
       <span className="shell__spacer" />
+
       {degraded.map((capability) => (
         <span key={capability.id} className="shell__status-warn" title={capability.detail}>
           {capability.label} unavailable
         </span>
       ))}
+
+      <nav className="shell__status-links" aria-label="About dither-ork">
+        <a
+          className="shell__status-link"
+          href={SOURCE_URL}
+          target="_blank"
+          rel="noreferrer"
+          title="The source of the build you are running"
+        >
+          source
+        </a>
+        <a
+          className="shell__status-link"
+          href={DOCS_URL}
+          target="_blank"
+          rel="noreferrer"
+          title="Architecture, API and development docs"
+        >
+          docs
+        </a>
+        <span className="shell__made-by" title={ATTRIBUTION}>
+          Made by ORKCOM
+        </span>
+      </nav>
     </footer>
+  );
+}
+
+/** One readout: a sans label naming the quantity, a mono value carrying it. */
+function Stat({
+  label,
+  value,
+  warn,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly warn?: boolean;
+}): React.ReactElement {
+  return (
+    <span className="shell__stat">
+      <span className="shell__stat-label">{label}</span>
+      <span
+        className={
+          warn === true ? "shell__stat-value shell__status-warn" : "shell__stat-value"
+        }
+      >
+        {value}
+      </span>
+    </span>
   );
 }
 

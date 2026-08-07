@@ -115,7 +115,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CHROMATIC_ABERRATION_PARAM.mode,
     label: "Mode",
     type: "enum",
-    hint: "Radial grows the fringe away from a centre; linear separates the whole frame along one angle.",
+    description: "Radial grows the fringe away from a centre; linear separates the whole frame along one angle.",
     animatable: false,
     // Order is load-bearing: the shader reads the ordinal, so inserting a value
     // in the middle renumbers every document already saved.
@@ -138,7 +138,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CHROMATIC_ABERRATION_PARAM.strength,
     label: "Strength",
     type: "float",
-    hint: "Separation at the corners, as a fraction of the half-diagonal — of the width in linear mode.",
+    description: "Separation at the corners, as a fraction of the half-diagonal — of the width in linear mode.",
     animatable: true,
     legal: [0, 0.2],
     // Roughly a texel at preview size: visible as fringing rather than as a
@@ -160,7 +160,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     // Turns, not degrees: a modulator ramping 0 -> 1 lands back where it
     // started, so an animated angle loops without the UI having to know that
     // 360 is special.
-    hint: "Direction of the linear separation, in turns. Ignored in radial mode.",
+    description: "Direction of the linear separation, in turns. Ignored in radial mode.",
     animatable: true,
     legal: [-1, 1],
     default: 0,
@@ -170,7 +170,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CHROMATIC_ABERRATION_PARAM.centerX,
     label: "Centre X",
     type: "float",
-    hint: "Optical centre, as a fraction of image width. Ignored in linear mode.",
+    description: "Optical centre, as a fraction of image width. Ignored in linear mode.",
     animatable: true,
     legal: [0, 1],
     default: 0.5,
@@ -186,7 +186,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CHROMATIC_ABERRATION_PARAM.centerY,
     label: "Centre Y",
     type: "float",
-    hint: "Optical centre, as a fraction of image height. Ignored in linear mode.",
+    description: "Optical centre, as a fraction of image height. Ignored in linear mode.",
     animatable: true,
     legal: [0, 1],
     default: 0.5,
@@ -196,7 +196,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CHROMATIC_ABERRATION_PARAM.falloff,
     label: "Falloff",
     type: "float",
-    hint: "Exponent on the radius. 1 grows the fringe evenly from the centre; 2 keeps it in the corners.",
+    description: "Exponent on the radius. 1 grows the fringe evenly from the centre; 2 keeps it in the corners.",
     animatable: true,
     legal: [0.25, 4],
     // Quadratic: the photographic look, and the reason the middle of the frame
@@ -210,7 +210,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     type: "float",
     // This is what the seed drives; without it both modes are fully determined
     // and a seed control would move nothing.
-    hint: "Seeded per-scanline extra separation, as a fraction of width. 0 is off, and then the seed has no effect.",
+    description: "Seeded per-scanline extra separation, as a fraction of width. 0 is off, and then the seed has no effect.",
     animatable: true,
     legal: [0, 0.25],
     default: 0,
@@ -225,7 +225,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CHROMATIC_ABERRATION_PARAM.edge,
     label: "Edge",
     type: "enum",
-    hint: "What a channel shows where it has been displaced off the frame.",
+    description: "What a channel shows where it has been displaced off the frame.",
     animatable: false,
     values: [...EDGE_VALUES],
     // Holding the edge is the only one of the three that does not invent
@@ -245,7 +245,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CHROMATIC_ABERRATION_PARAM.seed,
     label: "Seed",
     type: "seed",
-    hint: "Reroll the line wobble. No effect while wobble is 0.",
+    description: "Reroll the line wobble. No effect while wobble is 0.",
     animatable: false,
     default: 0,
     surprise: { weight: 0.8 },
@@ -255,6 +255,12 @@ const PARAMS: readonly ParamDescriptor[] = [
 const descriptor: EffectDescriptor = {
   id: "chromatic-aberration",
   name: "Chromatic aberration",
+  summary:
+    "Coloured fringing that grows away from the optical centre, the way a real lens fails towards its edges.",
+  description:
+    "Radial mode points the displacement away from a centre and grows it with distance, with falloff as the exponent on the radius so the fringe can be kept out of the middle of the frame the way a real one is. Linear mode is a single constant separation along an angle — prism dispersion rather than lens aberration. Green does not move: that is the optical model, and it is also what keeps the picture sharp while the fringes appear. If you want a flat, even, arbitrary separation instead, RGB split is the blunter tool for it.",
+  keywords: ["chromatic aberration", "fringe", "fringing", "lens", "colour fringe", "color fringe", "dispersion", "prism", "optical", "rgb", "edges"],
+  concept: "glitch",
   requirement: "F-GL-05",
   slot: "postprocess",
   family: "glitch",

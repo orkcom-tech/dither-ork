@@ -65,7 +65,7 @@ export const HSL_PARAMS: readonly ParamDescriptor[] = [
     // Turns, not degrees, per CONVENTIONS.md: a modulator ramping 0 -> 1 lands
     // exactly back where it started, so an animated rotation closes the loop by
     // construction and the UI never has to know that 360 is special.
-    hint: "Rotation of the OKLab hue plane, in turns. 0.5 is the opposite hue; 0.95 is a small shift backwards.",
+    description: "Rotation of the OKLab hue plane, in turns. 0.5 is the opposite hue; 0.95 is a small shift backwards.",
     animatable: true,
     legal: [0, 1],
     default: 0,
@@ -85,7 +85,7 @@ export const HSL_PARAMS: readonly ParamDescriptor[] = [
     key: HSL_PARAM.saturation,
     label: "Saturation",
     type: "float",
-    hint: "Gain on OKLab chroma at constant lightness. 0 is neutral grey; above 1 pushes colour out of gamut.",
+    description: "Gain on OKLab chroma at constant lightness. 0 is neutral grey; above 1 pushes colour out of gamut.",
     animatable: true,
     // Zero is legal and is the greyscale conversion, which is a real setting
     // rather than an edge case. Three is well past the sRGB gamut for anything
@@ -110,7 +110,7 @@ export const HSL_PARAMS: readonly ParamDescriptor[] = [
     key: HSL_PARAM.lightness,
     label: "Lightness",
     type: "float",
-    hint: "Offset on OKLab lightness. Perceptually even, so ±0.1 is the same visible step at every hue.",
+    description: "Offset on OKLab lightness. Perceptually even, so ±0.1 is the same visible step at every hue.",
     animatable: true,
     // OKLab L spans [0, 1] across the display range, so a full-range offset in
     // either direction is the most that can move the picture.
@@ -164,6 +164,12 @@ export const HSL_GPU: GpuEffect = {
 export default defineEffect({
   id: "hsl",
   name: "Hue / saturation / lightness",
+  summary:
+    "Hue rotation, saturation and lightness, worked in OKLab so every step is perceptually even.",
+  description:
+    "It is called HSL because that is what the control is for, but nothing here uses the HSL model: hue is an angle in OKLab, saturation is a gain on OKLab chroma at constant lightness, and lightness is an offset on OKLab lightness. That matters, because HSL's own lightness puts pure yellow and pure blue at the same number while one is roughly nine times brighter, and its hue is an angle on a hexagon, so an animated sweep visibly accelerates. Pushing saturation above 1 sends colours out of gamut, which the palette match then has to resolve — often the point, when you want a small palette used hard.",
+  keywords: ["hue", "saturation", "lightness", "colour", "color", "oklab", "tint", "desaturate", "greyscale", "grayscale", "vibrance", "shift hue", "recolour", "recolor"],
+  concept: "tone-and-colour",
   requirement: "F-PP-04",
   // Preprocess. Placed after a quantizer this would rewrite every pixel's
   // colour while the index map beside it still named the old palette entries —

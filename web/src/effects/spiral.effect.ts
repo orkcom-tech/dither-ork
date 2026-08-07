@@ -90,7 +90,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     type: "float",
     // Normalized rather than in pixels so a document keeps pointing at the same
     // feature when the working resolution changes between preview and export.
-    hint: "Spiral centre, as a fraction of image width. Values outside 0..1 put it off-frame.",
+    description: "Spiral centre, as a fraction of image width. Values outside 0..1 put it off-frame.",
     animatable: true,
     legal: [-1, 2],
     default: 0.5,
@@ -100,7 +100,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: SPIRAL_PARAM.centreY,
     label: "Centre Y",
     type: "float",
-    hint: "Spiral centre, as a fraction of image height.",
+    description: "Spiral centre, as a fraction of image height.",
     animatable: true,
     legal: [-1, 2],
     default: 0.5,
@@ -110,7 +110,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: SPIRAL_PARAM.pitch,
     label: "Pitch",
     type: "float",
-    hint: "Radial distance between successive arms, in pixels.",
+    description: "Radial distance between successive arms, in pixels.",
     animatable: true,
     legal: [0.5, 512],
     default: 8,
@@ -122,7 +122,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: SPIRAL_PARAM.twist,
     label: "Twist",
     type: "int",
-    hint: "Arms, and their handedness. Whole turns per revolution; a fraction would cut the screen at one angle.",
+    description: "Arms, and their handedness. Whole turns per revolution; a fraction would cut the screen at one angle.",
     // Not animatable: the value reaches the shader as an i32 and the uniform
     // packer refuses a non-integer for one, so a modulator bound here would
     // fail the pack rather than round. It is also a discrete look — arms appear
@@ -142,7 +142,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     // Turns, not degrees: a modulator ramping 0 -> 1 lands back where it
     // started, so an animated rotation loops without the UI having to know that
     // 360 is special.
-    hint: "Rotation of the whole spiral about its centre, in turns. The primary animation target.",
+    description: "Rotation of the whole spiral about its centre, in turns. The primary animation target.",
     animatable: true,
     legal: [-1, 1],
     default: 0,
@@ -152,7 +152,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: SPIRAL_PARAM.contrast,
     label: "Screen contrast",
     type: "float",
-    hint: "Steepens the arm profile around its midpoint. Above 1 hardens the arms into bands.",
+    description: "Steepens the arm profile around its midpoint. Above 1 hardens the arms into bands.",
     animatable: true,
     legal: [0.05, 4],
     default: 1,
@@ -162,7 +162,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: SPIRAL_PARAM.spread,
     label: "Spread",
     type: "float",
-    hint: "Dither strength. 0 is plain quantization, 1 reproduces tone exactly.",
+    description: "Dither strength. 0 is plain quantization, 1 reproduces tone exactly.",
     animatable: true,
     legal: [0, 2],
     default: 1,
@@ -172,7 +172,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: SPIRAL_PARAM.thresholdOffset,
     label: "Threshold offset",
     type: "float",
-    hint: "Slides the cut between the two candidate colours. ±0.5 forces one.",
+    description: "Slides the cut between the two candidate colours. ±0.5 forces one.",
     animatable: true,
     legal: [-0.5, 0.5],
     default: 0,
@@ -230,6 +230,12 @@ export function spiralGpuEffect(): GpuEffect {
 export default defineEffect({
   id: SPIRAL_ID,
   name: "Spiral",
+  summary:
+    "An Archimedean spiral screen — rings with a twist, so the arms wind out from a centre.",
+  description:
+    "The ring screen with an angular shear added: pitch sets the radial spacing between arms, and twist sets how many arms there are and which way they wind. Twist is a whole number because a fractional one puts a hard radial cut through the image where the angle wraps, which reads as a rendering fault rather than as a control; rotation is the continuous equivalent and the one to animate. Like the ring screen it is geometry about a centre point and takes no account of what is in the picture.",
+  keywords: ["spiral", "swirl", "vortex", "helix", "twist", "hypnotic", "whirl", "radial"],
+  concept: "halftone-screen",
   requirement: "F-PT-06",
   slot: "dither",
   family: "pattern",

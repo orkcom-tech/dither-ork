@@ -76,7 +76,7 @@ export const POSTERIZE_PARAMS: readonly ParamDescriptor[] = [
     key: POSTERIZE_PARAM.levels,
     label: "Levels",
     type: "int",
-    hint: "How many tones each channel is allowed. 2 is pure black and white.",
+    description: "How many tones each channel is allowed. 2 is pure black and white.",
     animatable: true,
     legal: [2, MAX_LEVELS],
     default: 4,
@@ -96,7 +96,7 @@ export const POSTERIZE_PARAMS: readonly ParamDescriptor[] = [
     key: POSTERIZE_PARAM.mode,
     label: "Mode",
     type: "enum",
-    hint: "Band each channel separately, or band the tone and keep the colour.",
+    description: "Band each channel separately, or band the tone and keep the colour.",
     animatable: false,
     values: [
       { value: "rgb", label: "Per channel" },
@@ -117,7 +117,7 @@ export const POSTERIZE_PARAMS: readonly ParamDescriptor[] = [
     key: POSTERIZE_PARAM.space,
     label: "Level spacing",
     type: "enum",
-    hint: "Even in the encoded value, as an image editor's posterize is, or even in physical light.",
+    description: "Even in the encoded value, as an image editor's posterize is, or even in physical light.",
     animatable: false,
     values: [
       { value: "srgb", label: "sRGB (perceptual)" },
@@ -175,6 +175,12 @@ export const POSTERIZE_GPU: GpuEffect = {
 export default defineEffect({
   id: "posterize",
   name: "Posterize",
+  summary:
+    "Reduces the picture to a fixed number of tones per channel, with hard steps and no dithering at all.",
+  description:
+    "The straight quantization a dither exists to avoid: every value is snapped to the nearest of N evenly spaced levels, so gradients become visible bands. Two levels per channel is pure black and white. RGB bands each channel separately, which can shift hues at the step boundaries; luma bands the tone and keeps the colour. Level spacing decides whether the steps are even in the encoded value, as an image editor's posterize is, or even in physical light, which puts more of them in the shadows.",
+  keywords: ["posterize", "levels", "banding", "bands", "quantize", "flat", "steps", "reduce colours", "reduce colors", "cel shading", "poster"],
+  concept: "tone-and-colour",
   requirement: "F-SP-06",
   // Before the dither, not after. Crushing the input to a handful of levels and
   // then dithering it is the reason to reach for this; running it after a

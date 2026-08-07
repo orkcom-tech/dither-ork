@@ -15,5 +15,10 @@ import { errorDiffusionEffect } from "./error-diffusion";
 export default errorDiffusionEffect({
   id: "shiau-fan-2",
   name: "Shiau-Fan 2",
+  summary:
+    "Shiau–Fan with one more tap on the row below — a wider fan, softer, still directional.",
+  description:
+    "The same shape reaching one column further back: eight sixteenths straight right, and 1, 1, 2, 4 across the row below. Spreading the downward half over four columns instead of three trades a little sharpness for fewer worms still. Choose it over plain Shiau–Fan when that kernel's grain is too coarse for the image.",
+  keywords: ["shiau", "shiau fan 2", "wide", "soft", "directional"],
   requirement: "F-ED-13",
 });

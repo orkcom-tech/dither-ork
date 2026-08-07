@@ -92,7 +92,7 @@ export const DILATE_ERODE_PARAMS: readonly ParamDescriptor[] = [
     key: DILATE_ERODE_PARAM.operation,
     label: "Operation",
     type: "enum",
-    hint: "Grow the region into its neighbours, or shrink it back into them.",
+    description: "Grow the region into its neighbours, or shrink it back into them.",
     // Not animatable: this is a choice between two operations, and a modulator
     // ramping across the boundary between them would produce a hard cut rather
     // than a transition. Radius is the animatable axis.
@@ -117,7 +117,7 @@ export const DILATE_ERODE_PARAMS: readonly ParamDescriptor[] = [
     key: DILATE_ERODE_PARAM.targetIndex,
     label: "Region",
     type: "int",
-    hint: "Which palette entry's regions grow or shrink.",
+    description: "Which palette entry's regions grow or shrink.",
     animatable: false,
     legal: [0, MAX_PALETTE_INDEX],
     default: 0,
@@ -134,7 +134,7 @@ export const DILATE_ERODE_PARAMS: readonly ParamDescriptor[] = [
     key: DILATE_ERODE_PARAM.radius,
     label: "Radius",
     type: "int",
-    hint: "How far the region moves, in pixels.",
+    description: "How far the region moves, in pixels.",
     animatable: true,
     legal: [1, MAX_RADIUS],
     default: 1,
@@ -151,7 +151,7 @@ export const DILATE_ERODE_PARAMS: readonly ParamDescriptor[] = [
     key: DILATE_ERODE_PARAM.shape,
     label: "Element shape",
     type: "enum",
-    hint: "Disc or square structuring element. Only visible above a radius of about 2.",
+    description: "Disc or square structuring element. Only visible above a radius of about 2.",
     animatable: false,
     values: [
       { value: "round", label: "Round" },
@@ -210,6 +210,12 @@ export const DILATE_ERODE_GPU: GpuEffect = {
 export default defineEffect({
   id: "dilate-erode",
   name: "Dilate / erode",
+  summary:
+    "Grows or shrinks one palette region by a few pixels — binary morphology on the index map.",
+  description:
+    "Dilation grows the region named by the target index into its neighbours; erosion shrinks it back into them. Because the index map is exact set membership, both are integer comparisons with no threshold anywhere, which is the whole reason the pipeline carries the map. Use it to clean speckle out of a dithered result, to thicken thin regions before the SVG tracer or a cutter sees them, or to open a gap between two regions. The disc and square structuring elements only differ visibly above a radius of about two.",
+  keywords: ["dilate", "erode", "morphology", "grow", "shrink", "expand", "contract", "thicken", "thin", "despeckle", "cleanup", "region", "spread", "choke", "trap"],
+  concept: "index-map",
   requirement: "F-SP-11",
   // Postprocess by necessity, not by taste: it reads the index map, and
   // `validateEffect` rejects an index-map consumer in the preprocess slot

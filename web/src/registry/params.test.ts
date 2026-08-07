@@ -44,6 +44,8 @@ afterEach(() => {
 const FLOAT: FloatParam = {
   key: "spread",
   label: "Spread",
+  description:
+    "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
   type: "float",
   animatable: true,
   legal: [0, 2],
@@ -55,6 +57,8 @@ const FLOAT: FloatParam = {
 const INT: IntParam = {
   key: "levels",
   label: "Levels",
+  description:
+    "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
   type: "int",
   animatable: true,
   legal: [2, 256],
@@ -65,6 +69,8 @@ const INT: IntParam = {
 const BOOL: BoolParam = {
   key: "serpentine",
   label: "Serpentine",
+  description:
+    "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
   type: "bool",
   animatable: false,
   default: true,
@@ -74,6 +80,8 @@ const BOOL: BoolParam = {
 const ENUM: EnumParam = {
   key: "shape",
   label: "Dot shape",
+  description:
+    "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
   type: "enum",
   animatable: false,
   values: [
@@ -87,6 +95,8 @@ const ENUM: EnumParam = {
 const COLOR: ColorParam = {
   key: "tint",
   label: "Tint",
+  description:
+    "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
   type: "color",
   animatable: true,
   default: [255, 0, 128],
@@ -96,6 +106,8 @@ const COLOR: ColorParam = {
 const SEED: SeedParam = {
   key: "jitterSeed",
   label: "Jitter seed",
+  description:
+    "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
   type: "seed",
   animatable: false,
   default: 0,
@@ -105,6 +117,8 @@ const SEED: SeedParam = {
 const CURVE: CurveParam = {
   key: "transfer",
   label: "Transfer",
+  description:
+    "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
   type: "curve",
   animatable: false,
   default: [
@@ -122,6 +136,10 @@ function effect(params: readonly ParamDescriptor[]): EffectDescriptor {
   return {
     id: "test-effect",
     name: "Test effect",
+    summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+    description:
+      "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+    keywords: ["fixture", "test"],
     requirement: "F-OD-02",
     slot: "dither",
     family: "ordered",

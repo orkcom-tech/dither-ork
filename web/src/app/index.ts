@@ -28,8 +28,13 @@
  *   passes `--jsx react` to agree with it. A file that forgets the import fails
  *   to type-check rather than failing at runtime.
  * - **No colour literals.** Every colour is a custom property from
- *   `src/ui/theme.css`; that is what makes both themes work and what F-UI-09
- *   builds on.
+ *   `src/ui/theme/tokens.css`; that is what makes both themes work and what
+ *   F-UI-09 builds on. The chrome is neutral graphite and the ork green is a
+ *   *state* colour — selected, live, playing — so a panel that reaches for
+ *   `--accent` to decorate something is reaching for the wrong token.
+ * - **Sans for labels, mono for values.** `--font-sans` is the document
+ *   default; apply `--font-mono` (or the `.mono` class) to the digits, ids and
+ *   codes a reader compares, and to nothing else.
  * - **The viewport is not React.** Reach it with {@link useViewport} and call
  *   methods on it. Before dragging a control that changes the picture, call
  *   `beginInteraction("param:<node>.<key>")` and end it on release — that is
@@ -81,6 +86,7 @@ export {
   type ToolbarItemDefinition,
 } from "./slots";
 export {
+  DEFAULT_MODE,
   THEME_MODES,
   applyTheme,
   createThemeController,

@@ -24,10 +24,17 @@ all named volumes and survive `down`.
 ### What you should see
 
 The application: a toolbar reading **open image · undo · redo · fit · 100% ·
-save · open · presets · export**, a stack panel on the left, a viewport in the
-middle, properties and palette on the right, and a status bar reading
-`effects 67` with the GPU adapter beside it. Press **open image**, choose a
-picture, press **add node**, and pick an effect.
+save · open · presets · export · batch · surprise me** on the left and
+**guide · dark** on the right, a stack panel on the left, a viewport in the
+middle, properties and palette on the right, a timeline along the bottom, and a
+status bar reading `effects 67` with the GPU adapter beside it and
+**source · docs · Made by ORKCOM** at its right end. Press **open image**,
+choose a picture, press **add node**, and pick an effect.
+
+The chrome is neutral graphite and the green is a state colour — selected,
+moving, playing, live. **If green appears anywhere that is not a state, that is
+a bug in the stylesheet that put it there** (see `web/src/ui/theme/tokens.css`,
+which is the only file holding a colour value).
 
 To check the whole application in one pass: open an image, add
 brightness/contrast then Floyd-Steinberg, press **export** and write a PNG;
@@ -35,6 +42,30 @@ raise the scale to 4x and write another; switch the format to **SVG** and write
 that; press **save** for a `.dork`, reload the page, press **open** and load it
 back — the picture should return exactly. Every one of those is a path a person
 takes, and none of them is covered by any of the three test suites.
+
+Three more that are equally uncovered, because they are about what the interface
+*says* rather than what it computes:
+
+- **Search finds an effect by what it is, not by its name.** Press **add node**
+  and type `glow`; Epsilon glow should be first, and the panel under the list
+  should explain that a dark two-colour palette is what makes it the neon one.
+  Type `wavy`; wave warp should appear, matched on a keyword rather than on its
+  name.
+- **Search admits its gaps.** Type `radio`. The picker should say that
+  *Wave field with obstacle interaction (F-PT-10) is specified but not built*,
+  give the reason, and offer the closest built effects. That table is
+  `web/src/registry/unbuilt.ts`, and `search.test.ts` fails the build if an
+  entry in it ever becomes a real effect.
+- **Hover help describes what a control does to the picture** (F-UI-13). Rest the
+  pointer on a parameter for 700 ms, or focus it and press **F1**. The panel's
+  prose comes off the descriptor and nowhere else, so a control with no help is
+  a descriptor that would have failed validation. Escape closes it.
+
+**guide** opens the user guide (F-UI-14): seven written chapters, then *Every
+effect*, which is generated from the sealed registry rather than written — so an
+effect added today is documented today, in its own author's words. Its search box
+consults the same unbuilt table the picker does, so `radio` gives the same answer
+in both places.
 
 If instead you get one full-page screen naming a missing capability, that is
 F-UI-12 and it is working: WebGPU and `SharedArrayBuffer` are hard requirements
@@ -700,7 +731,17 @@ entrypoint reinstall.
 - **No unseeded randomness in the pipeline.** Every stochastic node takes an
   explicit seed from the document. `Math.random()` in a render path is a defect.
 - **Adding an effect** means adding a registry descriptor with its surprise
-  metadata. Registry validation fails the build without it.
+  metadata **and its prose**: a `summary`, a `description` and `keywords`.
+  Registry validation fails the build without any of them, and it also fails a
+  description that only restates the label — `unhelpful-description`. The same
+  rule applies to every parameter. This is F-UI-15, and it is enforced rather
+  than requested because the hover help, the picker and the guide all read that
+  one copy; there is nowhere else for the words to be written.
+- **Descriptive text has exactly one home.** For an effect or a parameter that
+  home is the descriptor. For an interface idea with no descriptor behind it —
+  what a slot is, what the colour metric changes — it is
+  `web/src/ui/help/concepts.ts`, and for a family idea it is `EFFECT_CONCEPTS`
+  in `web/src/types/registry.ts`. A fourth copy anywhere is a bug.
 - **A behavioural claim that is not in a test file is not a claim.** Tests live
   beside what they test as `web/src/**/*.test.ts` and `#[cfg(test)]` modules in
   `core/`, and both suites run without a browser. See "Tests" above.

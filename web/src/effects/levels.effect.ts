@@ -72,7 +72,7 @@ export const LEVELS_PARAMS: readonly ParamDescriptor[] = [
     key: LEVELS_PARAM.inputBlack,
     label: "Input black",
     type: "float",
-    hint: "Everything at or below this encoded value becomes the output black.",
+    description: "Everything at or below this encoded value becomes the output black.",
     animatable: true,
     legal: [0, 1],
     default: 0,
@@ -91,7 +91,7 @@ export const LEVELS_PARAMS: readonly ParamDescriptor[] = [
     key: LEVELS_PARAM.inputWhite,
     label: "Input white",
     type: "float",
-    hint: "Everything at or above this encoded value becomes the output white.",
+    description: "Everything at or above this encoded value becomes the output white.",
     animatable: true,
     legal: [0, 1],
     default: 1,
@@ -106,7 +106,7 @@ export const LEVELS_PARAMS: readonly ParamDescriptor[] = [
     key: LEVELS_PARAM.gamma,
     label: "Gamma",
     type: "float",
-    hint: "Midtone bend. Above 1 brightens, below 1 darkens; the exponent applied is 1/gamma.",
+    description: "Midtone bend. Above 1 brightens, below 1 darkens; the exponent applied is 1/gamma.",
     animatable: true,
     // Photoshop's own bounds, and they are the useful ones: at 0.1 the midtones
     // are already crushed onto black and at 9.99 onto white, so nothing beyond
@@ -128,7 +128,7 @@ export const LEVELS_PARAMS: readonly ParamDescriptor[] = [
     key: LEVELS_PARAM.outputBlack,
     label: "Output black",
     type: "float",
-    hint: "Encoded value the input black maps to. Above output white, the tone scale inverts.",
+    description: "Encoded value the input black maps to. Above output white, the tone scale inverts.",
     animatable: true,
     legal: [0, 1],
     default: 0,
@@ -147,7 +147,7 @@ export const LEVELS_PARAMS: readonly ParamDescriptor[] = [
     key: LEVELS_PARAM.outputWhite,
     label: "Output white",
     type: "float",
-    hint: "Encoded value the input white maps to. Below output black, the tone scale inverts.",
+    description: "Encoded value the input white maps to. Below output black, the tone scale inverts.",
     animatable: true,
     legal: [0, 1],
     default: 1,
@@ -162,7 +162,7 @@ export const LEVELS_PARAMS: readonly ParamDescriptor[] = [
     key: LEVELS_PARAM.mode,
     label: "Mode",
     type: "enum",
-    hint: "Run the transfer on each channel, or on luminance alone and scale the colour by the ratio.",
+    description: "Run the transfer on each channel, or on luminance alone and scale the colour by the ratio.",
     animatable: false,
     // Append-only: the shader reads the ordinal, so inserting a value in the
     // middle renumbers every document already saved.
@@ -222,6 +222,12 @@ export const LEVELS_GPU: GpuEffect = {
 export default defineEffect({
   id: "levels",
   name: "Levels",
+  summary:
+    "Input black and white points, a midtone gamma, and output black and white — the standard levels control.",
+  description:
+    "Everything at or below the input black becomes the output black and everything at or above the input white becomes the output white, with gamma bending the midtones between them; setting output black above output white inverts the tone scale outright. Gamma follows the Photoshop midtone convention, so values above 1 brighten. Unlike brightness/contrast and HSL this node clips headroom even at its defaults, because an input white of 1 is a statement about where white is and the working buffer can legitimately hold values above it.",
+  keywords: ["levels", "black point", "white point", "gamma", "midtones", "clip", "histogram", "input output", "crush", "lift"],
+  concept: "tone-and-colour",
   requirement: "F-PP-03",
   // Preprocess: levels decides how much of the tone scale the kernel downstream
   // has to work with, which is the whole reason to reach for it here. After a

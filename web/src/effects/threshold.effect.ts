@@ -55,7 +55,7 @@ export const THRESHOLD_PARAMS: readonly ParamDescriptor[] = [
     key: THRESHOLD_PARAM.level,
     label: "Level",
     type: "float",
-    hint: "The tone the cut is made at, measured as it looks on screen. 0.5 is visual mid-grey.",
+    description: "The tone the cut is made at, measured as it looks on screen. 0.5 is visual mid-grey.",
     animatable: true,
     legal: [0, 1],
     default: 0.5,
@@ -74,7 +74,7 @@ export const THRESHOLD_PARAMS: readonly ParamDescriptor[] = [
     key: THRESHOLD_PARAM.softness,
     label: "Softness",
     type: "float",
-    hint: "Width of the ramp across the cut, centred on the level. 0 is a hard edge.",
+    description: "Width of the ramp across the cut, centred on the level. 0 is a hard edge.",
     animatable: true,
     legal: [0, 1],
     // Hard. A threshold is a hard cut unless asked otherwise, and 0 is the case
@@ -130,6 +130,12 @@ export const THRESHOLD_GPU: GpuEffect = {
 export default defineEffect({
   id: "threshold",
   name: "Threshold",
+  summary:
+    "Cuts the picture to black and white at one tone, with an optional soft edge across the cut.",
+  description:
+    "Everything above the level goes white and everything below goes black, measured on the tone as the screen shows it so that 0.5 is visual mid grey rather than linear mid grey. Softness widens the cut into a ramp centred on the level, which is the difference between hard stencil art and a two-tone image that still has some modelling in it. It quantizes nothing against the palette and emits no index map — this is a tone operation, not a dither.",
+  keywords: ["threshold", "black and white", "1 bit", "one bit", "binary", "stencil", "cutout", "silhouette", "monochrome", "high contrast", "bitonal"],
+  concept: "tone-and-colour",
   requirement: "F-SP-07",
   // Preprocess for the same reason as posterize: it rewrites colours, so
   // downstream of a quantizer it would leave the index map describing an image

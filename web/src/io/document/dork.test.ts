@@ -48,6 +48,10 @@ setLevel("error");
 const TEST_COMPOSITE: EffectDescriptor = {
   id: "test-composite",
   name: "Test Composite",
+  summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+  description:
+    "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+  keywords: ["fixture", "test"],
   requirement: "F-PP-05",
   slot: "preprocess",
   family: "preprocess",
@@ -56,6 +60,8 @@ const TEST_COMPOSITE: EffectDescriptor = {
     {
       key: "tint",
       label: "Tint",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "color",
       animatable: false,
       default: [255, 128, 0],
@@ -69,6 +75,8 @@ const TEST_COMPOSITE: EffectDescriptor = {
     {
       key: "shape",
       label: "Shape",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "curve",
       animatable: false,
       default: [

@@ -26,6 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLevel } from "../lib/log";
 import {
   CHROMA_CEILING,
+  EFFECT_CONCEPTS,
   SEED_RANGE,
   validateEffect,
   validateRegistry,
@@ -65,6 +66,8 @@ const FLOAT_PARAM: FloatParam = {
   key: "spread",
   label: "Spread",
   type: "float",
+  description:
+    "How much of the tone the pattern is allowed to carry. At 0 the matrix does nothing and the result is plain quantization.",
   animatable: true,
   legal: [0, 2],
   default: 1,
@@ -75,6 +78,7 @@ const INT_PARAM: IntParam = {
   key: "levels",
   label: "Levels",
   type: "int",
+  description: "How many tones each channel is allowed. 2 is pure black and white.",
   animatable: true,
   legal: [2, 256],
   default: 4,
@@ -85,6 +89,8 @@ const BOOL_PARAM: BoolParam = {
   key: "serpentine",
   label: "Serpentine",
   type: "bool",
+  description:
+    "Alternates direction every row so error stops drifting consistently to one side.",
   animatable: false,
   default: true,
   surprise: { trueProbability: 0.9, weight: 0.5 },
@@ -94,6 +100,7 @@ const ENUM_PARAM: EnumParam = {
   key: "shape",
   label: "Dot shape",
   type: "enum",
+  description: "The figure the ink is drawn as, which decides how the midtones join up.",
   animatable: false,
   values: [
     { value: "round", label: "Round" },
@@ -114,6 +121,7 @@ const COLOR_PARAM: ColorParam = {
   key: "tint",
   label: "Tint",
   type: "color",
+  description: "Colour the whole frame is pushed towards.",
   animatable: true,
   default: [255, 0, 128],
   surprise: {
@@ -129,6 +137,7 @@ const SEED_PARAM: SeedParam = {
   key: "jitterSeed",
   label: "Jitter seed",
   type: "seed",
+  description: "Fixes which pixels are jittered. The same seed always gives the same picture.",
   animatable: false,
   default: 0,
   surprise: { weight: 0.3 },
@@ -138,6 +147,7 @@ const CURVE_PARAM: CurveParam = {
   key: "transfer",
   label: "Transfer",
   type: "curve",
+  description: "Maps input tone to output tone. The diagonal is no change.",
   animatable: false,
   default: [
     { x: 0, y: 0 },
@@ -157,6 +167,11 @@ const CURVE_PARAM: CurveParam = {
 const VALID: EffectDescriptor = {
   id: "bayer-4",
   name: "Bayer 4×4",
+  summary: "Sixteen thresholds in a repeating tile — the ordered dither most people picture.",
+  description:
+    "A stand-in for the real Bayer 4×4 descriptor, carrying the fields the validator reads and nothing else.",
+  keywords: ["bayer", "ordered", "dither"],
+  concept: "ordered-dithering",
   requirement: "F-OD-02",
   slot: "dither",
   family: "ordered",
@@ -170,6 +185,11 @@ const VALID: EffectDescriptor = {
 const DIFFUSION: EffectDescriptor = {
   id: "floyd-steinberg",
   name: "Floyd–Steinberg",
+  summary: "Pushes each pixel's quantization error onto neighbours it has not reached yet.",
+  description:
+    "A stand-in for the real Floyd–Steinberg descriptor, present so the serial-execution rule has something to be checked against.",
+  keywords: ["floyd", "steinberg", "diffusion"],
+  concept: "error-diffusion",
   requirement: "F-ED-01",
   slot: "dither",
   family: "error-diffusion",
@@ -961,6 +981,12 @@ const EVERY_FAILURE_MODE: Record<RegistryIssueCode, true> = {
   "diffusion-must-run-serially": true,
   "index-map-consumer-in-preprocess": true,
   "resampler-must-run-on-gpu": true,
+  "missing-summary": true,
+  "missing-description": true,
+  "unhelpful-description": true,
+  "missing-keywords": true,
+  "duplicate-keyword": true,
+  "unknown-concept": true,
   "duplicate-param-key": true,
   "empty-param-key": true,
   "missing-surprise": true,
@@ -989,6 +1015,136 @@ const EVERY_FAILURE_MODE: Record<RegistryIssueCode, true> = {
   "curve-domain-not-covered": true,
   "invalid-jitter": true,
 };
+
+// --- descriptive text (F-UI-15) -----------------------------------------
+//
+// These sit with the rest of the validator's rules rather than in a file of
+// their own because they are the same kind of gate: the reason a missing
+// surprise range is a build failure is that Surprise Me would otherwise skip
+// the parameter forever, and the reason a missing description is one is that
+// hover help, the picker and the guide would otherwise each invent their own —
+// which is the three-copies drift F-UI-15 exists to prevent.
+
+describe("validateEffect rejects descriptive text that", () => {
+  it("is absent on the effect", () => {
+    for (const field of ["summary", "description", "keywords"] as const) {
+      const missing = { ...VALID };
+      delete (missing as Record<string, unknown>)[field];
+      rejects(
+        validateEffect(asDescriptor(missing)),
+        field === "summary"
+          ? "missing-summary"
+          : field === "description"
+            ? "missing-description"
+            : "missing-keywords",
+        `${field} absent`,
+      );
+    }
+  });
+
+  it("is blank or the wrong type on the effect", () => {
+    rejects(
+      validateEffect(withFields({ summary: "   " })),
+      "missing-summary",
+      "whitespace is not a summary",
+    );
+    rejects(
+      validateEffect(withFields({ description: 42 })),
+      "missing-description",
+      "a number is not a description",
+    );
+  });
+
+  it("only restates the name it is supposed to describe", () => {
+    // The laziest way a description arrives undocumented, and the one that
+    // looks like it was written.
+    rejects(
+      // Punctuation and case are folded first, so "bayer 4×4!" is caught too.
+      validateEffect(withFields({ summary: "  bayer 4×4!  " })),
+      "unhelpful-description",
+      "summary echoing the name",
+    );
+    rejects(
+      validateEffect(withFields({ description: VALID.summary })),
+      "unhelpful-description",
+      "description echoing the summary",
+    );
+  });
+
+  it("is absent on a parameter", () => {
+    const { description: _dropped, ...bare } = FLOAT_PARAM;
+    rejects(
+      validateEffect(withParam(bare)),
+      "missing-description",
+      "parameter with no description",
+    );
+    const issues = validateEffect(withParam(bare));
+    expect(issues.find((i) => i.code === "missing-description")?.param).toBe("spread");
+  });
+
+  it("only restates the parameter's own label", () => {
+    rejects(
+      validateEffect(withParam({ ...FLOAT_PARAM, description: "Spread" })),
+      "unhelpful-description",
+      "description echoing the label",
+    );
+  });
+});
+
+describe("validateEffect rejects keywords that", () => {
+  it("are empty, blank or not a list", () => {
+    for (const bad of [[], "glow", [""], ["  "], [7]]) {
+      rejects(
+        validateEffect(withFields({ keywords: bad })),
+        "missing-keywords",
+        `keywords ${JSON.stringify(bad)}`,
+      );
+    }
+  });
+
+  it("repeat, once punctuation and case are folded away", () => {
+    // "Blue Noise" and "blue-noise" are one keyword typed twice, and a
+    // duplicate is a weight applied twice in ranking rather than a synonym.
+    rejects(
+      validateEffect(withFields({ keywords: ["Blue Noise", "blue-noise"] })),
+      "duplicate-keyword",
+      "same keyword under two spellings",
+    );
+  });
+});
+
+describe("validateEffect rejects a concept", () => {
+  it("that no entry in EFFECT_CONCEPTS explains", () => {
+    rejects(
+      validateEffect(withFields({ concept: "vibes" })),
+      "unknown-concept",
+      "a concept with nothing to explain it",
+    );
+  });
+
+  it("but accepts every concept the table does declare", () => {
+    for (const concept of Object.keys(EFFECT_CONCEPTS)) {
+      expect(validateEffect(withFields({ concept })), concept).toEqual([]);
+    }
+  });
+});
+
+describe("EFFECT_CONCEPTS", () => {
+  it("keys every entry with its own id, so a lookup cannot return a mismatch", () => {
+    for (const [id, concept] of Object.entries(EFFECT_CONCEPTS)) {
+      expect(concept.id).toBe(id);
+    }
+  });
+
+  it("gives every concept a title, a summary and a description of its own", () => {
+    for (const concept of Object.values(EFFECT_CONCEPTS)) {
+      expect(concept.title.trim().length, concept.id).toBeGreaterThan(0);
+      expect(concept.summary.trim().length, concept.id).toBeGreaterThan(0);
+      expect(concept.description.trim().length, concept.id).toBeGreaterThan(0);
+      expect(concept.description, concept.id).not.toBe(concept.summary);
+    }
+  });
+});
 
 describe("failure-mode coverage", () => {
   it("rejects a bool probability outside [0, 1]", () => {

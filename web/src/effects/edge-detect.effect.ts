@@ -60,7 +60,7 @@ const OPERATOR: ParamDescriptor = {
   label: "Operator",
   type: "enum",
   animatable: false,
-  hint: "Sobel is a gradient magnitude and gives thick directional edges. Laplacian is a second derivative and gives thin symmetric ones.",
+  description: "Sobel is a gradient magnitude and gives thick directional edges. Laplacian is a second derivative and gives thin symmetric ones.",
   // Append-only. The shader sees the ordinal, so inserting a value in the
   // middle silently renumbers every document already saved.
   values: [
@@ -85,7 +85,7 @@ const STRENGTH: ParamDescriptor = {
   label: "Strength",
   type: "float",
   animatable: true,
-  hint: "Gain on the edge response before it is clipped to white.",
+  description: "Gain on the edge response before it is clipped to white.",
   legal: [0, 8],
   default: 1,
   step: 0.05,
@@ -105,7 +105,7 @@ const MIX: ParamDescriptor = {
   label: "Mix back",
   type: "float",
   animatable: true,
-  hint: "0 leaves the picture alone, 1 replaces it with the edge map.",
+  description: "0 leaves the picture alone, 1 replaces it with the edge map.",
   legal: [0, 1],
   // The plain edge map. An effect called "edge detect" should render edges
   // unless asked to blend them.
@@ -123,6 +123,12 @@ const MIX: ParamDescriptor = {
 export default defineEffect({
   id: "edge-detect",
   name: "Edge detect",
+  summary:
+    "Finds the picture's edges with Sobel or Laplacian and mixes them back over it.",
+  description:
+    "Sobel is a gradient magnitude and gives thick edges with a direction to them; Laplacian is a second derivative and gives thin symmetric ones. The two are normalised against each other, so a full-contrast step edge reads the same from either and strength means one thing regardless of which is selected. Strength is not decoration: an edge response is a difference between neighbours, so on anything but hard graphic edges it lands in the low hundredths and without gain the effect produces a black frame. Run it before a dither to hand the dither line art; run it after and it finds the dither's own texture, since by then every pixel is a step edge.",
+  keywords: ["edge", "edges", "sobel", "laplacian", "contour", "line art", "lineart", "detect", "trace", "comic", "outline"],
+  concept: "neighbourhood-filter",
   requirement: "F-SP-04",
   slot: "preprocess",
   family: "special",

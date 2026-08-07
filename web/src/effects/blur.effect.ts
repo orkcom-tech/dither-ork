@@ -55,7 +55,7 @@ const RADIUS: ParamDescriptor = {
   label: "Radius",
   type: "float",
   animatable: true,
-  hint: "Truncation half-width of the kernel, in pixels. Sigma is a third of it.",
+  description: "Truncation half-width of the kernel, in pixels. Sigma is a third of it.",
   // The ceiling is the same number as MAX_BLUR_RADIUS in the shader, so a
   // document can never ask for a radius the loop bound silently refuses.
   legal: [0, 64],
@@ -76,6 +76,12 @@ const RADIUS: ParamDescriptor = {
 export default defineEffect({
   id: "blur",
   name: "Blur",
+  summary:
+    "A true gaussian blur — the standard way to decide how much detail reaches the dither.",
+  description:
+    "One control, because a gaussian has exactly one shape parameter and everything else about it is arithmetic; the radius is the truncation half-width in pixels and sigma is a third of it. Placed before a dither this is the main way to soften detail a small palette could not carry anyway. Placed after one it erases the dither's texture, which is a real look but a rare one. For a detail crush that also makes the whole stack cheaper, use Internal resolution instead.",
+  keywords: ["blur", "gaussian", "soften", "smooth", "defocus", "out of focus", "haze", "fuzzy", "unfocus"],
+  concept: "neighbourhood-filter",
   requirement: "F-SP-02",
   slot: "preprocess",
   family: "special",

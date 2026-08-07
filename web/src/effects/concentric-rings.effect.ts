@@ -89,7 +89,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     type: "float",
     // Normalized rather than in pixels so a document keeps pointing at the same
     // feature when the working resolution changes between preview and export.
-    hint: "Ring centre, as a fraction of image width. Values outside 0..1 put it off-frame.",
+    description: "Ring centre, as a fraction of image width. Values outside 0..1 put it off-frame.",
     animatable: true,
     legal: [-1, 2],
     default: 0.5,
@@ -99,7 +99,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CONCENTRIC_RINGS_PARAM.centreY,
     label: "Centre Y",
     type: "float",
-    hint: "Ring centre, as a fraction of image height.",
+    description: "Ring centre, as a fraction of image height.",
     animatable: true,
     legal: [-1, 2],
     default: 0.5,
@@ -109,7 +109,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CONCENTRIC_RINGS_PARAM.pitch,
     label: "Pitch",
     type: "float",
-    hint: "Distance between rings, in pixels.",
+    description: "Distance between rings, in pixels.",
     animatable: true,
     legal: [0.5, 512],
     default: 8,
@@ -124,7 +124,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     // Cycles, not pixels: a modulator ramping 0 -> 1 advances the rings by
     // exactly one pitch and lands back on frame 0, so the loop closes without
     // the UI having to know what the pitch is.
-    hint: "Shifts the rings outward, in whole ring cycles. The primary animation target.",
+    description: "Shifts the rings outward, in whole ring cycles. The primary animation target.",
     animatable: true,
     legal: [-1, 1],
     default: 0,
@@ -134,7 +134,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CONCENTRIC_RINGS_PARAM.contrast,
     label: "Screen contrast",
     type: "float",
-    hint: "Steepens the ring profile around its midpoint. Above 1 hardens the rings into bands.",
+    description: "Steepens the ring profile around its midpoint. Above 1 hardens the rings into bands.",
     animatable: true,
     legal: [0.05, 4],
     default: 1,
@@ -144,7 +144,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CONCENTRIC_RINGS_PARAM.spread,
     label: "Spread",
     type: "float",
-    hint: "Dither strength. 0 is plain quantization, 1 reproduces tone exactly.",
+    description: "Dither strength. 0 is plain quantization, 1 reproduces tone exactly.",
     animatable: true,
     legal: [0, 2],
     default: 1,
@@ -154,7 +154,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CONCENTRIC_RINGS_PARAM.thresholdOffset,
     label: "Threshold offset",
     type: "float",
-    hint: "Slides the cut between the two candidate colours. ±0.5 forces one.",
+    description: "Slides the cut between the two candidate colours. ±0.5 forces one.",
     animatable: true,
     legal: [-0.5, 0.5],
     default: 0,
@@ -210,6 +210,12 @@ export function concentricRingsGpuEffect(): GpuEffect {
 export default defineEffect({
   id: CONCENTRIC_RINGS_ID,
   name: "Concentric rings",
+  summary:
+    "A radial screen — the threshold follows distance from a point, so the texture reads as rings spreading out of it.",
+  description:
+    "Rings of a fixed pitch expand from a centre you can place anywhere, including off the frame, and tone is carried by how thick each ring is where it falls. Phase slides the rings outward and is the primary animation target: a modulator ramping 0 to 1 pulses them outward once and closes the loop by construction. It is pure geometry about a point and knows nothing about the picture's content — the rings do not bend around the subject or stop behind it.",
+  keywords: ["rings", "circles", "concentric", "radial", "ripple", "target", "bullseye", "moire", "waves", "onion"],
+  concept: "halftone-screen",
   requirement: "F-PT-05",
   slot: "dither",
   family: "pattern",

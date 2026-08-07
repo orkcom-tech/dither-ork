@@ -96,7 +96,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: ROW_DISPLACEMENT_PARAM.minSliceHeight,
     label: "Min slice height",
     type: "float",
-    hint: "Shortest slice, as a fraction of image height. Resolution-independent, so preview and export match.",
+    description: "Shortest slice, as a fraction of image height. Resolution-independent, so preview and export match.",
     animatable: true,
     legal: [0.002, 0.5],
     default: 0.008,
@@ -114,7 +114,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     type: "float",
     // The two bounds are read as a range, so a max below the min is the same
     // range described backwards rather than an error.
-    hint: "Tallest slice, as a fraction of image height.",
+    description: "Tallest slice, as a fraction of image height.",
     animatable: true,
     legal: [0.002, 0.5],
     default: 0.05,
@@ -128,7 +128,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: ROW_DISPLACEMENT_PARAM.offsetRange,
     label: "Offset range",
     type: "float",
-    hint: "Largest sideways shift, as a fraction of image width. Each slice draws within ±this.",
+    description: "Largest sideways shift, as a fraction of image width. Each slice draws within ±this.",
     animatable: true,
     legal: [0, 1],
     default: 0.06,
@@ -146,7 +146,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     type: "float",
     // At 1 every slice moves and the image turns to mush; the look depends on
     // most of the picture staying put.
-    hint: "Chance that any given slice is displaced at all.",
+    description: "Chance that any given slice is displaced at all.",
     animatable: true,
     legal: [0, 1],
     default: 0.35,
@@ -161,7 +161,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: ROW_DISPLACEMENT_PARAM.edge,
     label: "Edge",
     type: "enum",
-    hint: "What a slice shows where it has been shifted off the frame.",
+    description: "What a slice shows where it has been shifted off the frame.",
     animatable: false,
     values: [...EDGE_VALUES],
     default: "wrap",
@@ -180,7 +180,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: ROW_DISPLACEMENT_PARAM.seed,
     label: "Seed",
     type: "seed",
-    hint: "Reroll the slice heights and their offsets.",
+    description: "Reroll the slice heights and their offsets.",
     animatable: false,
     default: 0,
     surprise: { weight: 1 },
@@ -190,6 +190,12 @@ const PARAMS: readonly ParamDescriptor[] = [
 const descriptor: EffectDescriptor = {
   id: "row-displacement",
   name: "Row displacement",
+  summary:
+    "Cuts the image into horizontal slices of random height and shifts each one sideways.",
+  description:
+    "Slice heights and offsets are both drawn from the seed, so the tearing is reproducible from the document and rerolls as a whole. Hold on to the distinction: this displaces by a *seed* — which slice you land in and how far it moves are random draws. Wave warp displaces by a fixed *geometric function* instead, and neither of them displaces by the picture's own content. Everything is measured as a fraction of the image rather than in pixels, so the preview and the export are the same picture at two sizes.",
+  keywords: ["row", "rows", "displace", "displacement", "slice", "slices", "tear", "shift", "offset", "vhs", "horizontal", "broken", "scramble", "datamosh"],
+  concept: "glitch",
   requirement: "F-GL-02",
   slot: "postprocess",
   family: "glitch",

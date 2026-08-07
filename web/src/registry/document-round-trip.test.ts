@@ -54,6 +54,8 @@ afterEach(() => {
 const TINT: ColorParam = {
   key: "tint",
   label: "Tint",
+  description:
+    "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
   type: "color",
   animatable: false,
   default: [255, 64, 32],
@@ -68,6 +70,8 @@ const TINT: ColorParam = {
 const TRANSFER: CurveParam = {
   key: "transfer",
   label: "Transfer",
+  description:
+    "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
   type: "curve",
   animatable: false,
   default: [
@@ -84,6 +88,8 @@ const TRANSFER: CurveParam = {
 const AMOUNT: FloatParam = {
   key: "amount",
   label: "Amount",
+  description:
+    "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
   type: "float",
   animatable: true,
   legal: [0, 1],
@@ -94,6 +100,8 @@ const AMOUNT: FloatParam = {
 const MODE: EnumParam = {
   key: "mode",
   label: "Mode",
+  description:
+    "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
   type: "enum",
   animatable: false,
   values: [
@@ -115,6 +123,10 @@ const MODE: EnumParam = {
 const EFFECT: EffectDescriptor = {
   id: "tinted-curve",
   name: "Tinted curve",
+  summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+  description:
+    "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+  keywords: ["fixture", "test"],
   requirement: "F-PP-05",
   slot: "preprocess",
   family: "preprocess",

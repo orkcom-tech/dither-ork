@@ -1,0 +1,151 @@
+/*
+ * Contextual help — F-UI-13.
+ *
+ * Every colour and metric is a token from `../theme/tokens.css`; there is no
+ * literal here, which is what lets F-UI-09's user themes reach this panel too.
+ *
+ * The panel is `position: fixed` in viewport coordinates because the controls it
+ * describes live inside panels that clip and scroll, and a tooltip that can be
+ * cut off by its parent's `overflow` is a tooltip that disappears at exactly the
+ * moment it is needed — at the bottom of a long properties list. `placement.ts`
+ * hands it a corner and the size it is allowed to be; everything past that size
+ * scrolls inside the panel rather than escaping it.
+ */
+
+/*
+ * The mount point. It has no box of its own — the panel inside it is fixed — so
+ * it must not be able to affect the layout it was appended to.
+ */
+.help-host {
+  display: contents;
+}
+
+.help-panel {
+  position: fixed;
+  z-index: 60;
+
+  /*
+   * A definite width, so the measuring pass has a column to wrap into and the
+   * height it reports is the height the panel will have. `max-width` from the
+   * placement narrows this near a screen edge; it never widens it, because a
+   * help panel as wide as the window is one nobody reads.
+   */
+  width: 21rem;
+
+  padding: 10px 12px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--fg);
+  box-shadow: var(--shadow);
+
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+
+  /* `overscroll-behavior` so reading to the end of a long article does not
+     then scroll the panel underneath it. */
+  overscroll-behavior: contain;
+}
+
+/*
+ * The only motion, and it is on the *placed* class rather than on the panel:
+ * the first render of an article is a hidden measuring pass, and an animation
+ * on the panel itself would spend itself while nothing was visible.
+ *
+ * A fade with no movement. The panel appears beside something the eye is already
+ * resting on, and a slide would drag the eye away from it. Suppressed entirely
+ * under `prefers-reduced-motion`.
+ */
+.help-panel--placed {
+  animation: help-panel-in 110ms ease-out;
+}
+
+@keyframes help-panel-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .help-panel--placed {
+    animation: none;
+  }
+}
+
+.help-panel__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gap);
+  margin-bottom: 6px;
+}
+
+.help-panel__title {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.help-panel__kind {
+  margin-left: auto;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.help-panel__summary {
+  margin: 0 0 8px;
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.help-panel__body {
+  margin: 0;
+  color: var(--fg-dim);
+}
+
+.help-panel__family {
+  margin: 10px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule);
+  color: var(--fg-dim);
+}
+
+.help-panel__family b {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/*
+ * The declared facts. A two-column grid rather than a list, because every one
+ * of them is a short label against a short value and the eye should be able to
+ * scan the left column.
+ */
+.help-panel__facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--gap);
+  margin: 10px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule);
+  font-size: var(--text-xs);
+}
+
+.help-panel__facts dt {
+  color: var(--fg-faint);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.help-panel__facts dd {
+  margin: 0;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}

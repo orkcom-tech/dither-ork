@@ -7,6 +7,15 @@
  * inline from the palette data by `SwatchGrid.tsx` — that is the datum being
  * displayed, not a style choice, and the ink drawn on top of it comes back to
  * the theme.
+ *
+ * This panel is the strongest case in the application for the neutral chrome:
+ * it shows colours next to each other and asks the user to judge them. Anything
+ * saturated in the frame around a swatch grid changes what the swatches look
+ * like. The accent survives here only as *selected*, *locked* and *drop target*,
+ * which are states of the editor rather than properties of a colour.
+ *
+ * Mono is applied below to the hex codes, the swatch indices and the extraction
+ * figures — the things a user compares character by character.
  */
 
 .pal {
@@ -34,8 +43,10 @@
 
 .pal__note {
   color: var(--fg-faint);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: var(--text-xs);
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   white-space: nowrap;
 }
 
@@ -121,6 +132,8 @@
   position: absolute;
   left: 2px;
   bottom: 1px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: var(--text-xs);
   line-height: 1;
   pointer-events: none;
@@ -196,6 +209,8 @@
   gap: var(--gap);
   margin: 0;
   color: var(--fg-faint);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: var(--text-xs);
 }
 
@@ -226,6 +241,8 @@
 
 .pal__input--hex {
   flex: 1 1 auto;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
 }
 
 .pal__input--number {
@@ -314,6 +331,8 @@
 .pal__report dd {
   margin: 0;
   color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 /* --- library ---------------------------------------------------------- */

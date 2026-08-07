@@ -82,7 +82,7 @@ const PARAMS = [
     key: SLICE_REPEAT_PARAM.axis,
     label: "Axis",
     type: "enum",
-    hint: "Horizontal cuts the image into rows; vertical into columns.",
+    description: "Horizontal cuts the image into rows; vertical into columns.",
     animatable: false,
     values: [
       { value: "horizontal", label: "Horizontal" },
@@ -104,7 +104,7 @@ const PARAMS = [
     key: SLICE_REPEAT_PARAM.sliceSize,
     label: "Band thickness",
     type: "float",
-    hint: "Mean thickness of a band, in pixels.",
+    description: "Mean thickness of a band, in pixels.",
     animatable: true,
     legal: [1, 512],
     default: 24,
@@ -127,7 +127,7 @@ const PARAMS = [
     // The shader moves each boundary by at most half a slot, which is what
     // keeps the boundaries monotone and the band lookup a three-step walk
     // rather than a search over the image.
-    hint: "How much band thickness varies. 0 gives an even grid.",
+    description: "How much band thickness varies. 0 gives an even grid.",
     animatable: true,
     legal: [0, 1],
     default: 0.5,
@@ -145,7 +145,7 @@ const PARAMS = [
     key: SLICE_REPEAT_PARAM.probability,
     label: "Band probability",
     type: "float",
-    hint: "Fraction of bands that are duplicated. The rest pass through.",
+    description: "Fraction of bands that are duplicated. The rest pass through.",
     animatable: true,
     legal: [0, 1],
     default: 0.35,
@@ -165,7 +165,7 @@ const PARAMS = [
     // The per-band count is drawn from 1..max, so 1 is meaningful: that band is
     // displaced without being repeated, which is the row-displacement look
     // appearing inside this effect rather than a degenerate case.
-    hint: "Upper bound on how many times the strip repeats inside a band.",
+    description: "Upper bound on how many times the strip repeats inside a band.",
     animatable: true,
     legal: [1, 16],
     default: 4,
@@ -179,7 +179,7 @@ const PARAMS = [
     key: SLICE_REPEAT_PARAM.offsetRange,
     label: "Reach",
     type: "float",
-    hint: "How far from its own position a band may take its strip, in pixels.",
+    description: "How far from its own position a band may take its strip, in pixels.",
     animatable: true,
     legal: [0, 2048],
     default: 96,
@@ -197,7 +197,7 @@ const PARAMS = [
     key: SLICE_REPEAT_PARAM.seed,
     label: "Seed",
     type: "seed",
-    hint: "Fixes the band thicknesses, which bands repeat, and how far they reach.",
+    description: "Fixes the band thicknesses, which bands repeat, and how far they reach.",
     animatable: false,
     default: 0,
     surprise: {
@@ -212,6 +212,12 @@ const PARAMS = [
 const DESCRIPTOR = defineEffect({
   id: EFFECT_ID,
   name: "Slice repeat",
+  summary:
+    "Cuts the image into bands and fills some of them with one thin strip of the picture repeated.",
+  description:
+    "This is what separates it from row and column displacement: those move a band without repeating anything, whereas here the strip inside a band is stamped down it several times, taken from somewhere else in the picture. Band thickness, which bands repeat, how many times they repeat and how far a band reaches for its strip all come from the seed. Band probability decides how much of the image passes through untouched.",
+  keywords: ["slice", "repeat", "band", "bands", "stutter", "duplicate", "echo", "stripe", "tear", "copy", "smear"],
+  concept: "glitch",
   requirement: "F-GL-11",
   // Glitch effects sit after the primary dither in the stack grammar (F-SM-03).
   slot: "postprocess",

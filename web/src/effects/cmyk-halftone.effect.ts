@@ -109,6 +109,12 @@ export const CMYK_HALFTONE_UNIFORMS: UniformLayout = {
 const descriptor = defineEffect({
   id: "cmyk-halftone",
   name: "CMYK halftone",
+  summary:
+    "Four-colour process printing: cyan, magenta, yellow and black screens, each at its own angle.",
+  description:
+    "The image is separated into four ink plates and each is screened independently, which is what produces the rosette pattern real process printing has. The angles default to the classical 15/75/0/45 set precisely because those offsets keep the four screens from beating against one another; move them and you get moiré on purpose. Unlike every other dither here it ignores the document palette and emits no index map — its output colours are ink overprints rather than palette entries, so outline, recolour and the SVG tracer have nothing to read after it.",
+  keywords: ["cmyk", "process", "four colour", "four color", "print", "printing", "separation", "rosette", "moire", "halftone", "ink", "offset", "misregistration"],
+  concept: "halftone-screen",
   requirement: "F-PT-02",
   slot: "dither",
   family: "pattern",
@@ -118,7 +124,7 @@ const descriptor = defineEffect({
       key: CMYK_HALFTONE_PARAM.cyanAngle,
       label: "Cyan angle",
       type: "float",
-      hint: "Screen angle of the cyan separation, in degrees.",
+      description: "Screen angle of the cyan separation, in degrees.",
       animatable: true,
       legal: [-180, 180],
       default: 15,
@@ -132,7 +138,7 @@ const descriptor = defineEffect({
       key: CMYK_HALFTONE_PARAM.magentaAngle,
       label: "Magenta angle",
       type: "float",
-      hint: "Screen angle of the magenta separation, in degrees.",
+      description: "Screen angle of the magenta separation, in degrees.",
       animatable: true,
       legal: [-180, 180],
       default: 75,
@@ -144,7 +150,7 @@ const descriptor = defineEffect({
       type: "float",
       // Yellow sits at 0 in the classical set because it is the least visible
       // ink and therefore the one that can afford the angle nearest the raster.
-      hint: "Screen angle of the yellow separation, in degrees.",
+      description: "Screen angle of the yellow separation, in degrees.",
       animatable: true,
       legal: [-180, 180],
       default: 0,
@@ -154,7 +160,7 @@ const descriptor = defineEffect({
       key: CMYK_HALFTONE_PARAM.blackAngle,
       label: "Black angle",
       type: "float",
-      hint: "Screen angle of the black separation, in degrees.",
+      description: "Screen angle of the black separation, in degrees.",
       animatable: true,
       legal: [-180, 180],
       default: 45,
@@ -164,7 +170,7 @@ const descriptor = defineEffect({
       key: CMYK_HALFTONE_PARAM.cyanCell,
       label: "Cyan cell size",
       type: "float",
-      hint: "Pixels per cell in the cyan screen.",
+      description: "Pixels per cell in the cyan screen.",
       animatable: true,
       legal: [1, 256],
       default: 8,
@@ -177,7 +183,7 @@ const descriptor = defineEffect({
       key: CMYK_HALFTONE_PARAM.magentaCell,
       label: "Magenta cell size",
       type: "float",
-      hint: "Pixels per cell in the magenta screen.",
+      description: "Pixels per cell in the magenta screen.",
       animatable: true,
       legal: [1, 256],
       default: 8,
@@ -187,7 +193,7 @@ const descriptor = defineEffect({
       key: CMYK_HALFTONE_PARAM.yellowCell,
       label: "Yellow cell size",
       type: "float",
-      hint: "Pixels per cell in the yellow screen.",
+      description: "Pixels per cell in the yellow screen.",
       animatable: true,
       legal: [1, 256],
       default: 8,
@@ -197,7 +203,7 @@ const descriptor = defineEffect({
       key: CMYK_HALFTONE_PARAM.blackCell,
       label: "Black cell size",
       type: "float",
-      hint: "Pixels per cell in the black screen.",
+      description: "Pixels per cell in the black screen.",
       animatable: true,
       legal: [1, 256],
       default: 8,
@@ -210,7 +216,7 @@ const descriptor = defineEffect({
       // Tone is reproduced at every setting: cyan, magenta and yellow are
       // solved against whatever black left. What changes is how much of a
       // neutral is printed with one ink instead of three.
-      hint: "How much of the neutral component goes to the black plate. Tone holds either way.",
+      description: "How much of the neutral component goes to the black plate. Tone holds either way.",
       animatable: true,
       legal: [0, 1],
       default: 0.5,
@@ -220,7 +226,7 @@ const descriptor = defineEffect({
       key: CMYK_HALFTONE_PARAM.inkDensity,
       label: "Ink density",
       type: "float",
-      hint: "How completely an ink absorbs its own primary. 1 is ideal ink and the only value that reproduces tone.",
+      description: "How completely an ink absorbs its own primary. 1 is ideal ink and the only value that reproduces tone.",
       animatable: true,
       legal: [0, 1],
       default: 1,
@@ -232,7 +238,7 @@ const descriptor = defineEffect({
       type: "enum",
       // Shared by all four separations: printers change the angle per
       // separation, not the dot.
-      hint: "Dot shape, the same on all four screens.",
+      description: "Dot shape, the same on all four screens.",
       // Not animatable: a modulator binds a numeric parameter, and stepping
       // through shapes mid-loop is a cut rather than a modulation.
       animatable: false,
@@ -256,7 +262,7 @@ const descriptor = defineEffect({
       key: CMYK_HALFTONE_PARAM.dotAspect,
       label: "Dot aspect",
       type: "float",
-      hint: "Elongation of the elliptical dot. Only the Ellipse shape reads it.",
+      description: "Elongation of the elliptical dot. Only the Ellipse shape reads it.",
       animatable: true,
       legal: [0.25, 4],
       default: 1.6,

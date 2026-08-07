@@ -92,3 +92,12 @@ export {
   type AnimatedExportDeps,
 } from "./animated";
 export { exportSourceFor, vectorTracerFor } from "./session";
+export {
+  MIN_FEATURE_FILTER_FLOOR,
+  SPECK_COLLAPSING_TOLERANCE,
+  TRACE_CONTOUR_WARNING_PIXELS,
+  minFeatureFilters,
+  modeCollapsesSpecks,
+  traceCostWarning,
+  type TraceCostWarning,
+} from "./trace-cost";

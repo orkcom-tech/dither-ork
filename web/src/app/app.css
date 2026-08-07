@@ -33,8 +33,11 @@
   background: var(--bg-raised);
 }
 
+/* The wordmark is a name rather than a label, and mono is what it has always
+   been set in. It is the one piece of type in the chrome that is neither. */
 .shell__brand {
   color: var(--fg);
+  font-family: var(--font-mono);
   font-size: var(--text-sm);
   letter-spacing: 0.22em;
   text-transform: uppercase;
@@ -197,9 +200,10 @@
   position: relative;
 }
 
+/* Neutral: a splitter under the cursor is a hover, not a document state. */
 .splitter:hover,
 .splitter[data-dragging="true"] {
-  background: var(--accent-dim);
+  background: var(--rule-hover);
 }
 
 .splitter--vertical {
@@ -216,10 +220,25 @@
 
 /* --- status bar ------------------------------------------------------- */
 
+/*
+ * The status bar carries two unrelated kinds of thing, which is why it is laid
+ * out in two halves rather than as one list.
+ *
+ * Left: readouts about the picture in front of you — zoom, preview quality,
+ * catalogue size, adapter. These change while you work, so their values are
+ * mono with tabular figures: the bar must not reflow because the zoom went from
+ * 100% to 87%.
+ *
+ * Right: the three links people go looking for exactly once — source,
+ * documentation, who made it. They are here rather than in the toolbar on
+ * purpose. The toolbar is for things done *to the picture*; a link is not one
+ * of those, and putting it up there would cost a permanent slot in the row a
+ * user's hand lives in.
+ */
 .shell__status {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   height: var(--statusbar-h);
   padding: 0 8px;
   border-top: 1px solid var(--rule);
@@ -230,13 +249,68 @@
   overflow: hidden;
 }
 
-.shell__status b {
+.shell__stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+/* The label names the quantity; the value is the quantity. Only the second is
+   mono — that is the whole rule of the type system, applied here. */
+.shell__stat-label {
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.shell__stat-value {
   color: var(--fg);
-  font-weight: normal;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .shell__status-warn {
   color: var(--warn);
+}
+
+.shell__status-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  /* The readouts are what the user is working with; if the window is too narrow
+     for everything, the links are what gets clipped. */
+  padding-left: 4px;
+  border-left: 1px solid var(--rule);
+  margin-left: 4px;
+}
+
+.shell__status-link {
+  color: var(--fg-dim);
+  text-decoration: underline;
+  text-decoration-color: var(--rule-strong);
+  text-underline-offset: 2px;
+}
+
+.shell__status-link:hover {
+  color: var(--fg);
+  text-decoration-color: var(--rule-hover);
+}
+
+/*
+ * The attribution.
+ *
+ * Plain text, not a link, and not underlined — because the company URL is not
+ * known to this repository and a link that goes nowhere is worse than a line of
+ * text that goes nowhere. When the URL and the mark arrive it becomes an <a>
+ * with the mark in front of the words; until then it says who made this and
+ * nothing else. See the note in App.tsx.
+ */
+.shell__made-by {
+  color: var(--fg-faint);
+  cursor: help;
 }
 
 /* --- startup screens -------------------------------------------------- */

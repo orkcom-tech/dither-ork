@@ -98,7 +98,7 @@ export const OUTLINE_PARAMS: readonly ParamDescriptor[] = [
     key: OUTLINE_PARAM.strokeWidth,
     label: "Stroke width",
     type: "int",
-    hint: "Thickness in pixels. Both sides places this much on each side of the boundary.",
+    description: "Thickness in pixels. Both sides places this much on each side of the boundary.",
     animatable: true,
     legal: [1, MAX_STROKE_WIDTH],
     default: 1,
@@ -115,7 +115,7 @@ export const OUTLINE_PARAMS: readonly ParamDescriptor[] = [
     key: OUTLINE_PARAM.targetIndex,
     label: "Region",
     type: "int",
-    hint: "Which palette entry's regions get stroked.",
+    description: "Which palette entry's regions get stroked.",
     animatable: false,
     legal: [0, MAX_PALETTE_INDEX],
     default: 0,
@@ -133,7 +133,7 @@ export const OUTLINE_PARAMS: readonly ParamDescriptor[] = [
     key: OUTLINE_PARAM.colorIndex,
     label: "Stroke colour",
     type: "int",
-    hint: "Palette entry the stroke is drawn in. Floored to the last entry if the palette is shorter.",
+    description: "Palette entry the stroke is drawn in. Floored to the last entry if the palette is shorter.",
     animatable: false,
     legal: [0, MAX_PALETTE_INDEX],
     // Not 0: the default target is region 0, and stroking region 0 in its own
@@ -149,7 +149,7 @@ export const OUTLINE_PARAMS: readonly ParamDescriptor[] = [
     key: OUTLINE_PARAM.placement,
     label: "Placement",
     type: "enum",
-    hint: "Which side of the region boundary the stroke sits on.",
+    description: "Which side of the region boundary the stroke sits on.",
     animatable: false,
     values: [
       { value: "inside", label: "Inside" },
@@ -176,7 +176,7 @@ export const OUTLINE_PARAMS: readonly ParamDescriptor[] = [
     key: OUTLINE_PARAM.shape,
     label: "Corner shape",
     type: "enum",
-    hint: "Disc or square neighbourhood. Only visible above a width of about 2.",
+    description: "Disc or square neighbourhood. Only visible above a width of about 2.",
     animatable: false,
     values: [
       { value: "round", label: "Round" },
@@ -235,6 +235,12 @@ export const OUTLINE_GPU: GpuEffect = {
 export default defineEffect({
   id: "outline",
   name: "Outline",
+  summary:
+    "Draws a stroke along the boundary of one palette region, in another palette colour.",
+  description:
+    "It reads the index map rather than the colours, so a boundary is an integer inequality between two palette indices — exact, and correct even where the two colours are nearly identical or where dither noise would defeat an edge detector. That is why it is only legal downstream of a node that quantized. The stroke colour is a palette entry rather than a free colour, because there is no index for a colour the palette does not contain, and the node rewrites the index map as well as the pixels so the next reader still sees a segmentation that describes them. Edge detect is the version that works on brightness and finds detail everywhere; this one finds region borders and nothing else.",
+  keywords: ["outline", "stroke", "border", "edge", "contour", "region", "palette", "keyline", "key line", "comic", "sticker", "trace"],
+  concept: "index-map",
   requirement: "F-SP-10",
   // Postprocess by necessity, not by taste: it reads the index map, and
   // `validateEffect` rejects an index-map consumer in the preprocess slot

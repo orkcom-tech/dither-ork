@@ -24,5 +24,10 @@ import { errorDiffusionEffect } from "./error-diffusion";
 export default errorDiffusionEffect({
   id: "ostromoukhov",
   name: "Ostromoukhov",
+  summary:
+    "The only kernel whose weights change with the input tone — three taps, tuned per level towards blue noise.",
+  description:
+    "Ostromoukhov, 2001. Three taps, the same three Sierra Lite uses, but their proportions are looked up per input level from a table solved offline so that the spectrum at each level sits as close to blue noise as three coefficients can be made to sit. That is why it is both cheaper than Floyd–Steinberg and quieter than it: no worming, no clumping, and a texture that reads as grain rather than as structure.",
+  keywords: ["ostromoukhov", "variable", "adaptive", "blue noise", "quiet", "clean", "modern", "three tap"],
   requirement: "F-ED-14",
 });

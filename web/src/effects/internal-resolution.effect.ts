@@ -98,7 +98,7 @@ export const INTERNAL_RESOLUTION_PARAMS: readonly ParamDescriptor[] = [
     key: INTERNAL_RESOLUTION_PARAM.factor,
     label: "Factor",
     type: "int",
-    hint: "Divides the working resolution on both axes. Everything after this node runs at the reduced size.",
+    description: "Divides the working resolution on both axes. Everything after this node runs at the reduced size.",
     // Not animatable, and this is the one parameter in the catalogue where that
     // is a hard constraint rather than a judgement: the extent rule reads this
     // value to size a texture, so a modulator sweeping it would reallocate the
@@ -123,7 +123,7 @@ export const INTERNAL_RESOLUTION_PARAMS: readonly ParamDescriptor[] = [
     key: INTERNAL_RESOLUTION_PARAM.filter,
     label: "Filter",
     type: "enum",
-    hint: "How source texels are combined. Nearest aliases, box averages, Lanczos keeps detail and rings.",
+    description: "How source texels are combined. Nearest aliases, box averages, Lanczos keeps detail and rings.",
     animatable: false,
     // Append-only: the shader reads the ordinal, so inserting a value in the
     // middle renumbers every document already saved.
@@ -212,6 +212,12 @@ export const INTERNAL_RESOLUTION_GPU: GpuEffect = {
 export default defineEffect({
   id: "internal-resolution",
   name: "Internal resolution",
+  summary:
+    "Runs everything after it on a smaller grid, which coarsens the dither and makes the whole stack cheaper.",
+  description:
+    "Divides the working resolution by an integer factor on both axes, so the dither grid, the halftone cell and every radius after this node are measured against the reduced grid. It leaves the frame smaller, and that is the design: 'without changing the output resolution' is what the *pair* does — this node, then Nearest upscale at the same factor. A single node that went down and back up again would crush detail but win no performance, and would run the dither on the full-resolution grid, which is exactly the look the crush exists to avoid. Box is the default because it is the only one of the three filters that is correct for an integer reduction; nearest aliases hard, and Lanczos keeps the most detail at the cost of ringing.",
+  keywords: ["resolution", "downscale", "downsample", "pixelate", "chunky", "crush", "detail", "performance", "speed", "scale down", "low res", "factor", "mosaic"],
+  concept: "working-resolution",
   requirement: "F-PP-01",
   // Preprocess, and it is the node the slot exists for: it decides the grid
   // every kernel downstream measures itself against. After a quantizer it would

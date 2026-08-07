@@ -15,5 +15,10 @@ import { errorDiffusionEffect } from "./error-diffusion";
 export default errorDiffusionEffect({
   id: "burkes",
   name: "Burkes",
+  summary:
+    "Stucki with the third row removed — most of its smoothness for seven of its twelve taps.",
+  description:
+    "Two rows of reach and a divisor of 32, so every weight is a shift. Losing Stucki's third row costs a little of the smoothness the wide kernels have and buys back nearly half the work, which makes it a good middle choice when Floyd–Steinberg's grain is too busy but Jarvis–Judice–Ninke's softness is too much.",
+  keywords: ["burkes", "two row", "balanced", "medium"],
   requirement: "F-ED-05",
 });

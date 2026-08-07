@@ -2,6 +2,7 @@ import React from "react";
 
 import { logger } from "../../lib/log";
 import { coerceParams, type EffectRegistry } from "../../registry";
+import { helpFor } from "../help";
 import { EXECUTION_LABEL, SLOT_LABEL, nodeById } from "../stack/model";
 import type { DocumentStore } from "../stack/store";
 import { ParamControl } from "./ParamControl";
@@ -84,26 +85,61 @@ export function PropertiesPanel({
 
   return (
     <div className="properties">
-      <header className="properties__header">
+      {/*
+        The header is the effect's own help anchor (F-UI-13): the name, the slot
+        badge and the execution badge are exactly the three things somebody
+        points at when asking "what is this node doing", and one attribute on the
+        header covers all three because help resolves with `closest()`.
+      */}
+      <header
+        className="properties__header"
+        {...helpFor({ kind: "effect", effect: effect.id })}
+      >
         <div className="properties__name">{effect.name}</div>
         <div className="properties__meta">
-          <span className="badge">{SLOT_LABEL[effect.slot]}</span>
-          <span className="badge">{EXECUTION_LABEL[effect.execution]}</span>
-          <span className="badge badge--quiet">{effect.requirement}</span>
+          <span className="badge badge--slot">{SLOT_LABEL[effect.slot]}</span>
+          <span className={`badge badge--exec badge--exec-${effect.execution}`}>
+            {EXECUTION_LABEL[effect.execution]}
+          </span>
+          <span className="badge badge--req">{effect.requirement}</span>
         </div>
       </header>
 
       <div className="properties__body">
-        <SeedField
-          label="Node seed"
-          hint="Every stochastic node reads this. The same seed renders the same picture."
-          value={node.seed}
-          interaction={`node:${node.id}.seed`}
-          onChange={(seed) => store.setNodeSeed(node.id, seed)}
-        />
+        {/*
+          Two groups, and only two, because only two are true. The seed belongs
+          to the *node* — it survives the effect being swapped and it is not one
+          of the effect's declared parameters — and everything below belongs to
+          the effect. `ParamDescriptor` carries no group field, so any finer
+          division would be a taxonomy invented here and contradicted by the
+          next effect somebody adds.
+        */}
+        <h3 className="properties__group">Node</h3>
+        {/*
+          The node seed is not one of the effect's declared parameters, so there
+          is no descriptor to read help off. It is a concept, and it has an entry
+          in `ui/help/concepts.ts` — which is why this one wrapper names a
+          concept where every control below it names a parameter.
+        */}
+        <div className="param" {...helpFor({ kind: "concept", concept: "node-seed" })}>
+          <SeedField
+            label="Node seed"
+            hint="Every stochastic node reads this. The same seed renders the same picture."
+            value={node.seed}
+            interaction={`node:${node.id}.seed`}
+            onChange={(seed) => store.setNodeSeed(node.id, seed)}
+          />
+        </div>
+
+        <h3 className="properties__group">
+          <span>Parameters</span>
+          {/* The count before the list, so a fifteen-parameter effect says so
+              rather than being discovered by scrolling. */}
+          <span className="properties__count">{effect.params.length}</span>
+        </h3>
 
         {effect.params.length === 0 ? (
-          <p className="field__note">This effect has no parameters.</p>
+          <p className="field field__note">This effect has no parameters.</p>
         ) : (
           effect.params.map((param) => {
             const value = coerced.values[param.key];

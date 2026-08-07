@@ -37,6 +37,7 @@ import {
   type VectorTracer,
 } from "../../export";
 import { logger } from "../../lib/log";
+import { minFeatureFilters, traceCostWarning } from "./trace-cost";
 import "./export.css";
 
 const log = logger("export");
@@ -349,6 +350,14 @@ export function ExportPanel({
     onSettings({ ...settings, trace: { ...settings.trace, ...patch } });
   };
 
+  // A vector export ignores the scale multiplier, so what gets traced is always
+  // the subject at 1:1 — see the `scale` decision in `export/estimate.ts`. The
+  // warning is computed from the settings alone rather than from a finished
+  // trace, because the trace is the thing that does not finish.
+  const traceCost = info.vector
+    ? traceCostWarning(settings.trace, subject.width * subject.height)
+    : null;
+
   return (
     <div className="xp">
       <div className="xp__row">
@@ -473,9 +482,14 @@ export function ExportPanel({
               onChange={(event) => setTrace({ minFeatureArea: Number(event.target.value) })}
             />
             <span className="xp__value">
-              {settings.trace.minFeatureArea === 0
-                ? "off"
-                : `${settings.trace.minFeatureArea} px²`}
+              {/*
+                1 reads as off, because it is: the core skips the filter below 2
+                and a region of area 1 clears a minimum of 1 anyway. See
+                `trace-cost.ts`.
+              */}
+              {minFeatureFilters(settings.trace.minFeatureArea)
+                ? `${settings.trace.minFeatureArea} px²`
+                : "off"}
             </span>
           </div>
           <p className="xp__detail">
@@ -485,6 +499,19 @@ export function ExportPanel({
             thousand specks — and the result line says how much of the picture it
             left bare.
           </p>
+
+          {traceCost === null ? null : (
+            <div className="xp__notice">
+              <b>{traceCost.headline}</b>
+              <br />
+              {traceCost.mechanism}
+              <ul className="xp__fixes">
+                {traceCost.fixes.map((fix) => (
+                  <li key={fix}>{fix}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="xp__row">
             <span className="ui-label">stroke</span>

@@ -1,0 +1,382 @@
+/*
+ * The user guide (F-UI-14).
+ *
+ * Every value comes from ui/theme.css — no colour literal appears in this file,
+ * which is what makes both themes work (F-UI-09). The dialog is a native
+ * `<dialog>`, so the browser owns the top layer, the focus trap and the
+ * backdrop; what is styled here is only what it looks like.
+ *
+ * **`display` is set on `.guide[open]` and never on `.guide`.** A dialog is
+ * hidden by the user agent's own `dialog:not([open]) { display: none }`, and an
+ * unqualified `display: flex` here would beat it and leave the guide on the page
+ * permanently.
+ *
+ * The type is a shade larger and the measure is capped: this is the one surface
+ * in the application that is prose to be read rather than controls to be
+ * operated, and the panel metrics that suit a stack row make a paragraph
+ * unreadable.
+ */
+
+.guide {
+  width: min(920px, calc(100vw - 32px));
+  height: min(840px, calc(100vh - 64px));
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--fg);
+  font-size: var(--text-md);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.guide[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.guide::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+.guide__head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-raised);
+}
+
+.guide__head h2 {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+/*
+ * `minmax(0, 1fr)` on the row, and `min-height: 0` on the flex item, are both
+ * load-bearing. A grid row defaults to `auto`, which is content height, so
+ * without them the rail and the text grow past the dialog, `overflow: hidden`
+ * above clips whatever does not fit, and neither column ever scrolls — the
+ * guide would end at whatever the window happened to be tall enough for. The
+ * same pair appears on the tablet layout below.
+ */
+.guide__body {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: 172px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+
+/* --- the contents rail -------------------------------------------------- */
+
+.guide__contents {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-content: start;
+  padding: 12px 8px;
+  overflow: auto;
+  border-right: 1px solid var(--rule);
+  background: var(--bg-sunken);
+  scrollbar-color: var(--rule-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.guide__contents-item {
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.guide__contents-item:hover {
+  background: var(--bg-inset);
+  color: var(--fg);
+}
+
+/* --- the text ----------------------------------------------------------- */
+
+.guide__text {
+  min-height: 0;
+  padding: 16px 20px 40px;
+  overflow-y: auto;
+}
+
+.guide__chapter {
+  max-width: 68ch;
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.guide__chapter:last-child {
+  border-bottom: 0;
+}
+
+.guide__chapter-title {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-lg);
+  letter-spacing: 0.02em;
+}
+
+.guide__lede {
+  margin: 4px 0 12px;
+  color: var(--accent);
+  font-size: var(--text-md);
+}
+
+.guide__prose {
+  display: block;
+  margin: 0 0 10px;
+  color: var(--fg-dim);
+  line-height: 1.65;
+}
+
+.guide__summary {
+  margin: 0 0 6px;
+  color: var(--fg);
+  line-height: 1.6;
+}
+
+.guide__note {
+  display: block;
+  margin: 2px 0 0;
+  color: var(--fg-faint);
+  font-size: var(--text-sm);
+}
+
+/* --- getting started ---------------------------------------------------- */
+
+.guide__steps {
+  margin: 0 0 14px;
+  padding-left: 20px;
+}
+
+.guide__step {
+  margin-bottom: 10px;
+  color: var(--fg-faint);
+}
+
+.guide__step-title {
+  display: block;
+  color: var(--fg);
+  font-size: var(--text-md);
+}
+
+/* --- facts read off the build ------------------------------------------- */
+
+.guide__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guide__fact {
+  flex: 1 1 200px;
+  padding: 6px 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.guide__fact-label {
+  display: block;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.guide__fact-value {
+  color: var(--fg-dim);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+/* --- lists (the export format tables) ----------------------------------- */
+
+.guide__list {
+  margin-top: 14px;
+}
+
+.guide__list-title {
+  margin: 0 0 6px;
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* --- the generated catalogue -------------------------------------------- */
+
+.guide__search {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  margin-bottom: 14px;
+}
+
+.guide__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.guide__count {
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.guide__miss {
+  margin: 0 0 14px;
+  padding: 8px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--warn);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.guide__concept {
+  margin-bottom: 20px;
+}
+
+.guide__concept-title {
+  margin: 0 0 4px;
+  color: var(--fg);
+  font-size: var(--text-md);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.guide__effect {
+  padding: 10px;
+  margin-top: 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.guide__effect-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.guide__effect-name {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-md);
+}
+
+.guide__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.guide__badge {
+  padding: 0 4px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.guide__badge--faint {
+  color: var(--fg-faint);
+  border-color: var(--rule);
+}
+
+.guide__details {
+  margin-top: 8px;
+}
+
+.guide__details-summary {
+  color: var(--fg-faint);
+  font-size: var(--text-sm);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.guide__controls {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 8px 0 0;
+}
+
+.guide__control-term {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
+  color: var(--fg);
+  font-size: var(--text-sm);
+}
+
+.guide__control-detail {
+  margin: 0;
+}
+
+.guide__control-detail .guide__prose {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+/* --- tablet (F-UI-10) --------------------------------------------------- */
+
+@media (max-width: 720px) {
+  .guide__body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .guide__contents {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px;
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .guide__controls {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .guide__control-detail {
+    margin-bottom: 8px;
+  }
+}

@@ -296,12 +296,30 @@ web/
   src/state/              the live document — mutations, history, autosave,
                           .dork serialisation — and state/render/, which is
                           document -> graph -> frame against the real backends
+  src/ui/theme/           the only colours in the application: tokens.css, plus
+                          the element base and the shared primitives. Nothing
+                          else anywhere may hold a literal colour (F-UI-09)
   src/ui/stack/           the stack editor
+  src/ui/picker/          the effect picker: the matcher that says why a row is
+                          on screen, the model that groups and judges the
+                          catalogue, and the component. Split out of stack/
+                          because nothing about it is specific to that panel
   src/ui/properties/      the properties panel, generated from the descriptor
   src/ui/palette/         the palette system: editor, library, extraction
+  src/ui/timeline/        the timeline: tracks, keyframes, playhead, and the
+                          preview pump it becomes while a track exists
   src/ui/export/          the export dialog, and the adapter that satisfies
                           export/'s two interfaces from the editor session
+  src/ui/batch/           the batch queue over many images
+  src/ui/surprise/        Surprise Me: seed, chaos, locks, history
   src/ui/documents/       save/open/presets/share, as a toolbar item and a dialog
+  src/ui/help/            contextual help (F-UI-13): the `data-help` token, the
+                          dwell machine, the placement solver, the article
+                          resolver that reads the descriptor, and `concepts.ts`
+                          — the interface ideas no descriptor is about
+  src/ui/guide/           the user guide (F-UI-14): seven written chapters, and
+                          an effect catalogue **generated** from the sealed
+                          registry. No effect is named in that directory
   src/viewport/           the canvas. Not React; owns its own canvas and overlay
   src/worker/             the render worker: the wire format both sides import,
                           the preview/export queue and its cancellation policy,
@@ -349,11 +367,20 @@ of the five can end the run with a screen of their own:
    (and so, indirectly, acquires the GPU device and the Rust core, on that
    thread), restores the autosave, builds the document store, bridges the
    palette, installs the image intake and subscribes the renderer.
-5. **Registration**, then React. Six registrations, in the order a person
-   reaches them: the stack panel, the properties panel, the toolbar (open, undo,
-   redo, fit, notices), the documents toolbar (save, open, presets, share), the
-   export action, and the history shortcuts. The palette panel registers on
-   import and so has no call.
+5. **Registration**, then React. In the order a person reaches them: the stack
+   panel, the properties panel, the toolbar (open, undo, redo, fit, notices),
+   the documents toolbar (save, open, presets, share), the timeline panel, the
+   export action, batch, Surprise Me, the guide, the history shortcuts, and
+   contextual help. The palette panel registers on import and so has no call.
+
+   Two of those are not panels and do not take a slot in a region. The **guide**
+   registers a toolbar item, because a guide is something you open, read and
+   close rather than a fifth column — `app/slots.ts` closes the panel ids to the
+   four names F-UI-08 gives. **Contextual help** registers nothing at all: it
+   mounts a React root of its own on `document.body` and delegates from the
+   document, because it describes controls drawn by panels that mount and
+   unmount underneath it, and a panel inside one of those regions would be
+   unmounted along with it.
 
 **Everything up to step 5 happens before React renders anything.** That is not
 tidiness. Panels register themselves into slots and a duplicate registration
@@ -372,6 +399,37 @@ soon". This is the same arrangement the effect catalogue uses, for the same
 reason, and it is what let the shell, the stack editor, the properties panel and
 the palette editor be written in parallel by people who never edited a shared
 file.
+
+### Where the words live (F-UI-13, F-UI-14, F-UI-15)
+
+Three surfaces explain the application to the person using it: the picker's
+result list, the hover help, and the guide. **All three read the same text, and
+none of them contains any.** The descriptor next to the shader carries the
+effect's `summary`, `description` and `keywords`, and each parameter carries a
+`description`; `types/registry.ts` fails the whole catalogue when one is missing
+*or when it only restates the label*. That is the mechanism, and it exists
+because the alternative had already happened elsewhere: three hand-written
+copies of one sentence, two of which are wrong by the second release.
+
+Two kinds of text have no descriptor to live on, and each has exactly one home.
+Family ideas — error diffusion, the index map, working resolution — are
+`EFFECT_CONCEPTS` in `types/registry.ts`, beside the descriptors that declare
+`producesIndexMap`. Interface ideas — what a slot is, what solo does, what the
+colour metric changes — are `ui/help/concepts.ts`. Help reaches all four kinds
+through one attribute, `data-help="param:blur.radius"`, resolved with
+`closest()`, which is why annotating a control is one attribute and not a
+wrapper, a ref or a provider.
+
+Search is the other half of the same problem. `registry/search.ts` matches over
+everything an effect says about itself rather than over its name — the glow
+effect is called *Epsilon glow*, so a name search does not find "glow" and every
+reader concludes the tool has none — and it reports *why* each row matched, so a
+result that came from a keyword is not an unexplained row. When it finds
+nothing, `registry/unbuilt.ts` is consulted: four requirements the spec names and
+this build does not implement, each with the reason and the closest built
+alternatives. `search.test.ts` asserts that none of the four is a registered
+effect, so an entry that becomes real fails the build rather than going on
+telling people a shipped effect does not exist.
 
 ### The one piece of state, and the palette's exception
 

@@ -388,6 +388,8 @@ describe("resolveVariation", () => {
     const narrowOffset: ParamDescriptor = {
       key: PATTERN_OFFSET_X,
       label: "Offset X",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "float",
       animatable: true,
       legal: [0, 2],

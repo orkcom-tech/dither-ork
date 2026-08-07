@@ -100,7 +100,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     // Turns, not degrees: a modulator ramping 0 -> 1 sweeps a full rotation and
     // lands back where it started, so an animated drag closes its loop by
     // construction rather than by the UI knowing that 360 is special.
-    hint: "Direction the picture is dragged, in turns. 0 drags to the right.",
+    description: "Direction the picture is dragged, in turns. 0 drags to the right.",
     animatable: true,
     legal: [-1, 1],
     default: 0,
@@ -117,7 +117,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: DATAMOSH_PARAM.dragLength,
     label: "Drag length",
     type: "float",
-    hint: "How far a source pixel may be carried, in pixels.",
+    description: "How far a source pixel may be carried, in pixels.",
     animatable: true,
     // The upper bound is the shader's compile-time loop bound. See
     // DATAMOSH_MAX_DRAG.
@@ -138,7 +138,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     type: "float",
     // Stated in display terms and converted to linear light inside the shader,
     // because 0.5 has to mean mid grey. See the note in the WGSL.
-    hint: "Lightness that separates the pixels that drag from the ones they drag over. 0.5 is mid grey.",
+    description: "Lightness that separates the pixels that drag from the ones they drag over. 0.5 is mid grey.",
     animatable: true,
     legal: [0, 1],
     default: 0.5,
@@ -156,7 +156,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: DATAMOSH_PARAM.source,
     label: "Drag source",
     type: "enum",
-    hint: "Whether the pixels that smear forward are the ones above the threshold or below it.",
+    description: "Whether the pixels that smear forward are the ones above the threshold or below it.",
     // Not animatable: it is a choice between two pictures, not a quantity, and
     // a modulator on an ordinal would flicker between them.
     animatable: false,
@@ -177,7 +177,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: DATAMOSH_PARAM.decay,
     label: "Decay",
     type: "float",
-    hint: "Per-pixel falloff of the carried colour. 1 is a hard drag for the whole length.",
+    description: "Per-pixel falloff of the carried colour. 1 is a hard drag for the whole length.",
     animatable: true,
     legal: [0, 1],
     // 1 is the plain definition of the effect: a drag that carries the source
@@ -197,7 +197,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: DATAMOSH_PARAM.jitter,
     label: "Length jitter",
     type: "float",
-    hint: "Seeded variation of the drag length from trail to trail. 0 gives every trail the same reach.",
+    description: "Seeded variation of the drag length from trail to trail. 0 gives every trail the same reach.",
     animatable: true,
     legal: [0, 1],
     // Off. A uniform reach is the honest base case and the one a golden image
@@ -216,7 +216,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: DATAMOSH_PARAM.seed,
     label: "Seed",
     type: "seed",
-    hint: "Selects which trails reach furthest. Only does anything with jitter above zero.",
+    description: "Selects which trails reach furthest. Only does anything with jitter above zero.",
     // Not animatable: stepping a seed across a loop produces a new picture per
     // frame rather than a moving one, and it cannot close the seam.
     animatable: false,
@@ -268,6 +268,12 @@ export const DATAMOSH_PARAM_TYPES: ReadonlyMap<string, ParamDescriptor> = new Ma
 export default defineEffect({
   id: DATAMOSH_SMEAR_ID,
   name: "Datamosh smear",
+  summary:
+    "Drags pixels in one direction over their neighbours, like a video frame that lost its keyframe.",
+  description:
+    "A gated back-trace rather than a directional blur: pixels on one side of a threshold are carried along the drag angle over the pixels on the other side, so bright shapes (or dark ones) streak while the rest of the picture stays where it is. Decay controls how quickly the carried colour gives out along the trail, and jitter varies the reach from trail to trail — the difference between a ragged smear and a comb. The seed selects which trails reach furthest, and does nothing while jitter is 0.",
+  keywords: ["datamosh", "mosh", "smear", "drag", "streak", "compression", "codec", "video", "melt", "pull", "stretch", "keyframe"],
+  concept: "glitch",
   requirement: "F-GL-07",
   slot: "postprocess",
   family: "glitch",

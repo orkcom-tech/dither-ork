@@ -59,6 +59,19 @@ export const EXECUTION_LABEL: Record<ExecutionKind, string> = {
   gpu: "gpu",
 };
 
+/**
+ * The same fact, spelled out, for the badge's help text.
+ *
+ * A two-letter badge can say *which* backend runs a node but not why anyone
+ * should care. This is the sentence that makes the badge worth its width: it
+ * names the cost model, so a stack that has become slow is legible from the
+ * rows rather than from a profiler.
+ */
+export const EXECUTION_COST: Record<ExecutionKind, string> = {
+  wasm: "Runs as a serial CPU kernel. A CPU node between GPU nodes also costs a readback and an upload, so runs of them are cheaper than alternating.",
+  gpu: "Runs as a GPU compute pass, batched with the GPU nodes next to it.",
+};
+
 export const BLEND_LABEL: Record<BlendMode, string> = {
   normal: "Normal",
   multiply: "Multiply",

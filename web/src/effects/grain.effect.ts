@@ -76,7 +76,7 @@ export const GRAIN_PARAMS: readonly ParamDescriptor[] = [
     // and per-frame variation is the temporal-variation system's job, where it
     // can be made periodic in the loop length rather than merely different.
     animatable: false,
-    hint: "Which grain. Every seed is as good as every other; the same seed always gives the same field.",
+    description: "Which grain. Every seed is as good as every other; the same seed always gives the same field.",
     default: 0,
     surprise: { weight: 1 },
   },
@@ -84,7 +84,7 @@ export const GRAIN_PARAMS: readonly ParamDescriptor[] = [
     key: GRAIN_PARAM.size,
     label: "Grain size",
     type: "float",
-    hint: "Diameter of one grain, in pixels.",
+    description: "Diameter of one grain, in pixels.",
     animatable: true,
     // Below 1 the lattice is finer than the pixel grid, so the field aliases
     // into something that is no longer grain of any size.
@@ -106,7 +106,7 @@ export const GRAIN_PARAMS: readonly ParamDescriptor[] = [
     type: "float",
     // Amplitude of the noise in the sRGB encoding at full tonal response, so 1
     // swings a midtone pixel across the entire display range.
-    hint: "How strong the grain is. 1 swings a midtone across the whole range.",
+    description: "How strong the grain is. 1 swings a midtone across the whole range.",
     animatable: true,
     legal: [0, 1],
     default: 0.12,
@@ -123,7 +123,7 @@ export const GRAIN_PARAMS: readonly ParamDescriptor[] = [
     key: GRAIN_PARAM.tonalResponse,
     label: "Tonal response",
     type: "float",
-    hint: "How much the grain follows the midtones. 0 is a flat field, 1 is film.",
+    description: "How much the grain follows the midtones. 0 is a flat field, 1 is film.",
     animatable: true,
     legal: [0, 1],
     // Not 1: pure midtone weighting leaves clean highlights and clean shadows,
@@ -143,7 +143,7 @@ export const GRAIN_PARAMS: readonly ParamDescriptor[] = [
     key: GRAIN_PARAM.monochrome,
     label: "Monochrome",
     type: "bool",
-    hint: "One noise field for all channels, or three independent ones as colour film has.",
+    description: "One noise field for all channels, or three independent ones as colour film has.",
     animatable: false,
     // True: one field moves a pixel along the tone axis, which is what a small
     // palette can absorb. Three fields move it sideways in colour, and the
@@ -194,6 +194,12 @@ export const GRAIN_GPU: GpuEffect = {
 export default defineEffect({
   id: "grain",
   name: "Film grain",
+  summary:
+    "Film grain — seeded noise at a chosen size, strongest through the midtones the way silver halide is.",
+  description:
+    "Interpolated value noise rather than one hash per pixel, so the grain has a real size you set in pixels instead of always being one pixel of static. Tonal response controls how closely the grain follows the midtones: at 0 it is a flat field across the whole picture, at 1 it behaves like film, where the shadows and the highlights are comparatively clean. Monochrome adds one field to all three channels; turn it off for the three independent fields colour film has. The seed is a parameter of its own so this node can be rerolled without disturbing anything else in the stack.",
+  keywords: ["grain", "film", "noise", "texture", "analog", "analogue", "silver", "speckle", "dust", "35mm", "vintage", "rough", "gritty"],
+  concept: "optical",
   requirement: "F-SP-16",
   // Preprocess, and here it changes what the effect does rather than only where
   // it is legal. Downstream of a quantizer the noise would produce colours the

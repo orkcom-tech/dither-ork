@@ -7,6 +7,8 @@ import { createEditorSession, type EditorSession } from "../state";
 import { registerBatchControls } from "../ui/batch";
 import { registerDocumentsToolbar } from "../ui/documents";
 import { animatedSourceFor, gifCoreFor, registerExportControls } from "../ui/export";
+import { registerGuide } from "../ui/guide";
+import { installHelp } from "../ui/help";
 import { paletteStore } from "../ui/palette";
 import { registerStackPanel } from "../ui/stack";
 import { registerPropertiesPanel } from "../ui/properties";
@@ -162,7 +164,22 @@ async function start(): Promise<void> {
     registry: outcome.registry,
     palette: paletteStore,
   });
+  // The guide (F-UI-14). Registered on the `end` side, so it is not a step in
+  // the document workflow the start group spells out.
+  registerGuide({ registry: outcome.registry });
   installHistoryShortcuts(session);
+
+  // Contextual help (F-UI-13). Installed after the panels rather than before,
+  // because it delegates from the document and reads the sealed registry: the
+  // order only matters in that it must be after `boot()` produced a registry.
+  // Its React root is its own, mounted on `document.body`, which is why it is a
+  // call here and not an element in the shell — help describes controls drawn by
+  // panels that mount and unmount underneath it.
+  //
+  // The returned uninstaller is dropped on purpose: this is the application's
+  // only session, and it ends when the document does. `installHelp` returns one
+  // so a test — or a second window — can take it down; nothing here can.
+  installHelp({ registry: outcome.registry });
 
   // Autosave is debounced, so a tab closing mid-debounce would lose the last
   // edit. `pagehide` is the event that fires for a bfcache navigation as well

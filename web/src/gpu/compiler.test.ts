@@ -50,6 +50,10 @@ function descriptor(id: string, resamples?: boolean): EffectDescriptor {
   return {
     id,
     name: id,
+    summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+    description:
+      "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+    keywords: ["fixture", "test"],
     requirement: "F-PP-01",
     slot: "preprocess",
     family: "preprocess",

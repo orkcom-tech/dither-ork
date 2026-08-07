@@ -4,8 +4,15 @@ import { CSS } from "@dnd-kit/utilities";
 
 import type { BlendMode, StackNode } from "../../types/document";
 import type { EffectDescriptor } from "../../types/registry";
+import { helpFor } from "../help";
 import { NumberField } from "../properties";
-import { BLEND_LABEL, BLEND_MODES, EXECUTION_LABEL, SLOT_LABEL } from "./model";
+import {
+  BLEND_LABEL,
+  BLEND_MODES,
+  EXECUTION_COST,
+  EXECUTION_LABEL,
+  SLOT_LABEL,
+} from "./model";
 
 export interface StackRowProps {
   readonly node: StackNode;
@@ -133,9 +140,16 @@ export function StackRow({
           </button>
         </div>
 
+        {/*
+          Enabled is the ordinary state of a node, so it is drawn in the
+          ordinary ink. Twenty accent-coloured dots down the panel would say
+          "twenty things are happening here" when what is happening is nothing
+          at all — the accent is spent on solo below, which really is a state
+          the document is unusually in.
+        */}
         <button
           type="button"
-          className="node__flag"
+          className="node__flag node__flag--enable"
           aria-pressed={node.enabled}
           title={node.enabled ? "Disable this node" : "Enable this node"}
           onClick={onToggleEnabled}
@@ -145,7 +159,7 @@ export function StackRow({
 
         <button
           type="button"
-          className="node__flag"
+          className="node__flag node__flag--solo"
           aria-pressed={soloed}
           title={
             soloed
@@ -157,71 +171,136 @@ export function StackRow({
           S
         </button>
 
-        <button type="button" className="node__name" onClick={onSelect}>
+        {/*
+          The name is the first thing to lose width on a narrow panel, so it
+          carries its own full text as a tooltip: an ellipsis with nothing
+          behind it would make two effects in the same family indistinguishable
+          without selecting each of them in turn.
+        */}
+        {/*
+          The name button is this row's help anchor (F-UI-13) — but only when the
+          effect is one this build has. A `data-help` naming an id the sealed
+          registry does not carry resolves to nothing and the panel would simply
+          fail to open, which reads as help being broken rather than as the node
+          being unknown; the `unknown` badge already says the true thing.
+        */}
+        <button
+          type="button"
+          className="node__name"
+          title={effect?.name ?? node.effect}
+          {...(effect === undefined ? {} : helpFor({ kind: "effect", effect: effect.id }))}
+          onClick={onSelect}
+        >
           <span className="node__index">{position + 1}</span>
           <span className="node__title">{effect?.name ?? node.effect}</span>
           {effect === undefined ? (
             <span className="badge badge--warn">unknown</span>
           ) : (
             <>
-              <span className="badge">{SLOT_LABEL[effect.slot]}</span>
-              <span className="badge">{EXECUTION_LABEL[effect.execution]}</span>
+              <span className="badge badge--slot">{SLOT_LABEL[effect.slot]}</span>
+              {/*
+                Execution, shown as what it costs. A `cpu` node is a serial
+                kernel, and one sitting between GPU nodes is a readback plus an
+                upload — docs/ARCHITECTURE.md asks for that ceiling to be
+                visible in the UI rather than discovered by profiling, so the
+                expensive badge is the loud one and `gpu` is the quiet one.
+              */}
+              <span
+                className={`badge badge--exec badge--exec-${effect.execution}`}
+                title={EXECUTION_COST[effect.execution]}
+              >
+                {EXECUTION_LABEL[effect.execution]}
+              </span>
             </>
           )}
         </button>
 
+        {/*
+          Duplicate and remove as marks rather than as the words `dup` and `del`.
+          The two words cost 58px of a 248px row, which is the difference
+          between an effect name being readable and being an ellipsis — and the
+          words are still there, in the tooltip and in the accessible name, so
+          nothing is lost but the width.
+        */}
         <button
           type="button"
           className="node__action"
           title="Duplicate this node"
+          aria-label={`Duplicate ${effect?.name ?? node.effect}`}
           onClick={onDuplicate}
         >
-          dup
+          ⧉
         </button>
         <button
           type="button"
           className="node__action"
           title="Remove this node"
+          aria-label={`Remove ${effect?.name ?? node.effect}`}
           onClick={onRemove}
         >
-          del
+          ✕
         </button>
       </div>
 
-      {composites ? (
+      {/*
+        The second line, and it is present on every row that knows its effect —
+        which is what makes twenty of them scannable. Two things live on it.
+
+        The **requirement id**, first and therefore in a column: a stack is read
+        as a whole, and a fixed column of spec ids is how you see at a glance
+        that six of these nodes came out of the same section of the spec. It is
+        here rather than beside the name because on a 260px panel it and the
+        name cannot both have the room, and of the two it is the one that is
+        still legible when it is not next to what it describes.
+
+        Then **opacity and blend**, when the node can composite at all.
+      */}
+      {effect === undefined ? null : (
         <div className="node__controls">
-          {/*
-            The same numeric control the properties panel uses, in its `dense`
-            variant — one line instead of two, which is what it was built for.
-            Reusing it rather than a native range input is not cosmetic: it is
-            what brackets the drag with `beginInteraction`/`endInteraction` on
-            the viewport, under the name below, so an opacity drag is visible to
-            the preview-quality policy exactly as a parameter drag is.
-          */}
-          <NumberField
-            label="Opacity"
-            value={node.opacity}
-            min={0}
-            max={1}
-            step={0.01}
-            interaction={`opacity:${node.id}`}
-            dense
-            onChange={(value) => onOpacity(value, true)}
-          />
-          <select
-            className="select select--dense"
-            aria-label={`${effect?.name ?? node.effect} blend mode`}
-            value={node.blend}
-            onChange={(event) => onBlend(event.currentTarget.value as BlendMode)}
+          <span
+            className="badge badge--req node__req"
+            title={`Implements spec requirement ${effect.requirement}`}
           >
-            {BLEND_MODES.map((mode) => (
-              <option key={mode} value={mode}>
-                {BLEND_LABEL[mode]}
-              </option>
-            ))}
-          </select>
+            {effect.requirement}
+          </span>
+
+          {composites ? (
+            <>
+              {/*
+                The same numeric control the properties panel uses, in its
+                `dense` variant — one line instead of two, which is what it was
+                built for. Reusing it rather than a native range input is not
+                cosmetic: it is what brackets the drag with
+                `beginInteraction`/`endInteraction` on the viewport, under the
+                name below, so an opacity drag is visible to the preview-quality
+                policy exactly as a parameter drag is.
+              */}
+              <NumberField
+                label="Opacity"
+                value={node.opacity}
+                min={0}
+                max={1}
+                step={0.01}
+                interaction={`opacity:${node.id}`}
+                dense
+                onChange={(value) => onOpacity(value, true)}
+              />
+              <select
+                className="select select--dense"
+                aria-label={`${effect.name} blend mode`}
+                value={node.blend}
+                onChange={(event) => onBlend(event.currentTarget.value as BlendMode)}
+              >
+                {BLEND_MODES.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {BLEND_LABEL[mode]}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : null}
         </div>
-      ) : null}
+      )}
 
       {issue === null ? null : <p className="node__issue">{issue}</p>}
     </li>

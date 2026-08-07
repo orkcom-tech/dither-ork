@@ -99,7 +99,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: COLUMN_DISPLACEMENT_PARAM.minSliceWidth,
     label: "Min slice width",
     type: "float",
-    hint: "Narrowest slice, as a fraction of image width. Resolution-independent, so preview and export match.",
+    description: "Narrowest slice, as a fraction of image width. Resolution-independent, so preview and export match.",
     animatable: true,
     legal: [0.002, 0.5],
     default: 0.008,
@@ -117,7 +117,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     type: "float",
     // The two bounds are read as a range, so a max below the min is the same
     // range described backwards rather than an error.
-    hint: "Widest slice, as a fraction of image width.",
+    description: "Widest slice, as a fraction of image width.",
     animatable: true,
     legal: [0.002, 0.5],
     default: 0.05,
@@ -131,7 +131,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: COLUMN_DISPLACEMENT_PARAM.offsetRange,
     label: "Offset range",
     type: "float",
-    hint: "Largest vertical shift, as a fraction of image height. Each slice draws within ±this.",
+    description: "Largest vertical shift, as a fraction of image height. Each slice draws within ±this.",
     animatable: true,
     legal: [0, 1],
     default: 0.06,
@@ -149,7 +149,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     type: "float",
     // At 1 every slice moves and the image turns to mush; the look depends on
     // most of the picture staying put.
-    hint: "Chance that any given slice is displaced at all.",
+    description: "Chance that any given slice is displaced at all.",
     animatable: true,
     legal: [0, 1],
     default: 0.35,
@@ -164,7 +164,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: COLUMN_DISPLACEMENT_PARAM.edge,
     label: "Edge",
     type: "enum",
-    hint: "What a slice shows where it has been shifted off the frame.",
+    description: "What a slice shows where it has been shifted off the frame.",
     animatable: false,
     values: [...EDGE_VALUES],
     default: "wrap",
@@ -181,7 +181,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: COLUMN_DISPLACEMENT_PARAM.seed,
     label: "Seed",
     type: "seed",
-    hint: "Reroll the slice widths and their offsets.",
+    description: "Reroll the slice widths and their offsets.",
     animatable: false,
     default: 0,
     surprise: { weight: 1 },
@@ -191,6 +191,12 @@ const PARAMS: readonly ParamDescriptor[] = [
 const descriptor: EffectDescriptor = {
   id: "column-displacement",
   name: "Column displacement",
+  summary:
+    "Row displacement turned ninety degrees — vertical slices of random width, each shifted up or down.",
+  description:
+    "Slice widths and vertical offsets are drawn from the seed exactly as the row version draws heights and horizontal offsets, so the two are the same effect on the other axis and are commonly stacked together for a shattered result. Like its sibling it displaces by a seed rather than by a geometric function or by the picture. Sizes are fractions of the image, so preview and export agree.",
+  keywords: ["column", "columns", "vertical", "displace", "displacement", "slice", "slices", "tear", "shift", "shatter", "broken"],
+  concept: "glitch",
   requirement: "F-GL-03",
   slot: "postprocess",
   family: "glitch",

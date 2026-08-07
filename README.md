@@ -6,8 +6,9 @@ Load an image, stack dither and glitch effects in a reorderable pipeline, bind
 any parameter to a modulator, and export a seamless animated loop — or a still,
 or a vector file for print and cutting.
 
-**Status: it animates, and work leaves the browser.** `docker compose up` then
-<http://localhost:5173> gives you an editor you can finish something in:
+**Status: it animates, work leaves the browser, and it explains itself.**
+`docker compose up` then <http://localhost:5173> gives you an editor you can
+finish something in:
 
 - open a picture, build a stack out of 67 effects, reorder it, edit every
   parameter, solo any node, set per-node opacity and blend mode, change or
@@ -34,7 +35,32 @@ or a vector file for print and cutting.
 - **save and open `.dork` documents**, with or without the picture inside them;
   save, apply and share presets, including six starter presets and a share link
   that carries the whole recipe in the URL fragment and no image at all;
-- the document autosaves and comes back on reload.
+- the document autosaves and comes back on reload;
+- **find the effect you mean, and be told when it is not here.** The picker
+  searches everything an effect says about itself, not its name — the glow
+  effect is called *Epsilon glow*, so a name search finds nothing and every
+  reader concludes there is no glow — and it shows *why* each row matched. When
+  a query names something the specification has and this build does not, it says
+  so, names the requirement, gives the reason, and offers the closest built
+  effects. Four such gaps are declared, and a test fails the build if one of
+  them ever becomes a real effect;
+- **read what a control does before you move it.** Rest on any parameter for
+  700 ms, or focus it and press <kbd>F1</kbd>. Every word of it is the text
+  stored beside the shader, so there is no second copy to go stale — a
+  descriptor with a missing description, or one that only restates its own
+  label, fails the catalogue and the application refuses to start;
+- **a user guide in the application** — seven written chapters (getting started,
+  the stack and why order matters, what a palette is here, linear light, the
+  index map, animation, export) and a searchable catalogue of all 67 effects
+  **generated from the registry**, so an effect added today is documented today
+  in its own author's words.
+
+The chrome is neutral graphite and the image is the only saturated thing on
+screen. That is not a style preference: this tool's whole subject is what happens
+to a picture when colour is taken away from it, and the eye adapts to whatever
+surrounds what it is looking at, so a coloured interface biases every palette
+decision made inside it. Green is kept for one meaning — *this is live*. Light
+and dark are both there; dark is the committed default.
 
 The render loop, the SVG tracer and the GIF encoder run in a **web worker** that
 owns the GPU device and the Rust core, so the window stays live while a big
@@ -56,10 +82,17 @@ it goes back to full when you let go.
   autosave and share links. Keyframes have no place in the schema yet, so they
   live in the timeline for the session and are gone on reload. This is stated in
   the timeline panel.
-- **Hue-targeted recolour**, and **JPEG glitch**, which needs a JPEG encoder in
-  the render path.
-- **Node groups and masking** — the graph carries the edges for both; nothing
-  builds them.
+- **Hue-targeted recolour**.
+- Four requirements the specification names and this build does not implement.
+  They are declared in `web/src/registry/unbuilt.ts` and **the search box names
+  them** rather than coming back empty: **JPEG glitch (F-GL-06)**, which needs a
+  JPEG encoder in the render path; the **luminance-displaced line screen
+  (F-PT-09)**, the *Unknown Pleasures* ridgeline, which needs a displacement
+  driven by the picture itself; the **wave field with obstacle interaction
+  (F-PT-10)**, which needs a signed distance field that four other things also
+  want and that should be built once; and **node masking (F-PP-08)**, which is a
+  second image edge on a graph that carries one per node.
+- **Node groups** — the graph carries the edges; nothing builds them.
 
 Everything below under "What it will do" that is not in the lists above is still
 a plan.
@@ -98,8 +131,9 @@ cost, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ## What it will do
 
 - **67 effects, built** — 15 error diffusion, 6 ordered, 8 pattern, 16 glitch,
-  16 special, 6 preprocess. One of the specification's named effects is
-  deliberately absent: JPEG glitch, which needs an encoder in the render path
+  16 special, 6 preprocess. Every one of them carries its own description and
+  search keywords, and the catalogue refuses to load without them. Four of the
+  specification's named requirements are absent and are listed above
 - **A stackable, reorderable pipeline, built** — any effect, any number of
   times, in any order, each with its own opacity and blend mode
 - **Full colour** — automatic palette extraction, a hardware palette library
@@ -116,6 +150,9 @@ cost, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - **Documents and presets, built** — `.dork` files, a preset library, starter
   presets and share links
 - **Batch, built** — one pipeline over many images, to a ZIP or a directory
+- **It explains itself, built** — search over what an effect *is*, hover help on
+  every parameter, an in-app guide whose effect catalogue is generated, and one
+  home for every sentence: the descriptor beside the shader
 
 Every requirement is numbered in the project specification.
 

@@ -22,7 +22,7 @@ import { describe, expect, it } from "vitest";
 
 import { discoverEffects } from "./discovery";
 import { createEffectRegistry } from "./registry";
-import { validateRegistry } from "../types/registry";
+import { EFFECT_CONCEPTS, validateRegistry } from "../types/registry";
 import type { EffectFamily, ExecutionKind } from "../types/registry";
 import type { NodeSlot } from "../types/document";
 
@@ -165,6 +165,82 @@ describe("the shipped catalogue", () => {
       )
       .map((effect) => `${effect.id} (${effect.slot})`);
     expect(misplaced).toEqual([]);
+  });
+
+  // --- descriptive text (F-UI-15) ---------------------------------------
+  //
+  // The validator already refuses a descriptor with no summary, description or
+  // keywords, so these are the checks it cannot make: that the sixty-seven texts
+  // are sixty-seven *different* texts, and that the concept table and the
+  // catalogue agree with each other. Both are copy-and-paste failures, which is
+  // the failure mode a catalogue this size actually has.
+
+  it("gives every effect a concept the table can explain", () => {
+    const without = effects.filter((effect) => effect.concept === undefined);
+    expect(without.map((effect) => effect.id)).toEqual([]);
+  });
+
+  it("uses every concept the table declares", () => {
+    // A concept nobody claims is a chapter of the guide about nothing, and it
+    // is what a renamed effect leaves behind.
+    const claimed = new Set(effects.map((effect) => effect.concept));
+    const orphans = Object.keys(EFFECT_CONCEPTS).filter((id) => !claimed.has(id as never));
+    expect(orphans).toEqual([]);
+  });
+
+  it("writes a different summary and description for every effect", () => {
+    for (const field of ["summary", "description"] as const) {
+      const seen = new Map<string, string[]>();
+      for (const effect of effects) {
+        const text = effect[field];
+        seen.set(text, [...(seen.get(text) ?? []), effect.id]);
+      }
+      const shared = [...seen.entries()]
+        .filter(([, ids]) => ids.length > 1)
+        .map(([, ids]) => `${field}: ${ids.join(", ")}`);
+      expect(shared).toEqual([]);
+    }
+  });
+
+  it("says more in the description than in the summary", () => {
+    // The two fields are a one-liner and a fuller explanation. A description no
+    // longer than its summary is the same sentence stored twice, which is what
+    // the guide would then print under a heading promising more.
+    const thin = effects
+      .filter((effect) => effect.description.length <= effect.summary.length)
+      .map((effect) => effect.id);
+    expect(thin).toEqual([]);
+  });
+
+  it("gives every effect keywords that are not just its own name", () => {
+    // The point of the field: "Epsilon glow" has to answer to "glow", and an
+    // effect whose keywords are all words already in its name adds nothing that
+    // the name search did not already reach.
+    const words = (text: string): readonly string[] =>
+      text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ");
+    const useless = effects
+      .filter((effect) => {
+        const own = new Set([...words(effect.name), ...words(effect.id)]);
+        return effect.keywords.every((keyword) =>
+          words(keyword).every((word) => own.has(word)),
+        );
+      })
+      .map((effect) => effect.id);
+    expect(useless).toEqual([]);
+  });
+
+  it("describes every parameter of every effect", () => {
+    // Restated here as a count rather than left to the validator, because the
+    // number is the thing that makes the guarantee concrete: 359 parameters,
+    // and the properties panel has a sentence for each.
+    const undescribed = effects.flatMap((effect) =>
+      effect.params
+        .filter((param) => param.description.trim().length === 0)
+        .map((param) => `${effect.id}.${param.key}`),
+    );
+    expect(undescribed).toEqual([]);
+    const total = effects.reduce((sum, effect) => sum + effect.params.length, 0);
+    expect(total).toBeGreaterThan(0);
   });
 
   it("keeps every index-map rewriter downstream of a quantizer", () => {

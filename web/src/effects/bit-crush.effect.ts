@@ -96,7 +96,7 @@ const PARAMS = [
     key: BIT_CRUSH_PARAM.redBits,
     label: "Red depth",
     type: "int",
-    hint: "Bits kept in the red channel, measured in sRGB. 8 leaves it alone.",
+    description: "Bits kept in the red channel, measured in sRGB. 8 leaves it alone.",
     animatable: true,
     legal: [1, 8],
     // Four bits per channel is RGB444: a real hardware format, symmetric across
@@ -108,7 +108,7 @@ const PARAMS = [
     key: BIT_CRUSH_PARAM.greenBits,
     label: "Green depth",
     type: "int",
-    hint: "Bits kept in the green channel, measured in sRGB. 8 leaves it alone.",
+    description: "Bits kept in the green channel, measured in sRGB. 8 leaves it alone.",
     animatable: true,
     legal: [1, 8],
     default: 4,
@@ -118,7 +118,7 @@ const PARAMS = [
     key: BIT_CRUSH_PARAM.blueBits,
     label: "Blue depth",
     type: "int",
-    hint: "Bits kept in the blue channel, measured in sRGB. 8 leaves it alone.",
+    description: "Bits kept in the blue channel, measured in sRGB. 8 leaves it alone.",
     animatable: true,
     legal: [1, 8],
     default: 4,
@@ -128,7 +128,7 @@ const PARAMS = [
     key: BIT_CRUSH_PARAM.corruptChance,
     label: "Corruption",
     type: "float",
-    hint: "Chance per pixel per channel that the selected bit plane flips.",
+    description: "Chance per pixel per channel that the selected bit plane flips.",
     animatable: true,
     legal: [0, 1],
     // Off. Corruption is a departure from what a crush is, and the crush should
@@ -153,7 +153,7 @@ const PARAMS = [
     // biggest jump that channel can make and the control means the same thing
     // at two bits as at eight. Counting from the bottom instead would make the
     // slider inert on a shallow channel, which is worse than making it coarse.
-    hint: "Which bit plane flips, counted from the top. 0 is the loudest.",
+    description: "Which bit plane flips, counted from the top. 0 is the loudest.",
     animatable: true,
     legal: [0, 7],
     default: 0,
@@ -169,7 +169,7 @@ const PARAMS = [
     key: BIT_CRUSH_PARAM.seed,
     label: "Seed",
     type: "seed",
-    hint: "Fixes which pixels corrupt. Nothing here reads a clock.",
+    description: "Fixes which pixels corrupt. Nothing here reads a clock.",
     animatable: false,
     default: 0,
     surprise: {
@@ -184,6 +184,12 @@ const PARAMS = [
 const DESCRIPTOR = defineEffect({
   id: EFFECT_ID,
   name: "Bit crush",
+  summary:
+    "Cuts each colour channel down to a few bits, the way old display hardware stored colour.",
+  description:
+    "The crush happens in sRGB rather than in linear light, because bit depth is a statement about a storage encoding and every format this imitates — a VGA DAC, an RGB565 framebuffer, an Amiga colour register — stores gamma-encoded values. The three depths are independent because the asymmetric ones are the interesting formats: RGB565 and RGB332 are both real and neither is reachable with a single slider. Corruption flips a chosen bit plane in a fraction of the pixels, and plane 0 is the loudest because it is the top bit. Posterize is the tidy version of the same idea; this one names the hardware.",
+  keywords: ["bit crush", "bit depth", "bits", "quantize", "banding", "vga", "rgb565", "8 bit", "16 bit", "retro", "hardware", "colour depth", "color depth", "corrupt", "bit plane", "amiga"],
+  concept: "glitch",
   requirement: "F-GL-13",
   // Glitch effects sit after the primary dither in the stack grammar (F-SM-03).
   slot: "postprocess",

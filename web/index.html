@@ -10,15 +10,20 @@
       lives in src/ui/theme.css, imported by the app, so that a theme is one set
       of values in one place (F-UI-09).
 
-      `data-theme` above is the pre-script default. app/theme.ts replaces it as
-      soon as it knows the stored mode and the OS preference, which is one frame
-      later; starting dark means that frame is not a white flash.
+      The four values below are copies of --bg, --fg and the sans family from
+      src/ui/theme/tokens.css. They are duplicated rather than imported because
+      an @import here would be a second round trip before the first paint, which
+      is the flash this block exists to prevent. Change them together.
+
+      `data-theme` above is the pre-script default, and dark is also the default
+      the app settles on — see the note in src/ui/theme/tokens.css about why
+      that is a decision and not an omission.
     -->
     <style>
       :root {
         color-scheme: dark;
-        background: #0d0f0c;
-        color: #cfe8c2;
+        background: #131519;
+        color: #e3e6ec;
       }
       html,
       body,
@@ -27,7 +32,15 @@
       }
       body {
         margin: 0;
-        font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font:
+          13px/1.5 ui-sans-serif,
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          "Helvetica Neue",
+          Arial,
+          sans-serif;
       }
       #boot-noscript {
         padding: 2rem;

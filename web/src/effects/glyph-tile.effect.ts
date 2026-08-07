@@ -314,7 +314,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: GLYPH_TILE_PARAM.glyphSet,
     label: "Glyph set",
     type: "enum",
-    hint: "Blocks reach solid ink; ASCII tops out around half coverage, which is what makes it read as type.",
+    description: "Blocks reach solid ink; ASCII tops out around half coverage, which is what makes it read as type.",
     animatable: false,
     values: GLYPH_SETS.map((set) => ({ value: set.value, label: set.label })),
     default: "ascii",
@@ -330,7 +330,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: GLYPH_TILE_PARAM.cellSize,
     label: "Cell size",
     type: "int",
-    hint: "Cell edge in pixels. The glyph raster is 8×8, so below about 6 the letterforms stop being readable.",
+    description: "Cell edge in pixels. The glyph raster is 8×8, so below about 6 the letterforms stop being readable.",
     // Not animatable: the value reaches the shader as a u32 and the uniform
     // packer refuses a non-integer for one, so a modulator bound here would
     // fail the pack rather than round. It also re-tiles the whole image, so
@@ -346,7 +346,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: GLYPH_TILE_PARAM.invert,
     label: "Light on dark",
     type: "bool",
-    hint: "Draw the glyph in the lighter of the two candidate colours — the terminal look — instead of the darker.",
+    description: "Draw the glyph in the lighter of the two candidate colours — the terminal look — instead of the darker.",
     animatable: false,
     default: false,
     surprise: {
@@ -363,7 +363,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     // The cell grid is locked to whole pixels: a fractional origin would
     // resample the glyph raster and blur the letterforms, which is the one
     // thing this effect must not do.
-    hint: "Shifts the cell grid horizontally, in whole pixels.",
+    description: "Shifts the cell grid horizontally, in whole pixels.",
     animatable: true,
     legal: [-1024, 1024],
     default: 0,
@@ -373,7 +373,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: GLYPH_TILE_PARAM.offsetY,
     label: "Offset Y",
     type: "float",
-    hint: "Shifts the cell grid vertically, in whole pixels.",
+    description: "Shifts the cell grid vertically, in whole pixels.",
     animatable: true,
     legal: [-1024, 1024],
     default: 0,
@@ -383,7 +383,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: GLYPH_TILE_PARAM.contrast,
     label: "Contrast",
     type: "float",
-    hint: "Steepens the tone-to-glyph mapping around its midpoint, pushing the result towards fewer, harder glyphs.",
+    description: "Steepens the tone-to-glyph mapping around its midpoint, pushing the result towards fewer, harder glyphs.",
     animatable: true,
     legal: [0.05, 4],
     default: 1,
@@ -393,7 +393,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: GLYPH_TILE_PARAM.thresholdOffset,
     label: "Density offset",
     type: "float",
-    hint: "Slides the whole image up or down the glyph ramp. ±0.5 forces the sparsest or densest glyph.",
+    description: "Slides the whole image up or down the glyph ramp. ±0.5 forces the sparsest or densest glyph.",
     animatable: true,
     legal: [-0.5, 0.5],
     default: 0,
@@ -582,6 +582,12 @@ export function glyphTileGpuEffect(): GpuEffect {
 export default defineEffect({
   id: GLYPH_TILE_ID,
   name: "Glyph tile",
+  summary:
+    "Replaces each cell of the picture with the character or block whose ink coverage matches that cell's tone.",
+  description:
+    "The image is cut into cells, each cell's mean tone is measured, and the glyph whose coverage is nearest that tone is stamped into it. Choosing on coverage rather than on shape is what makes this a dither rather than a novelty filter — the cell averages back to the tone it replaced. The block set reaches solid ink and behaves like a coarse dither; the ASCII ramp cannot, because no letter fills its cell — the densest here covers 36 of a cell's 64 pixels — which is why type-set images always come out lighter than the original. Below about six pixels a cell the letterforms stop being readable.",
+  keywords: ["ascii", "ascii art", "text", "type", "letters", "characters", "terminal", "blocks", "block elements", "mosaic", "tiles", "typewriter", "matrix"],
+  concept: "halftone-screen",
   requirement: "F-PT-08",
   slot: "dither",
   family: "pattern",

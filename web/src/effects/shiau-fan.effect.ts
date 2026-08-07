@@ -16,5 +16,10 @@ import { errorDiffusionEffect } from "./error-diffusion";
 export default errorDiffusionEffect({
   id: "shiau-fan",
   name: "Shiau-Fan",
+  summary:
+    "Half the error goes straight right and the rest fans down-left — deliberately asymmetric.",
+  description:
+    "Four eighths go straight right and the remaining four are spread 1, 1, 2 across the row below, ending directly underneath. The asymmetry keeps error moving along the scan rather than pooling under the current pixel, which suppresses the clumping flat areas otherwise show. Every weight is a power of two over a power of two, so the whole kernel is shifts — it is among the cheapest here. Being directional by construction, it benefits more than most from serpentine scanning.",
+  keywords: ["shiau", "shiau fan", "asymmetric", "directional"],
   requirement: "F-ED-12",
 });

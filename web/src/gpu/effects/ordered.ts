@@ -97,7 +97,7 @@ export const ORDERED_CONTROL_PARAMS: readonly ParamDescriptor[] = [
     // The candidate pair is ordered darker-first in the shader, so positive is
     // always towards the lighter of the two — the control does not reverse
     // direction as the image crosses a palette midpoint.
-    hint: "Slides the cut between the two candidate colours. ±0.5 forces one.",
+    description: "Slides the cut between the two candidate colours. ±0.5 forces one.",
     animatable: true,
     legal: [-0.5, 0.5],
     default: 0,
@@ -107,7 +107,7 @@ export const ORDERED_CONTROL_PARAMS: readonly ParamDescriptor[] = [
     key: ORDERED_PARAM.contrast,
     label: "Matrix contrast",
     type: "float",
-    hint: "Steepens the matrix around its midpoint. Above 1 hardens the pattern.",
+    description: "Steepens the matrix around its midpoint. Above 1 hardens the pattern.",
     animatable: true,
     legal: [0.05, 4],
     default: 1,
@@ -120,7 +120,7 @@ export const ORDERED_CONTROL_PARAMS: readonly ParamDescriptor[] = [
     // The threshold is compared against the pixel's *fraction* of the way
     // between its two candidate palette entries, so 1 reproduces tone exactly
     // for any palette, even or uneven — there is nothing to tune per palette.
-    hint: "Dither strength. 0 is plain quantization, 1 reproduces tone exactly.",
+    description: "Dither strength. 0 is plain quantization, 1 reproduces tone exactly.",
     animatable: true,
     legal: [0, 2],
     default: 1,
@@ -130,7 +130,7 @@ export const ORDERED_CONTROL_PARAMS: readonly ParamDescriptor[] = [
     key: ORDERED_PARAM.tileScale,
     label: "Tile scale",
     type: "float",
-    hint: "Size of the matrix on screen, in pixels per matrix cell.",
+    description: "Size of the matrix on screen, in pixels per matrix cell.",
     animatable: true,
     legal: [0.25, 64],
     default: 1,
@@ -143,7 +143,7 @@ export const ORDERED_CONTROL_PARAMS: readonly ParamDescriptor[] = [
     // Turns, not degrees: a modulator ramping 0 -> 1 lands back where it
     // started, so an animated rotation loops without the UI having to know
     // that 360 is special.
-    hint: "Rotation of the matrix about the image centre, in turns.",
+    description: "Rotation of the matrix about the image centre, in turns.",
     animatable: true,
     legal: [-1, 1],
     default: 0,
@@ -153,7 +153,7 @@ export const ORDERED_CONTROL_PARAMS: readonly ParamDescriptor[] = [
     key: ORDERED_PARAM.offsetX,
     label: "Offset X",
     type: "float",
-    hint: "Shifts the matrix horizontally, in matrix cells.",
+    description: "Shifts the matrix horizontally, in matrix cells.",
     animatable: true,
     legal: [-1024, 1024],
     default: 0,
@@ -163,7 +163,7 @@ export const ORDERED_CONTROL_PARAMS: readonly ParamDescriptor[] = [
     key: ORDERED_PARAM.offsetY,
     label: "Offset Y",
     type: "float",
-    hint: "Shifts the matrix vertically, in matrix cells.",
+    description: "Shifts the matrix vertically, in matrix cells.",
     animatable: true,
     legal: [-1024, 1024],
     default: 0,
@@ -171,10 +171,43 @@ export const ORDERED_CONTROL_PARAMS: readonly ParamDescriptor[] = [
   },
 ];
 
+/**
+ * Search terms every ordered dither answers to, on top of its own (F-UI-15).
+ *
+ * Someone looking for this family types "dither", "pattern" or "retro" long
+ * before they type "Bayer", and "blue noise" was the case that proved the point:
+ * search matched only names and structural fields, so the word "noise" found
+ * nothing. Merged into each tile's own list by the descriptor factory so that no
+ * tile can forget them.
+ */
+const ORDERED_KEYWORDS: readonly string[] = [
+  "dither",
+  "dithering",
+  "ordered",
+  "ordered dither",
+  "threshold matrix",
+  "matrix",
+  "tile",
+  "pattern",
+  "retro",
+];
+
 /** One ordered dither: its identity, its tile size and its shader. */
 export interface OrderedDitherSpec {
   readonly effectId: string;
   readonly name: string;
+  /**
+   * F-UI-15's three fields, per tile.
+   *
+   * Per-tile rather than shared, because what the five have in common is
+   * already written once in `EFFECT_CONCEPTS["ordered-dithering"]` and what a
+   * person choosing between them needs is the rest: how coarse this tile is and
+   * what it is reached for. A shared paragraph would say nothing at the moment
+   * of choosing.
+   */
+  readonly summary: string;
+  readonly description: string;
+  readonly keywords: readonly string[];
   readonly requirement: string;
   /** Tile edge in texels, restated as `TILE` in the shader. */
   readonly tile: number;
@@ -194,6 +227,11 @@ export const ORDERED_DITHERS: readonly OrderedDitherSpec[] = [
   {
     effectId: "bayer-2",
     name: "Bayer 2×2",
+    summary:
+      "The coarsest ordered dither there is — four thresholds, so above one pixel per cell it reads as a visible checker.",
+    description:
+      "Four thresholds in the classic 2×2 recursion. There is not enough tile here to hide in, which is exactly why it is reached for on purpose: raise the tile scale and the checkerboard becomes the subject rather than the texture. Against a two-colour palette it gives the hard 50% screen of early bitmap graphics. If you want the pattern to dissolve into tone instead, use Bayer 8×8 or blue noise.",
+    keywords: ["bayer", "checker", "checkerboard", "2x2", "coarse", "retro", "bitmap", "chunky"],
     requirement: "F-OD-01",
     tile: 2,
     wgsl: bayer2Wgsl,
@@ -202,6 +240,11 @@ export const ORDERED_DITHERS: readonly OrderedDitherSpec[] = [
   {
     effectId: "bayer-4",
     name: "Bayer 4×4",
+    summary:
+      "The tile most people picture when they say 'ordered dither' — coarse enough to see, fine enough to hold a gradient.",
+    description:
+      "Sixteen thresholds in a 4×4 recursion. This is the middle of the Bayer family and the usual first choice: the woven pattern is clearly visible but still fine enough that a gradient reads as a gradient rather than as bands. Raise the tile scale to make the pattern the subject, or drop the spread to let the palette show through with less texture.",
+    keywords: ["bayer", "4x4", "retro", "gradient", "classic", "game boy", "gameboy"],
     requirement: "F-OD-02",
     tile: 4,
     wgsl: bayer4Wgsl,
@@ -210,6 +253,11 @@ export const ORDERED_DITHERS: readonly OrderedDitherSpec[] = [
   {
     effectId: "bayer-8",
     name: "Bayer 8×8",
+    summary:
+      "The finest Bayer tile that still shows its own structure — ordered dithering without it announcing itself.",
+    description:
+      "Sixty-four thresholds. At one pixel per cell the pattern nearly dissolves into texture at ordinary output sizes, which makes this the Bayer tile to use when you want the regularity of an ordered dither but not a visible weave. Scale the tile up and the 8×8 recursion becomes plainly legible again.",
+    keywords: ["bayer", "8x8", "fine", "subtle", "retro"],
     requirement: "F-OD-03",
     tile: 8,
     wgsl: bayer8Wgsl,
@@ -218,6 +266,11 @@ export const ORDERED_DITHERS: readonly OrderedDitherSpec[] = [
   {
     effectId: "bayer-16",
     name: "Bayer 16×16",
+    summary:
+      "The largest Bayer tile — 256 thresholds, one for every level an 8-bit channel has.",
+    description:
+      "Two hundred and fifty-six thresholds, which is as many as an 8-bit channel has levels, so this is the largest Bayer tile that can add anything at all. At one pixel per cell its structure is nearly invisible; the recursion only becomes legible once the tile is scaled up, which is the main reason to choose it over 8×8.",
+    keywords: ["bayer", "16x16", "large tile", "smooth", "fine"],
     requirement: "F-OD-04",
     tile: 16,
     wgsl: bayer16Wgsl,
@@ -226,6 +279,11 @@ export const ORDERED_DITHERS: readonly OrderedDitherSpec[] = [
   {
     effectId: "blue-noise",
     name: "Blue noise",
+    summary:
+      "Ordered dithering with no visible pattern at all — the thresholds are arranged so there is no structure to see.",
+    description:
+      "A void-and-cluster tile rather than a recursion: the thresholds are placed so the spectrum carries no low-frequency energy, which is what stops the eye finding a repeating figure in the result. It flatters more images than any of the Bayer tiles, and it is the one to reach for when you want a dither that reads as grain rather than as a screen. It is still an ordered dither, so it costs one pass and survives scaling and animation the way Bayer does and error diffusion does not.",
+    keywords: ["noise", "blue noise", "random", "grain", "stochastic", "void and cluster", "organic", "no pattern", "smooth"],
     requirement: "F-OD-05",
     tile: 64,
     wgsl: blueNoiseWgsl,
@@ -246,6 +304,12 @@ export function orderedDitherDescriptor(spec: OrderedDitherSpec): EffectDescript
   return {
     id: spec.effectId,
     name: spec.name,
+    summary: spec.summary,
+    description: spec.description,
+    // Deduplicated: a tile's own list may legitimately repeat a shared term, and
+    // the registry validator rejects a keyword declared twice.
+    keywords: [...new Set([...spec.keywords, ...ORDERED_KEYWORDS])],
+    concept: "ordered-dithering",
     requirement: spec.requirement,
     slot: "dither",
     family: "ordered",

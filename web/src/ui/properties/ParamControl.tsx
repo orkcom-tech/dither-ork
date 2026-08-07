@@ -5,6 +5,7 @@ import type { EffectParamValue } from "../../registry";
 import type { CommitOptions } from "../stack/store";
 import type { CurvePoint, SrgbTriplet } from "../../types/document";
 import type { ParamDescriptor } from "../../types/registry";
+import { helpFor } from "../help";
 import { ColorField } from "./ColorField";
 import { CurveEditor } from "./CurveEditor";
 import { NumberField } from "./NumberField";
@@ -67,11 +68,36 @@ function numberOr(
  * nothing else.
  *
  * **There is no effect id in this file.** Every control below is built from
- * `ParamDescriptor` alone — legal range, step, default, options, label, hint —
+ * `ParamDescriptor` alone — legal range, step, default, options, label, description —
  * which is the payoff the descriptor design was for: an effect added tomorrow
  * gets a complete properties panel without a line being written here.
+ *
+ * ## The wrapper
+ *
+ * The control is wrapped in one element carrying `data-help` (F-UI-13). A
+ * wrapper rather than the attribute on each of the six controls: help is
+ * resolved with `closest()`, so one ancestor covers the label, the track, the
+ * entry box and the trailing reroll button alike, and the six field components
+ * stay unaware that the feature exists. It is a plain block — `.field` and `.nf`
+ * carry their own padding and rule, and neither has an outside margin to
+ * collapse — so nothing on screen moves.
+ *
+ * The token names the *effect and the key*, not the node: two Bayer nodes are
+ * two sets of values but one description, which is the whole point of the text
+ * living on the descriptor.
  */
-export function ParamControl({
+export function ParamControl(props: ParamControlProps): React.ReactElement {
+  return (
+    <div
+      className="param"
+      {...helpFor({ kind: "param", effect: props.effectId, param: props.param.key })}
+    >
+      <Control {...props} />
+    </div>
+  );
+}
+
+function Control({
   nodeId,
   effectId,
   param,
@@ -87,7 +113,7 @@ export function ParamControl({
       return (
         <NumberField
           label={param.label}
-          hint={param.hint}
+          hint={param.description}
           value={numberOr(effectId, param, value, param.default)}
           min={param.legal[0]}
           max={param.legal[1]}
@@ -101,7 +127,7 @@ export function ParamControl({
       return (
         <NumberField
           label={param.label}
-          hint={param.hint}
+          hint={param.description}
           value={numberOr(effectId, param, value, param.default)}
           min={param.legal[0]}
           max={param.legal[1]}
@@ -115,7 +141,7 @@ export function ParamControl({
       return (
         <SeedField
           label={param.label}
-          hint={param.hint}
+          hint={param.description}
           value={numberOr(effectId, param, value, param.default)}
           interaction={interaction}
           onChange={onChange}
@@ -127,7 +153,7 @@ export function ParamControl({
       if (typeof value !== "boolean") mistyped(effectId, param, value);
       return (
         <div className="field field--inline">
-          <label className="toggle" title={param.hint ?? param.label}>
+          <label className="toggle" title={param.description}>
             <input
               type="checkbox"
               checked={checked}
@@ -147,7 +173,7 @@ export function ParamControl({
       if (typeof value !== "string") mistyped(effectId, param, value);
       return (
         <div className="field">
-          <div className="field__label" title={param.hint ?? param.label}>
+          <div className="field__label" title={param.description}>
             {param.label}
           </div>
           <select
@@ -172,7 +198,7 @@ export function ParamControl({
       return (
         <ColorField
           label={param.label}
-          hint={param.hint}
+          hint={param.description}
           value={triplet}
           interaction={interaction}
           onChange={dragged}
@@ -186,7 +212,7 @@ export function ParamControl({
       return (
         <CurveEditor
           label={param.label}
-          hint={param.hint}
+          hint={param.description}
           value={points}
           fallback={param.default}
           interaction={interaction}

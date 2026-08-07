@@ -141,7 +141,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CLUSTERED_DOT_PARAM.cellSize,
     label: "Cell size",
     type: "int",
-    hint: "Screen ruling, in pixels between dot centres. Larger cells give coarser dots and more tonal levels.",
+    description: "Screen ruling, in pixels between dot centres. Larger cells give coarser dots and more tonal levels.",
     // Not animatable: the value reaches the shader as a u32 and the uniform
     // packer refuses a non-integer for one, so a modulator bound here would
     // fail the pack rather than round. It also selects a different screen
@@ -157,7 +157,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CLUSTERED_DOT_PARAM.angle,
     label: "Screen angle",
     type: "enum",
-    hint: "45° is the classical screen: its dot lattice is the one printing uses because the grid is least visible there.",
+    description: "45° is the classical screen: its dot lattice is the one printing uses because the grid is least visible there.",
     animatable: false,
     values: ANGLE_MODES.map((mode) => ({ value: mode.value, label: mode.label })),
     default: "diagonal",
@@ -178,7 +178,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     // An ordered screen is locked to the pixel grid — that is what makes it an
     // ordered screen rather than a resampled halftone — so the offset takes
     // effect in whole pixels and a fractional value floors.
-    hint: "Shifts the screen horizontally, in whole pixels.",
+    description: "Shifts the screen horizontally, in whole pixels.",
     animatable: true,
     legal: [-1024, 1024],
     default: 0,
@@ -188,7 +188,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CLUSTERED_DOT_PARAM.offsetY,
     label: "Offset Y",
     type: "float",
-    hint: "Shifts the screen vertically, in whole pixels.",
+    description: "Shifts the screen vertically, in whole pixels.",
     animatable: true,
     legal: [-1024, 1024],
     default: 0,
@@ -198,7 +198,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CLUSTERED_DOT_PARAM.contrast,
     label: "Screen contrast",
     type: "float",
-    hint: "Steepens the screen around its midpoint. Above 1 hardens the dot into an on/off blob.",
+    description: "Steepens the screen around its midpoint. Above 1 hardens the dot into an on/off blob.",
     animatable: true,
     legal: [0.05, 4],
     default: 1,
@@ -208,7 +208,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CLUSTERED_DOT_PARAM.spread,
     label: "Spread",
     type: "float",
-    hint: "Dither strength. 0 is plain quantization, 1 reproduces tone exactly.",
+    description: "Dither strength. 0 is plain quantization, 1 reproduces tone exactly.",
     animatable: true,
     legal: [0, 2],
     default: 1,
@@ -218,7 +218,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: CLUSTERED_DOT_PARAM.thresholdOffset,
     label: "Threshold offset",
     type: "float",
-    hint: "Slides the cut between the two candidate colours. ±0.5 forces one.",
+    description: "Slides the cut between the two candidate colours. ±0.5 forces one.",
     animatable: true,
     legal: [-0.5, 0.5],
     default: 0,
@@ -508,6 +508,12 @@ export function clusteredDotGpuEffect(): GpuEffect {
 export default defineEffect({
   id: CLUSTERED_DOT_ID,
   name: "Clustered-dot screen",
+  summary:
+    "The classical printing screen: at every tone the lit pixels form one compact dot per cell, growing outward from its centre.",
+  description:
+    "This is the exact opposite of Bayer, which disperses the same pixels as widely as it can — here they cluster, and the dot grows out from the cell centre as the tone darkens, which is what a real printing screen does and what makes the result hold up when it is actually printed. The diagonal 45° lattice is the classical choice because its grid is the least visible; orthogonal is the axis-aligned alternative. Cell size sets both how coarse the dot is and how many tonal levels are available, since a larger cell has more pixels to grow through.",
+  keywords: ["clustered", "cluster dot", "classical screen", "print", "printing", "newspaper", "ulichney", "dot", "halftone", "laser printer", "offset"],
+  concept: "halftone-screen",
   requirement: "F-PT-07",
   slot: "dither",
   family: "pattern",

@@ -59,6 +59,11 @@
   backdrop-filter: blur(2px);
 }
 
+/*
+ * Zoom, dimensions, frame timing: all quantities, all read while they change
+ * under a pan or a drag, so the whole readout is mono with tabular figures. A
+ * readout that reflows as the numbers move is a readout you cannot read.
+ */
 .viewport__readout {
   display: flex;
   gap: 12px;
@@ -68,8 +73,10 @@
   border-radius: var(--radius);
   background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
   color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   font-size: var(--text-sm);
-  letter-spacing: 0.06em;
+  letter-spacing: 0.02em;
   white-space: nowrap;
 }
 
@@ -79,8 +86,15 @@
 }
 
 /*
- * The degraded-preview badge (F-UI-03). It is `--warn` and it is the only warm
- * colour in the viewport, because the one thing it must never do is blend in.
+ * The degraded-preview badge (F-UI-03).
+ *
+ * `--warn`, and now the only saturated warm thing anywhere in the chrome, which
+ * is exactly what it was for: the one thing it must never do is blend in. The
+ * neutral graphite around it makes it louder than it was, not quieter.
+ *
+ * It is driven by what the worker actually did — a frame really rendered at a
+ * reduced resolution — and it is hidden with the `hidden` attribute the moment
+ * that stops being true. Do not give it a state of its own here.
  */
 .viewport__badge {
   display: flex;
@@ -103,6 +117,8 @@
   display: none;
 }
 
+/* "You are looking at the original" is a live state of the viewport, so it is
+   one of the places the accent belongs. */
 .viewport__compare-tag {
   padding: 3px 8px;
   border: 1px solid var(--accent-dim);

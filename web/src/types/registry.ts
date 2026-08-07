@@ -58,6 +58,125 @@ export type EffectFamily =
   | "special";
 
 /**
+ * A family idea shared by several effects and worth explaining exactly once
+ * (F-UI-15).
+ *
+ * `family` says which requirement group an effect came from and is a *filing*
+ * decision; a concept is a *teaching* decision, and the two do not coincide.
+ * Posterize, threshold and invert are filed under `special` because the spec
+ * lists them there, but what a reader needs told about them is the same thing
+ * they need told about levels and curves: these are pointwise transfers of the
+ * display-referred tone, applied before anything quantizes. Conversely the
+ * `special` family holds four unrelated ideas at once.
+ *
+ * Kept as a closed union rather than a free string so that the guide's concept
+ * chapters and the hover help cannot reference a concept nobody wrote.
+ */
+export type EffectConcept =
+  | "error-diffusion"
+  | "ordered-dithering"
+  | "halftone-screen"
+  | "tone-and-colour"
+  | "neighbourhood-filter"
+  | "optical"
+  | "glitch"
+  | "index-map"
+  | "working-resolution";
+
+/** One concept, written once and read by the guide and by hover help. */
+export interface ConceptDescriptor {
+  readonly id: EffectConcept;
+  /** Heading, as the guide prints it. */
+  readonly title: string;
+  /** One line: what the family of effects has in common. */
+  readonly summary: string;
+  /** The explanation itself — what it is, why it is a family, how to use it. */
+  readonly description: string;
+}
+
+/**
+ * The concept texts.
+ *
+ * These are the paragraphs that would otherwise be copied into sixty-seven
+ * descriptions. An effect names its concept and says only what makes it
+ * different from its siblings; everything the siblings share is here.
+ */
+export const EFFECT_CONCEPTS: Readonly<Record<EffectConcept, ConceptDescriptor>> = {
+  "error-diffusion": {
+    id: "error-diffusion",
+    title: "Error diffusion",
+    summary:
+      "Quantizes a pixel to the nearest palette colour, then pushes the difference onto pixels it has not reached yet.",
+    description:
+      "Every pixel is replaced by the closest colour the palette can offer, and the amount by which that was wrong — the error — is split among neighbours further along the scan. Those neighbours are therefore quantized against a value that already carries the debt, so the picture keeps its average tone even though no pixel keeps its own. What separates the fifteen kernels here is only where the error goes and in what proportions: a short reach gives a fine, busy grain, a wide reach gives a smooth one that softens edges. The cost is that the scan is serial by definition, so this whole family runs on the CPU while everything else runs as a compute pass. Error diffusion is the family to reach for when you want detail preserved and no visible pattern; ordered dithering is the one to reach for when the pattern is the point.",
+  },
+  "ordered-dithering": {
+    id: "ordered-dithering",
+    title: "Ordered dithering",
+    summary:
+      "Compares each pixel against a threshold read from a repeating tile, so the pattern is fixed and the same everywhere.",
+    description:
+      "A tile of thresholds is laid over the image and each pixel is pushed towards whichever of its two candidate palette colours its own threshold says. Because the tile repeats, the texture is completely regular — that regularity is the look, and it is why these effects survive being scaled up, animated or exported to vector where a diffusion grain would turn to mush. Every pixel decides on its own, so the whole family runs as one GPU pass and costs the same at any tile size. The shared controls move the tile rather than the algorithm: scale, rotation and offset are the primary animation targets, spread sets how much of the tone the pattern is allowed to carry, and threshold offset slides the cut between the two candidates.",
+  },
+  "halftone-screen": {
+    id: "halftone-screen",
+    title: "Halftone and pattern screens",
+    summary:
+      "Draws the tone as a geometric figure — a dot, a line, a ring — that grows and shrinks with brightness.",
+    description:
+      "A pattern screen is an ordered dither whose threshold comes from a drawing rather than from a tile of numbers: distance to the nearest dot centre, distance across a grating, distance from a point. Where the figure is fat the pixel goes dark, where it is thin the pixel goes light, so tone is carried by the *area* of ink rather than by its density. This is how print works, and it is why these effects read as printed matter rather than as a computer artefact. The geometry is the parameter set — cell size or pitch sets how coarse the figure is, angle sets which way it runs — and it is what distinguishes each of them from the others. Screens are best on images that have already been simplified; a fine screen over a busy photograph fights the detail rather than describing it.",
+  },
+  "tone-and-colour": {
+    id: "tone-and-colour",
+    title: "Tone and colour",
+    summary:
+      "Changes what tone or colour a pixel is, one pixel at a time, before anything quantizes.",
+    description:
+      "These are the pointwise front of the stack. Each one reads a single pixel and writes a single pixel, and every one of them is defined on the display-referred value — the tone as the screen shows it — rather than on linear light, because that is the domain in which 'lift the shadows by a quarter' means what it says. They matter more here than in an ordinary image editor: a dither has only a handful of colours to work with, so how much contrast, how much saturation and how many levels reach the dither decides most of what the result looks like. Put them before the dither node. Placed after one they operate on the dither's own texture instead of on the picture.",
+  },
+  "neighbourhood-filter": {
+    id: "neighbourhood-filter",
+    title: "Neighbourhood filters",
+    summary:
+      "Reads a pixel and the pixels around it, so it can find or remove detail at a chosen size.",
+    description:
+      "Blur, sharpen, edge detect and emboss all work the same way: they weigh a pixel against its neighbours and write the result. That gives them a size — the radius, or the fixed one-pixel tap of a 3×3 operator — and the size is what they are really controlling, since it says which detail counts as detail. All four belong before the dither. After one, every pixel is a step edge against its neighbour and the filter finds the dither's own texture rather than the picture's, which is a real look but almost never the intended one. Before it, they decide how much of the image survives into a small palette: blur to crush detail, sharpen to keep edges legible, edge detect or emboss to hand the dither line art instead of a photograph.",
+  },
+  optical: {
+    id: "optical",
+    title: "Optical and photographic",
+    summary:
+      "Imitates something a lens, a film or a projector does to a picture rather than something a computer does.",
+    description:
+      "Glow, vignette, lens distortion, light leak and grain are all artefacts of physical capture, and each is modelled as the physical thing rather than as a filter that resembles it — light that adds, light that is lost, a frame that is bent, silver that is uneven. They read as photography rather than as processing, which is why they are worth reaching for around a dither: the hard, quantized result of a dither plus one soft physical artefact is a much stronger picture than either alone. Whether one belongs before or after the dither is a real choice. Before it, the artefact is quantized along with everything else and becomes part of the pattern; after it, it sits over the pattern as light does over a printed page.",
+  },
+  glitch: {
+    id: "glitch",
+    title: "Glitch",
+    summary:
+      "Displaces, duplicates or corrupts pixels as if the picture had survived a broken machine.",
+    description:
+      "The glitch family breaks the picture on purpose, and it does so along one of three lines: geometry (slices, waves, tears and splits that move pixels somewhere they do not belong), signal (masks, scanlines, bit crushing and channel swaps that imitate the display or the storage format), and corruption (seeded bursts and shuffles). Everything stochastic here is driven by an explicit seed and by nothing else — no clock, no frame counter — so a look you liked is reproducible from the document and an animation loops cleanly. Several of the effects have no seed at all, and that is deliberate rather than an oversight: their pattern is a function of position, so there is nothing to reroll and a seed control would move nothing. Glitch nodes normally sit after the dither, where they tear a picture that is already made of hard palette colours.",
+  },
+  "index-map": {
+    id: "index-map",
+    title: "Working on palette regions",
+    summary:
+      "Reads the palette index each pixel was assigned, so region edges are exact rather than guessed.",
+    description:
+      "Once a node has quantized, the pipeline carries a second buffer alongside the colours: for every pixel, which palette entry it became. That map is what makes region work exact. A boundary between two regions is an integer inequality between two indices — free to compute, and correct even where the two palette colours are nearly identical or where dither noise would defeat an edge detector working on colour alone. Effects that read the map are therefore only legal downstream of a node that produces one, which the stack checks before anything renders. They also rewrite the map as well as the colours, because a node that moved a region boundary in colour and left the map behind would hand the next reader — another region effect, or the SVG tracer — a segmentation that no longer describes the pixels.",
+  },
+  "working-resolution": {
+    id: "working-resolution",
+    title: "Working resolution",
+    summary:
+      "Runs the middle of the stack on a smaller grid, then brings the frame back to size with the chunk intact.",
+    description:
+      "The size of a dither's grain is fixed in pixels, so the only way to make the grain coarse relative to the subject is to make the picture smaller while the dither runs. Internal resolution divides the working grid; nearest upscale multiplies it back afterwards, replicating each texel into a hard block. Used as a pair at the same factor, they crush detail without changing the exported size — and they are also the main performance lever, since every node between them costs a quarter of the work at factor two. Used alone, internal resolution simply exports smaller. The upscale must stay nearest and integer: any smoothing would average palette colours into ones the palette does not contain, which is the one thing an indexed pipeline must not do.",
+  },
+};
+
+/**
  * Where an effect runs, and therefore what it costs.
  *
  * `wasm` is a serial CPU kernel — error diffusion is inherently serial, so the
@@ -134,8 +253,21 @@ interface ParamBase {
   readonly type: ParamType;
   /** Whether a modulator or keyframe track may bind to it (F-AN-02). */
   readonly animatable: boolean;
-  /** One line of UI help. Absent means the label is self-explanatory. */
-  readonly hint?: string;
+  /**
+   * What this control does **to the picture** (F-UI-15).
+   *
+   * Required, and required to say something the label does not. "Serpentine
+   * alternates direction every row so error stops drifting consistently to one
+   * side" is the standard; "alternates the scan direction" restates the label
+   * and {@link validateRegistry} rejects it as
+   * `unhelpful-description`.
+   *
+   * This is the *only* descriptive string a parameter carries. The properties
+   * panel's tooltip, the hover help of F-UI-13 and the guide's parameter tables
+   * all read it, because three hand-written copies of 359 parameter
+   * descriptions drift within a release.
+   */
+  readonly description: string;
 }
 
 export interface FloatParam extends ParamBase {
@@ -316,6 +448,48 @@ export interface EffectDescriptor {
   /** Stable id, referenced by `StackNode.effect`. Kebab-case, unique. */
   readonly id: string;
   readonly name: string;
+  /**
+   * One line, in the words a user would use: what this does to the picture.
+   *
+   * This is the line the effect picker shows under the name and the first line
+   * of the hover panel (F-UI-13), so it has to stand alone — no "see below", no
+   * reference to a sibling effect, and no restatement of the name.
+   */
+  readonly summary: string;
+  /**
+   * The full description: how it behaves, what it is for, and what it pairs
+   * with.
+   *
+   * Written once, here, and read by hover help (F-UI-13), the guide's generated
+   * effect catalogue (F-UI-14) and search (F-ST-08) — F-UI-15 in one field. Say
+   * what it does to the image rather than what category it is in, and where an
+   * effect is commonly confused with another, say the difference: wave warp
+   * displaces by a fixed geometric function, row displacement by a seed, and
+   * neither displaces by the picture.
+   */
+  readonly description: string;
+  /**
+   * What a person might call this when they go looking for it, beyond its name.
+   *
+   * The reason this field exists is a real failure, not a hypothetical: the
+   * owner of this tool could not find the glow effect, because it is named
+   * "Epsilon glow" after the reference product and search matched only names
+   * and structural fields. Every effect therefore carries the ordinary words
+   * for what it produces — `epsilon-glow` answers to glow, neon, bloom and halo;
+   * `blue-noise` answers to noise — and the words for the look it belongs to.
+   *
+   * Never empty, and no two entries may normalize to the same string.
+   */
+  readonly keywords: readonly string[];
+  /**
+   * The family idea this effect belongs to, explained once in
+   * {@link EFFECT_CONCEPTS}.
+   *
+   * Optional because an effect need not belong to one, though every effect in
+   * the shipped catalogue does — `catalogue.test.ts` asserts it. A concept is
+   * not the same thing as {@link EffectFamily}: see {@link EffectConcept}.
+   */
+  readonly concept?: EffectConcept;
   /**
    * The spec requirement this implements, e.g. `"F-ED-01"`. Carried so the
    * catalogue can be checked against the spec mechanically instead of by
@@ -541,6 +715,12 @@ export type RegistryIssueCode =
   | "diffusion-must-run-serially"
   | "index-map-consumer-in-preprocess"
   | "resampler-must-run-on-gpu"
+  | "missing-summary"
+  | "missing-description"
+  | "unhelpful-description"
+  | "missing-keywords"
+  | "duplicate-keyword"
+  | "unknown-concept"
   | "duplicate-param-key"
   | "empty-param-key"
   | "missing-surprise"
@@ -641,6 +821,128 @@ function isPositiveWeight(value: unknown): value is number {
 
 /** `F-` plus a two-or-three letter group plus a number, e.g. `F-ED-01`, `F-ED-CTL`. */
 const REQUIREMENT_PATTERN = /^F-[A-Z]{2}-[A-Z0-9]{2,3}$/;
+
+/**
+ * Fold case, punctuation and whitespace away so two strings can be compared for
+ * *saying the same thing* rather than for being the same bytes.
+ *
+ * Used by the descriptive-text checks below to catch the laziest way a
+ * description arrives undocumented: repeating the label. `search.ts` has a
+ * normalizer of its own with the same rule; it is not shared because this file
+ * is the one `search.ts` imports and the dependency must not run the other way.
+ */
+function normalizeText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/** Present, a string, and not blank. */
+function isText(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+/**
+ * Check one descriptive string: present, and not a restatement of the thing it
+ * is supposed to describe.
+ *
+ * Both halves are the requirement. F-UI-15 asks that a missing description be a
+ * validation failure the way missing surprise metadata is, because that is what
+ * stops a newly added effect arriving undocumented — but a description that
+ * merely echoes the label arrives undocumented too, and costs a reader the same
+ * time as an absent one while looking like it was written.
+ */
+function checkDescriptiveText(
+  text: unknown,
+  restates: readonly string[],
+  missingCode: RegistryIssueCode,
+  what: string,
+  report: (code: RegistryIssueCode, message: string) => void,
+): void {
+  if (!isText(text)) {
+    report(missingCode, `no ${what}; F-UI-15 requires one on every entry`);
+    return;
+  }
+  const normalized = normalizeText(text);
+  for (const restated of restates) {
+    if (normalized === normalizeText(restated)) {
+      report(
+        "unhelpful-description",
+        `${what} "${text}" only restates "${restated}"; say what it does to the picture`,
+      );
+      return;
+    }
+  }
+}
+
+/** The descriptive text every parameter carries (F-UI-15). */
+function checkParamText(
+  effectId: string,
+  param: ParamDescriptor,
+  issues: RegistryIssue[],
+): void {
+  checkDescriptiveText(
+    param.description,
+    [param.label, param.key],
+    "missing-description",
+    "description",
+    (code, message) => issues.push(paramIssue(effectId, param.key, code, message)),
+  );
+}
+
+/** The descriptive text and search keywords every effect carries (F-UI-15). */
+function checkEffectText(
+  effectId: string,
+  effect: EffectDescriptor,
+  issues: RegistryIssue[],
+): void {
+  const report = (code: RegistryIssueCode, message: string): void => {
+    issues.push(issue(effectId, code, message));
+  };
+  const name = typeof effect.name === "string" ? effect.name : "";
+
+  checkDescriptiveText(effect.summary, [name, effectId], "missing-summary", "summary", report);
+  // The description is also checked against the summary: an effect whose long
+  // form is its short form has one description under two field names, which is
+  // the drift F-UI-15 exists to prevent showing up inside a single descriptor.
+  checkDescriptiveText(
+    effect.description,
+    [name, effectId, typeof effect.summary === "string" ? effect.summary : ""],
+    "missing-description",
+    "description",
+    report,
+  );
+
+  const keywords: unknown = effect.keywords;
+  if (!Array.isArray(keywords) || keywords.length === 0) {
+    report(
+      "missing-keywords",
+      "no search keywords; an effect nobody can name is an effect nobody can find",
+    );
+  } else {
+    const seen: string[] = [];
+    for (const keyword of keywords as readonly unknown[]) {
+      if (!isText(keyword) || normalizeText(keyword).length === 0) {
+        report("missing-keywords", `keyword ${JSON.stringify(keyword)} is blank`);
+        continue;
+      }
+      const normalized = normalizeText(keyword);
+      if (seen.includes(normalized)) {
+        report("duplicate-keyword", `keyword "${keyword}" is declared twice`);
+        continue;
+      }
+      seen.push(normalized);
+    }
+  }
+
+  if (effect.concept !== undefined && !(effect.concept in EFFECT_CONCEPTS)) {
+    report(
+      "unknown-concept",
+      `concept "${String(effect.concept)}" has no entry in EFFECT_CONCEPTS, so nothing can explain it`,
+    );
+  }
+}
 
 /**
  * Lowercase kebab-case. Enforced rather than merely documented because an id
@@ -1127,6 +1429,14 @@ export function validateEffect(effect: EffectDescriptor): readonly RegistryIssue
     );
   }
 
+  // F-UI-15. Checked here rather than left to the type system for the reason
+  // stated at the top of the validation section: the types guarantee this for
+  // literals written in this repository and guarantee nothing for a descriptor
+  // assembled programmatically. An effect that reaches the registry without a
+  // description is an effect the hover panel, the picker and the guide all have
+  // to invent text for, and inventing it is how the three copies start.
+  checkEffectText(id, effect, issues);
+
   // Error diffusion is serial by definition — that constraint is the reason the
   // renderer is split in two at all. A descriptor claiming otherwise is a
   // mislabelled effect, and it would be scheduled into a GPU batch that cannot
@@ -1184,6 +1494,8 @@ export function validateEffect(effect: EffectDescriptor): readonly RegistryIssue
       );
     }
     seenKeys.push(param.key);
+
+    checkParamText(id, param, issues);
 
     switch (param.type) {
       case "float":

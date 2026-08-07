@@ -115,6 +115,21 @@
   color: var(--fail);
 }
 
+/*
+ * The two ways out of a trace that will not finish.
+ *
+ * A list rather than a run-on sentence because each entry names a control that
+ * is on screen a few rows above, and somebody reading this is looking for the
+ * next thing to touch rather than for prose.
+ */
+.xp__fixes {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
 .xp__notice--ok {
   border-left-color: var(--ok);
   color: var(--fg-dim);

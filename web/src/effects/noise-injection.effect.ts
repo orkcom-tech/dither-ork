@@ -84,7 +84,7 @@ export const NOISE_INJECTION_PARAMS: readonly ParamDescriptor[] = [
     key: NOISE_INJECTION_PARAM.kind,
     label: "Distribution",
     type: "enum",
-    hint: "White is one independent draw per cell; value interpolates between them; gaussian clusters near zero with rare large excursions.",
+    description: "White is one independent draw per cell; value interpolates between them; gaussian clusters near zero with rare large excursions.",
     // Not animatable: an enum reaches the shader as an ordinal and a modulator
     // produces a continuous number, so interpolating between two distributions
     // would mean nothing even if the packer accepted it.
@@ -116,7 +116,7 @@ export const NOISE_INJECTION_PARAMS: readonly ParamDescriptor[] = [
     key: NOISE_INJECTION_PARAM.amount,
     label: "Amount",
     type: "float",
-    hint: "Largest excursion, measured on the tone as it looks on screen. The same number means the same swing in all three distributions.",
+    description: "Largest excursion, measured on the tone as it looks on screen. The same number means the same swing in all three distributions.",
     animatable: true,
     legal: [0, 1],
     // Small. Noise before a dither is there to break the threshold decision, and
@@ -137,7 +137,7 @@ export const NOISE_INJECTION_PARAMS: readonly ParamDescriptor[] = [
     key: NOISE_INJECTION_PARAM.scale,
     label: "Feature size",
     type: "float",
-    hint: "Edge of one noise cell, in pixels. 1 is per-pixel.",
+    description: "Edge of one noise cell, in pixels. 1 is per-pixel.",
     animatable: true,
     // Below 1 the lattice is finer than the pixel grid, so the field aliases
     // into something that is no longer noise of any size.
@@ -157,7 +157,7 @@ export const NOISE_INJECTION_PARAMS: readonly ParamDescriptor[] = [
     key: NOISE_INJECTION_PARAM.channels,
     label: "Channels",
     type: "enum",
-    hint: "One field added to all three channels, or three independent fields.",
+    description: "One field added to all three channels, or three independent fields.",
     animatable: false,
     values: [
       { value: "rgb", label: "Per channel" },
@@ -185,7 +185,7 @@ export const NOISE_INJECTION_PARAMS: readonly ParamDescriptor[] = [
     // where it can be made periodic in the loop length rather than merely
     // different.
     animatable: false,
-    hint: "Which field. Every seed is as good as every other; the same seed always gives the same noise.",
+    description: "Which field. Every seed is as good as every other; the same seed always gives the same noise.",
     default: 0,
     surprise: { weight: 1 },
   },
@@ -227,6 +227,12 @@ export const NOISE_INJECTION_GPU: GpuEffect = {
 export default defineEffect({
   id: NOISE_INJECTION_ID,
   name: "Noise injection",
+  summary:
+    "Adds seeded noise before the dither, which breaks up banding and gives the result a grainier texture.",
+  description:
+    "White noise draws one independent value per cell, value noise interpolates between those draws so the field has a visible feature size, and gaussian clusters near zero with rare large excursions. Feature size is the cell edge in pixels, so 1 is per-pixel. Adding noise before a quantizing node is the oldest way of hiding banding: the noise pushes pixels across the palette boundary at random, so a flat gradient dithers instead of stepping. The seed is explicit, so the same document always produces the same field. Film grain is the effect to reach for when the grain itself is the look; this one is for feeding the dither.",
+  keywords: ["noise", "grain", "static", "random", "dither noise", "banding", "gaussian", "white noise", "speckle", "texture", "roughen"],
+  concept: "tone-and-colour",
   requirement: "F-PP-06",
   // Preprocess, and here the slot changes what the effect does rather than only
   // where it is legal. Downstream of a quantizer the noise would produce colours

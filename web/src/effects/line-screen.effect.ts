@@ -65,6 +65,12 @@ export const LINE_SCREEN_UNIFORMS: UniformLayout = {
 const descriptor = defineEffect({
   id: "line-screen",
   name: "Line screen",
+  summary:
+    "A rotated grating whose lines thicken as the picture gets darker.",
+  description:
+    "The same idea as a halftone dot but in one dimension: tone is carried by how wide each line is, so dark areas fill in and light areas thin to hairlines. Pitch sets the spacing and angle the direction. Duty cycle is the line width at mid grey: 0.5 is the only value that reproduces tone exactly, and moving it scales the ink demand rather than offsetting it, so paper white stays paper white and only the mid and shadow tones thicken or thin — the same way an under- or over-exposed screen behaves in print. It draws lines but does not move them: nothing in this catalogue displaces lines by the picture's own brightness.",
+  keywords: ["line", "lines", "stripes", "grating", "engraving", "screen", "ruling", "linear halftone", "barcode", "venetian blind"],
+  concept: "halftone-screen",
   requirement: "F-PT-03",
   slot: "dither",
   family: "pattern",
@@ -74,7 +80,7 @@ const descriptor = defineEffect({
       key: LINE_SCREEN_PARAM.pitch,
       label: "Pitch",
       type: "float",
-      hint: "Pixels between line centres.",
+      description: "Pixels between line centres.",
       animatable: true,
       legal: [1, 256],
       default: 6,
@@ -86,7 +92,7 @@ const descriptor = defineEffect({
       key: LINE_SCREEN_PARAM.angle,
       label: "Angle",
       type: "float",
-      hint: "Direction of the lines, in degrees. 0 is horizontal.",
+      description: "Direction of the lines, in degrees. 0 is horizontal.",
       animatable: true,
       legal: [-180, 180],
       default: 45,
@@ -98,7 +104,7 @@ const descriptor = defineEffect({
       type: "float",
       // Scales the ink demand rather than offsetting it, so paper white stays
       // paper white at every setting and only the mid and shadow tones move.
-      hint: "Line width as a fraction of the pitch at 50% tone. 0.5 reproduces tone exactly.",
+      description: "Line width as a fraction of the pitch at 50% tone. 0.5 reproduces tone exactly.",
       animatable: true,
       legal: [0.05, 0.95],
       default: 0.5,
@@ -111,7 +117,7 @@ const descriptor = defineEffect({
       // In pitches, so a modulator ramping 0 -> 1 slides the grating by exactly
       // one line and lands back where it started: the loop closes by
       // construction rather than by the UI knowing that some number is special.
-      hint: "Shifts the grating across the lines, in pitches.",
+      description: "Shifts the grating across the lines, in pitches.",
       animatable: true,
       legal: [-1024, 1024],
       default: 0,
@@ -121,7 +127,7 @@ const descriptor = defineEffect({
       key: LINE_SCREEN_PARAM.spread,
       label: "Spread",
       type: "float",
-      hint: "Screen strength. 0 is plain quantization, 1 reproduces tone exactly.",
+      description: "Screen strength. 0 is plain quantization, 1 reproduces tone exactly.",
       animatable: true,
       legal: [0, 2],
       default: 1,

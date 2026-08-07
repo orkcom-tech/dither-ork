@@ -81,7 +81,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: SCANLINES_PARAM.pitch,
     label: "Pitch",
     type: "float",
-    hint: "Raster lines per lit/dark cycle. 2 is one dark line between each lit one.",
+    description: "Raster lines per lit/dark cycle. 2 is one dark line between each lit one.",
     animatable: true,
     // Below one line the pattern has nothing to land on; above ~64 there is one
     // band across the whole frame and it stops being scanlines.
@@ -104,7 +104,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     // started whatever the pitch is, so a rolling-scanline animation closes its
     // loop by construction rather than by the UI knowing that some number of
     // pixels is special.
-    hint: "Shifts the pattern along the raster, in cycles. 1 is one whole cycle.",
+    description: "Shifts the pattern along the raster, in cycles. 1 is one whole cycle.",
     animatable: true,
     legal: [-1, 1],
     default: 0,
@@ -120,7 +120,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: SCANLINES_PARAM.strength,
     label: "Strength",
     type: "float",
-    hint: "How much light the dark band loses. 1 blacks it out completely.",
+    description: "How much light the dark band loses. 1 blacks it out completely.",
     animatable: true,
     legal: [0, 1],
     default: 0.5,
@@ -138,7 +138,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: SCANLINES_PARAM.thickness,
     label: "Line thickness",
     type: "float",
-    hint: "Share of each cycle the dark band occupies. 0.5 is even lit/dark.",
+    description: "Share of each cycle the dark band occupies. 0.5 is even lit/dark.",
     animatable: true,
     legal: [0, 1],
     default: 0.5,
@@ -157,7 +157,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     type: "float",
     // Also the anti-aliasing control: at 0 the band edge is a step, and a step
     // sampled on a raster at a non-integer pitch beats against the pixel grid.
-    hint: "Width of the band's edge, as a fraction of its own half-width. 0 is a hard bar.",
+    description: "Width of the band's edge, as a fraction of its own half-width. 0 is a hard bar.",
     animatable: true,
     legal: [0, 1],
     default: 0.25,
@@ -207,6 +207,12 @@ export const SCANLINES_PARAM_TYPES: ReadonlyMap<string, ParamDescriptor> = new M
 export default defineEffect({
   id: SCANLINES_ID,
   name: "Scanlines",
+  summary:
+    "Dark horizontal bands across the picture, as a CRT raster leaves between its lines.",
+  description:
+    "Pitch is the number of raster lines per lit/dark cycle, so 2 is one dark line between each lit one. Strength sets how much light the dark band loses and thickness what share of the cycle it occupies — separate controls, because a thin hard line at half depth and a fat soft line at half depth are different pictures and one slider cannot reach both. Phase slides the pattern along the raster and is what to animate for a rolling bar. There is no seed: the pattern is a function of the row index and nothing about it is random.",
+  keywords: ["scanlines", "scanline", "crt", "tv", "raster", "retro", "monitor", "lines", "video", "arcade", "phosphor", "vhs"],
+  concept: "glitch",
   requirement: "F-GL-08",
   slot: "postprocess",
   family: "glitch",

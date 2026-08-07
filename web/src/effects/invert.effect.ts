@@ -56,7 +56,7 @@ export const INVERT_PARAMS: readonly ParamDescriptor[] = [
     key: INVERT_PARAM.amount,
     label: "Amount",
     type: "float",
-    hint: "How far towards the negative. Half way is flat grey; the approach to it is the solarized look.",
+    description: "How far towards the negative. Half way is flat grey; the approach to it is the solarized look.",
     animatable: true,
     legal: [0, 1],
     // Full. An invert node that does not invert is a node that does nothing,
@@ -75,7 +75,7 @@ export const INVERT_PARAMS: readonly ParamDescriptor[] = [
     key: INVERT_PARAM.mode,
     label: "Mode",
     type: "enum",
-    hint: "Complement every channel, or flip only the OKLab lightness and keep hue and chroma.",
+    description: "Complement every channel, or flip only the OKLab lightness and keep hue and chroma.",
     animatable: false,
     values: [
       { value: "rgb", label: "Per channel" },
@@ -130,6 +130,12 @@ export const INVERT_GPU: GpuEffect = {
 export default defineEffect({
   id: "invert",
   name: "Invert",
+  summary:
+    "Turns the picture into its negative, with a partial amount that passes through the solarized look.",
+  description:
+    "The complement is taken on the sRGB-encoded value rather than on linear light, because complementing linear light sends visual mid grey to 90% bright and produces a negative with no shadows in it. Amount is not merely an on/off: halfway is flat grey, and the approach to it is the solarization photographers get by re-exposing a print. Lightness mode flips only OKLab lightness and leaves hue and chroma alone, which inverts the tonality without turning skin green.",
+  keywords: ["invert", "negative", "inverse", "flip", "complement", "solarize", "reverse", "opposite"],
+  concept: "tone-and-colour",
   requirement: "F-SP-08",
   // Inverting after a quantizer is a tempting place to put this — and it is
   // exactly where it would rewrite every pixel's colour while the index map

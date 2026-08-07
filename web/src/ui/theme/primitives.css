@@ -1,0 +1,55 @@
+/*
+ * The primitives every panel shares: a button, a micro-label, a scroll area.
+ *
+ * `.ui-button` is a *label* — sans, uppercase, tracked — and its hover edge is
+ * neutral. Green appears on it only under `aria-pressed`, which is a state the
+ * document is actually in.
+ */
+
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--fg-dim);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ui-button:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--rule-hover);
+}
+
+.ui-button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.ui-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ui-label {
+  color: var(--fg-dim);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.ui-scroll {
+  overflow: auto;
+  scrollbar-color: var(--rule-strong) transparent;
+  scrollbar-width: thin;
+}

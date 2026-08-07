@@ -54,7 +54,8 @@ const STRENGTH: ParamDescriptor = {
   label: "Diffusion strength",
   type: "float",
   animatable: true,
-  hint: "How much of each pixel's quantization error is passed on. 0 is plain nearest-colour quantization.",
+  description:
+    "How much of the difference between a pixel and the palette colour it became is handed to its neighbours. At 1 the picture keeps its overall tone and gains grain; at 0 nothing is handed on and the result is flat nearest-colour banding with no texture at all.",
   legal: [0, 1],
   default: 1,
   step: 0.01,
@@ -76,7 +77,8 @@ const SERPENTINE: ParamDescriptor = {
   label: "Serpentine scan",
   type: "bool",
   animatable: false,
-  hint: "Alternate the scan direction each row, which removes the directional worming of left-to-right-only scanning.",
+  description:
+    "Alternates the direction of travel every row, so error stops drifting consistently to one side. Off, the leftover error walks the same way on every line and the grain organises itself into diagonal worms.",
   default: true,
   surprise: {
     // Off is a real look — it is what most period implementations did — but it
@@ -93,7 +95,8 @@ const JITTER: ParamDescriptor = {
   label: "Threshold jitter",
   type: "float",
   animatable: true,
-  hint: "Seeded noise on the value the palette match is taken from. Breaks up the kernel's regular texture.",
+  description:
+    "Adds seeded noise to the value each palette match is taken from, which scatters the kernel's regular texture into something closer to film grain. Past about a quarter every kernel converges on the same look, which defeats the point of choosing one.",
   legal: [0, 1],
   // Off. Jitter is a departure from the published kernel, and a kernel should
   // render as itself unless asked otherwise — the goldens pin the zero case.
@@ -114,7 +117,8 @@ const OVERSHOOT_LIMIT: ParamDescriptor = {
   label: "Overshoot clamp",
   type: "float",
   animatable: true,
-  hint: "How far past the palette's range an accumulated value may travel. 0 kills the bright/dark drag out of saturated regions.",
+  description:
+    "Caps how far a running total may travel beyond the palette's own range. A large flat area of a colour the palette cannot reach builds up error with nowhere to spend it, and it leaks out of the region as a bright or dark drag; at 0 that drag is gone and the region ends cleanly, at the cost of the tone being slightly wrong.",
   legal: [0, OVERSHOOT_CEILING],
   // The core's own default: one full unit of headroom.
   default: 1,
@@ -134,7 +138,8 @@ const CHANNELS: ParamDescriptor = {
   label: "Error channels",
   type: "enum",
   animatable: false,
-  hint: "Diffuse three independent error channels, or one luminance term.",
+  description:
+    "Per channel carries red, green and blue error separately, which lets a small palette mix colours it does not contain — this is what people mean by a colour dither. Luma carries one brightness term, so flats stay clean and gradients band.",
   values: [
     { value: "per-channel", label: "Per channel" },
     { value: "luma", label: "Luma" },
@@ -181,9 +186,39 @@ export interface DiffusionEffectSpec {
   readonly id: string;
   readonly name: string;
   readonly requirement: string;
+  /**
+   * F-UI-15's three fields, per kernel.
+   *
+   * They are per-kernel rather than shared because what the fifteen have in
+   * common is already written once in `EFFECT_CONCEPTS["error-diffusion"]`, and
+   * what is left is exactly the thing a person choosing between them needs: how
+   * this kernel's grain differs from its neighbours'. A shared paragraph here
+   * would tell a reader nothing at the moment they are picking.
+   */
+  readonly summary: string;
+  readonly description: string;
+  readonly keywords: readonly string[];
   /** False only for Riemersma. */
   readonly serpentine?: boolean;
 }
+
+/**
+ * Search terms every diffusion kernel answers to, on top of its own.
+ *
+ * A user hunting for this family types "dither", "diffusion" or "grain" long
+ * before they type "Stucki", and the spelling of a surname is exactly what they
+ * will not have. Merged into each kernel's own keywords by the factory below so
+ * that no kernel can forget them.
+ */
+const DIFFUSION_KEYWORDS: readonly string[] = [
+  "dither",
+  "dithering",
+  "error diffusion",
+  "diffusion",
+  "grain",
+  "quantize",
+  "halftone alternative",
+];
 
 /**
  * Build the descriptor for one diffusion kernel.
@@ -201,6 +236,12 @@ export function errorDiffusionEffect(spec: DiffusionEffectSpec): EffectDescripto
   return {
     id: spec.id,
     name: spec.name,
+    summary: spec.summary,
+    description: spec.description,
+    // Deduplicated because the kernel's own list may legitimately repeat a
+    // shared term, and the validator rejects a keyword declared twice.
+    keywords: [...new Set([...spec.keywords, ...DIFFUSION_KEYWORDS])],
+    concept: "error-diffusion",
     requirement: spec.requirement,
     // Error diffusion quantizes, so it is the primary node of a stack.
     slot: "dither",

@@ -97,7 +97,7 @@ const INTERLACE_TEAR_PARAMS: readonly ParamDescriptor[] = [
     // consecutive frames are different pictures rather than stages of one
     // movement. `phase` is the axis that animates the comb.
     animatable: false,
-    hint: "Rows per field. 1 is a true interlace comb; larger values tear in blocks.",
+    description: "Rows per field. 1 is a true interlace comb; larger values tear in blocks.",
     legal: [1, MAX_FIELD_HEIGHT],
     // 1: the effect's own name. A default that needed explaining would be the
     // wrong default.
@@ -116,7 +116,7 @@ const INTERLACE_TEAR_PARAMS: readonly ParamDescriptor[] = [
     label: "Tear offset",
     type: "float",
     animatable: true,
-    hint: "Horizontal shift applied to alternating fields, in pixels. Fields move in opposite directions.",
+    description: "Horizontal shift applied to alternating fields, in pixels. Fields move in opposite directions.",
     legal: [-MAX_OFFSET, MAX_OFFSET],
     default: 6,
     surprise: {
@@ -135,7 +135,7 @@ const INTERLACE_TEAR_PARAMS: readonly ParamDescriptor[] = [
     // Field pairs rather than rows: a shift of two field heights is the
     // identity, so a modulator that ramps 0 -> 1 lands back on frame 0 without
     // the UI having to know that some row count is special.
-    hint: "Slides which rows belong to which field, in field pairs. A 0→1 ramp rolls the comb once.",
+    description: "Slides which rows belong to which field, in field pairs. A 0→1 ramp rolls the comb once.",
     legal: [-1, 1],
     default: 0,
     surprise: {
@@ -151,7 +151,7 @@ const INTERLACE_TEAR_PARAMS: readonly ParamDescriptor[] = [
     label: "Wrap at the edge",
     type: "bool",
     animatable: false,
-    hint: "On, a shifted field wraps around the frame; off, it smears its edge column.",
+    description: "On, a shifted field wraps around the frame; off, it smears its edge column.",
     // On. A tear caused by a timing shift wraps — the line is still the same
     // length and its content has only moved within it — and that is the tear
     // this effect is imitating.
@@ -168,6 +168,12 @@ const INTERLACE_TEAR_PARAMS: readonly ParamDescriptor[] = [
 export default defineEffect({
   id: "interlace-tear",
   name: "Interlace tear",
+  summary:
+    "Cuts the frame into horizontal fields and shifts alternate ones in opposite directions.",
+  description:
+    "One row per field gives a true interlace comb; taller fields tear the picture into blocks the way a dropped frame does. The shift is opposite rather than one-sided on purpose — a one-sided shift moves the picture as well as tearing it, and moving the picture in slices is already row displacement. Phase is measured in field pairs, so a modulator ramping 0 to 1 rolls the comb down the image exactly once and closes the loop by construction. There is no seed, because which field a row lands in is a function of its y coordinate.",
+  keywords: ["interlace", "tear", "comb", "field", "fields", "vhs", "video", "dropped frame", "tv", "zigzag", "weave", "shear"],
+  concept: "glitch",
   requirement: "F-GL-16",
   slot: "postprocess",
   family: "glitch",

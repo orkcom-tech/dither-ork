@@ -86,7 +86,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     // All three are measured in OKLab and normalised to [0, 1], so the
     // threshold below means the same thing whichever is chosen. Luminance in
     // linear light would put a threshold of 0.5 well into the highlights.
-    hint: "What the pixels are ordered by, and what the threshold measures.",
+    description: "What the pixels are ordered by, and what the threshold measures.",
     animatable: false,
     values: [
       { value: "luma", label: "Lightness" },
@@ -109,7 +109,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: PIXEL_SORT_PARAM.direction,
     label: "Direction",
     type: "enum",
-    hint: "Which axis the spans run along, and which end the low keys collect at.",
+    description: "Which axis the spans run along, and which end the low keys collect at.",
     animatable: false,
     // Order is load-bearing: the shader reads the ordinal and uses bit 1 for
     // the axis and bit 0 for the sort order. Inserting a value in the middle
@@ -135,7 +135,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: PIXEL_SORT_PARAM.threshold,
     label: "Threshold",
     type: "float",
-    hint: "Pixels at or above this on the sort key form spans. 0 sorts everything, 1 sorts nothing.",
+    description: "Pixels at or above this on the sort key form spans. 0 sorts everything, 1 sorts nothing.",
     animatable: true,
     legal: [0, 1],
     default: 0.55,
@@ -155,7 +155,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     type: "int",
     // Also the budget: pass 3 compares each pixel against every pixel of its
     // own span, so this multiplies the pixel count directly.
-    hint: "Longest run that sorts as one block, in pixels. Longer runs are chopped into blocks of this length.",
+    description: "Longest run that sorts as one block, in pixels. Longer runs are chopped into blocks of this length.",
     animatable: true,
     legal: [2, 512],
     default: 64,
@@ -174,7 +174,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     // This is what the seed drives. At 0 the sort is exactly the published
     // algorithm and the seed does nothing — stated rather than hidden, because
     // a seed control that never moves anything is worse than no seed at all.
-    hint: "Seeded per-line variation of the threshold. 0 is off, and then the seed has no effect.",
+    description: "Seeded per-line variation of the threshold. 0 is off, and then the seed has no effect.",
     animatable: true,
     legal: [0, 1],
     default: 0,
@@ -189,7 +189,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: PIXEL_SORT_PARAM.seed,
     label: "Seed",
     type: "seed",
-    hint: "Reroll the per-line threshold jitter.",
+    description: "Reroll the per-line threshold jitter.",
     animatable: false,
     default: 0,
     surprise: { weight: 1 },
@@ -199,6 +199,12 @@ const PARAMS: readonly ParamDescriptor[] = [
 const descriptor: EffectDescriptor = {
   id: "pixel-sort",
   name: "Pixel sort",
+  summary:
+    "Sorts runs of pixels along a row or column, smearing the picture into clean streaks.",
+  description:
+    "A span is a run of consecutive pixels whose sort key clears the threshold, and within each span the pixels are reordered so the low keys collect at one end. Because a run has to be walked to be found, this is the one glitch effect that is not a per-pixel function of its input: it costs three passes, and the span limit is both a look control and the budget, since the work is proportional to it. Threshold decides how much of the picture is caught — at 0 everything sorts, at 1 nothing does. Sorting moves pixels, so an index map from an upstream dither no longer describes the image afterwards.",
+  keywords: ["pixel sort", "sort", "sorting", "streak", "smear", "drip", "databend", "stretch", "melt", "run", "glitch art"],
+  concept: "glitch",
   requirement: "F-GL-01",
   slot: "postprocess",
   family: "glitch",

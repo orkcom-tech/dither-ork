@@ -83,6 +83,12 @@ export const CROSS_HATCH_UNIFORMS: UniformLayout = {
 const descriptor = defineEffect({
   id: "cross-hatch",
   name: "Cross-hatch",
+  summary:
+    "Two to four line screens overlaid at different angles, like pen hatching.",
+  description:
+    "Each layer is the same grating the line screen draws, at its own angle and pitch, and the ink is their union — a pixel is inked if any layer inks it. Every layer is therefore present at every tone, running from hairlines in the highlights to overlapping bands in the shadows; the combined screen is renormalised for that overlap, so tone still reproduces exactly. The angles are spread across a half circle rather than stepped by a fixed amount because the obvious steps — 90° at three layers, 60° at four — put two of them back on the same direction, and the pitch ratio defaults off 1 because equal pitches let three or more layers close on a lattice, where light tones print several percent too dark.",
+  keywords: ["hatch", "hatching", "crosshatch", "cross hatch", "engraving", "etching", "pen", "ink", "drawing", "sketch", "woodcut"],
+  concept: "halftone-screen",
   requirement: "F-PT-04",
   slot: "dither",
   family: "pattern",
@@ -97,7 +103,7 @@ const descriptor = defineEffect({
       // three or four rely on the layer pitches not standing in a simple ratio,
       // which is what the pitch ratio's default is for. Measured: at three
       // layers with a pitch ratio of exactly 1, a 15% tone prints 6% dark.
-      hint: "Overlaid gratings. At three or more, a pitch ratio of exactly 1 prints light tones dark.",
+      description: "Overlaid gratings. At three or more, a pitch ratio of exactly 1 prints light tones dark.",
       // Not animatable: a modulator crossing an integer boundary is a cut, not
       // a modulation.
       animatable: false,
@@ -109,7 +115,7 @@ const descriptor = defineEffect({
       key: CROSS_HATCH_PARAM.pitch,
       label: "Pitch",
       type: "float",
-      hint: "Pixels between line centres in the first layer.",
+      description: "Pixels between line centres in the first layer.",
       animatable: true,
       legal: [1, 256],
       default: 8,
@@ -120,7 +126,7 @@ const descriptor = defineEffect({
       key: CROSS_HATCH_PARAM.angle,
       label: "Base angle",
       type: "float",
-      hint: "Direction of the first layer, in degrees. 0 is horizontal.",
+      description: "Direction of the first layer, in degrees. 0 is horizontal.",
       animatable: true,
       legal: [-180, 180],
       default: 45,
@@ -134,7 +140,7 @@ const descriptor = defineEffect({
       // across the half-circle for any count and no two layers can land on the
       // same direction. That is a correctness property, not a preference — see
       // the shader header.
-      hint: "Total angle the layers are spread over. 180 spaces them evenly and never repeats a direction.",
+      description: "Total angle the layers are spread over. 180 spaces them evenly and never repeats a direction.",
       animatable: true,
       legal: [15, 180],
       default: 180,
@@ -144,7 +150,7 @@ const descriptor = defineEffect({
       key: CROSS_HATCH_PARAM.pitchRatio,
       label: "Pitch ratio",
       type: "float",
-      hint: "Each layer's pitch relative to the one before it. Off 1, so three or more layers cannot lock in phase.",
+      description: "Each layer's pitch relative to the one before it. Off 1, so three or more layers cannot lock in phase.",
       animatable: true,
       legal: [0.5, 2],
       // Not 1, and that is the whole job of this control. Equal pitches let
@@ -163,7 +169,7 @@ const descriptor = defineEffect({
       key: CROSS_HATCH_PARAM.duty,
       label: "Duty cycle",
       type: "float",
-      hint: "Line width as a fraction of the pitch at 50% tone. 0.5 reproduces tone exactly.",
+      description: "Line width as a fraction of the pitch at 50% tone. 0.5 reproduces tone exactly.",
       animatable: true,
       legal: [0.05, 0.95],
       default: 0.5,
@@ -173,7 +179,7 @@ const descriptor = defineEffect({
       key: CROSS_HATCH_PARAM.spread,
       label: "Spread",
       type: "float",
-      hint: "Screen strength. 0 is plain quantization, 1 reproduces tone exactly.",
+      description: "Screen strength. 0 is plain quantization, 1 reproduces tone exactly.",
       animatable: true,
       legal: [0, 2],
       default: 1,

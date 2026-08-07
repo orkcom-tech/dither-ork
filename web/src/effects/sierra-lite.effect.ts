@@ -15,5 +15,10 @@ import { errorDiffusionEffect } from "./error-diffusion";
 export default errorDiffusionEffect({
   id: "sierra-lite",
   name: "Sierra Lite",
+  summary:
+    "The cheapest kernel here — three taps over two rows, close to Floyd–Steinberg's grain at half the work.",
+  description:
+    "Divisor four, three taps. It gets remarkably close to Floyd–Steinberg's texture for half the taps, which makes it the one to reach for on very large images or when several diffusion nodes are stacked. The trade is slightly more directional structure.",
+  keywords: ["sierra", "sierra lite", "fast", "cheap", "three tap", "light"],
   requirement: "F-ED-08",
 });

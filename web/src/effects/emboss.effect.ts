@@ -61,7 +61,7 @@ const ANGLE: ParamDescriptor = {
   // Turns, not degrees, for the same reason the ordered dithers' tile rotation
   // is: a modulator ramping 0 -> 1 lands back where it started, so an animated
   // sweep loops without the UI having to know that 360 is special.
-  hint: "Direction the light comes from, in turns counter-clockwise from the right.",
+  description: "Direction the light comes from, in turns counter-clockwise from the right.",
   legal: [0, 1],
   // Upper left, which is where every engraving convention puts the light.
   default: 0.375,
@@ -82,7 +82,7 @@ const DEPTH: ParamDescriptor = {
   label: "Depth",
   type: "float",
   animatable: true,
-  hint: "Gain on the lightness difference between the two taps. High values clip to solid black and white.",
+  description: "Gain on the lightness difference between the two taps. High values clip to solid black and white.",
   legal: [0, 8],
   default: 1.5,
   step: 0.05,
@@ -100,6 +100,12 @@ const DEPTH: ParamDescriptor = {
 export default defineEffect({
   id: "emboss",
   name: "Emboss",
+  summary:
+    "Renders the picture as relief lit from an angle — bright where brightness rises towards the light, dark where it falls away.",
+  description:
+    "A directional derivative of lightness drawn as a grey plate: flat areas go mid grey and only changes in brightness show at all. Colour is discarded, which is what makes it an emboss rather than a directional sharpen. The tap distance is fixed at one pixel rather than exposed, since a control that moved it would be a second radius with nothing to distinguish it from a blur. Before a dither the grey relief dithers into an engraved plate; after one it finds the dither's texture instead of the picture's relief.",
+  keywords: ["emboss", "relief", "bevel", "engrave", "engraving", "stamp", "carved", "metal", "plate", "3d"],
+  concept: "neighbourhood-filter",
   requirement: "F-SP-05",
   slot: "preprocess",
   family: "special",

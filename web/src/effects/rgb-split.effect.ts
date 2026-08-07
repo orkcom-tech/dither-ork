@@ -104,7 +104,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: RGB_SPLIT_PARAM.redX,
     label: "Red X",
     type: "float",
-    hint: "Horizontal travel of the red channel, as a fraction of image width.",
+    description: "Horizontal travel of the red channel, as a fraction of image width.",
     animatable: true,
     legal: TRAVEL,
     // A visible split at the default: an effect that does nothing until a
@@ -116,7 +116,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: RGB_SPLIT_PARAM.redY,
     label: "Red Y",
     type: "float",
-    hint: "Vertical travel of the red channel, as a fraction of image height.",
+    description: "Vertical travel of the red channel, as a fraction of image height.",
     animatable: true,
     legal: TRAVEL,
     default: 0,
@@ -126,7 +126,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: RGB_SPLIT_PARAM.greenX,
     label: "Green X",
     type: "float",
-    hint: "Horizontal travel of the green channel, as a fraction of image width.",
+    description: "Horizontal travel of the green channel, as a fraction of image width.",
     animatable: true,
     legal: TRAVEL,
     // Green is the channel the eye reads detail from, so it stays put by
@@ -138,7 +138,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: RGB_SPLIT_PARAM.greenY,
     label: "Green Y",
     type: "float",
-    hint: "Vertical travel of the green channel, as a fraction of image height.",
+    description: "Vertical travel of the green channel, as a fraction of image height.",
     animatable: true,
     legal: TRAVEL,
     default: 0,
@@ -148,7 +148,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: RGB_SPLIT_PARAM.blueX,
     label: "Blue X",
     type: "float",
-    hint: "Horizontal travel of the blue channel, as a fraction of image width.",
+    description: "Horizontal travel of the blue channel, as a fraction of image width.",
     animatable: true,
     legal: TRAVEL,
     // Opposite the red default, which is what makes the untouched effect read
@@ -160,7 +160,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: RGB_SPLIT_PARAM.blueY,
     label: "Blue Y",
     type: "float",
-    hint: "Vertical travel of the blue channel, as a fraction of image height.",
+    description: "Vertical travel of the blue channel, as a fraction of image height.",
     animatable: true,
     legal: TRAVEL,
     default: 0,
@@ -172,7 +172,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     type: "float",
     // This is what the seed drives; without it the effect is fully determined
     // by the six offsets and a seed control would move nothing.
-    hint: "Seeded per-scanline horizontal wobble, independent per channel, as a fraction of width. 0 is off, and then the seed has no effect.",
+    description: "Seeded per-scanline horizontal wobble, independent per channel, as a fraction of width. 0 is off, and then the seed has no effect.",
     animatable: true,
     legal: [0, 0.25],
     default: 0,
@@ -189,7 +189,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: RGB_SPLIT_PARAM.edge,
     label: "Edge",
     type: "enum",
-    hint: "What a channel shows where it has been shifted off the frame.",
+    description: "What a channel shows where it has been shifted off the frame.",
     animatable: false,
     values: [...EDGE_VALUES],
     // Holding the edge is the only one of the three that does not invent
@@ -208,7 +208,7 @@ const PARAMS: readonly ParamDescriptor[] = [
     key: RGB_SPLIT_PARAM.seed,
     label: "Seed",
     type: "seed",
-    hint: "Reroll the line wobble. No effect while wobble is 0.",
+    description: "Reroll the line wobble. No effect while wobble is 0.",
     animatable: false,
     default: 0,
     surprise: { weight: 0.8 },
@@ -218,6 +218,12 @@ const PARAMS: readonly ParamDescriptor[] = [
 const descriptor: EffectDescriptor = {
   id: "rgb-split",
   name: "RGB split",
+  summary:
+    "Moves the red, green and blue records apart, so edges gain coloured fringes.",
+  description:
+    "Each channel gets its own translation, which is the crude and deliberate version of what a lens does by accident. Chromatic aberration is the optical model, where the displacement grows away from a centre; this one is six numbers and no physics, so the fringe is even across the whole frame and can point any direction you like. Offsets are fractions of the image so preview and export agree, and the shader interpolates because a fractional offset is almost never a whole texel. Line wobble is the only stochastic part, so the seed does nothing until you raise it.",
+  keywords: ["rgb split", "channel split", "fringe", "3d", "anaglyph", "red blue", "colour shift", "color shift", "offset", "misregistration", "chromatic"],
+  concept: "glitch",
   requirement: "F-GL-04",
   slot: "postprocess",
   family: "glitch",

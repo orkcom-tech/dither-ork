@@ -112,7 +112,7 @@ const CHANNEL_SWAP_PARAMS: readonly ParamDescriptor[] = [
     label: "Red from",
     type: "enum",
     animatable: false,
-    hint: "Input channel the red output is read from.",
+    description: "Input channel the red output is read from.",
     values: SOURCE_VALUES,
     default: "r",
     surprise: {
@@ -130,7 +130,7 @@ const CHANNEL_SWAP_PARAMS: readonly ParamDescriptor[] = [
     label: "Green from",
     type: "enum",
     animatable: false,
-    hint: "Input channel the green output is read from.",
+    description: "Input channel the green output is read from.",
     values: SOURCE_VALUES,
     default: "g",
     surprise: {
@@ -148,7 +148,7 @@ const CHANNEL_SWAP_PARAMS: readonly ParamDescriptor[] = [
     label: "Blue from",
     type: "enum",
     animatable: false,
-    hint: "Input channel the blue output is read from.",
+    description: "Input channel the blue output is read from.",
     values: SOURCE_VALUES,
     default: "b",
     surprise: {
@@ -166,7 +166,7 @@ const CHANNEL_SWAP_PARAMS: readonly ParamDescriptor[] = [
     label: "Alpha from",
     type: "enum",
     animatable: false,
-    hint: "Input channel the alpha output is read from. Leave on Alpha to keep coverage intact.",
+    description: "Input channel the alpha output is read from. Leave on Alpha to keep coverage intact.",
     values: SOURCE_VALUES,
     default: "a",
     surprise: {
@@ -186,6 +186,12 @@ const CHANNEL_SWAP_PARAMS: readonly ParamDescriptor[] = [
 export default defineEffect({
   id: "channel-swap",
   name: "Channel swap",
+  summary:
+    "Rewires which input channel each output channel reads, for arbitrary colour permutations.",
+  description:
+    "Four independent choices, one per output channel, which covers all twenty-four permutations and also the non-bijective maps that duplicate a channel — setting red, green and blue all to read red collapses the image onto its red record as a greyscale. Leave alpha on Alpha to keep coverage intact. There is no seed and nothing here is random: this is a rewiring, and a seed control would move nothing.",
+  keywords: ["channel swap", "channels", "swap", "rgb", "bgr", "permute", "colour swap", "color swap", "rewire", "alpha", "false colour", "false color"],
+  concept: "glitch",
   requirement: "F-GL-14",
   // Glitch is applied to the picture, so it sits after the dither. Nothing here
   // forbids it earlier in principle, but a channel swap upstream of a quantizer

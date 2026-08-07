@@ -30,6 +30,10 @@ import { PATTERN_OFFSET_X, PATTERN_OFFSET_Y, PATTERN_ROTATION } from "./temporal
 export const PATTERN_EFFECT: EffectDescriptor = {
   id: "test-pattern",
   name: "Test pattern",
+  summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+  description:
+    "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+  keywords: ["fixture", "test"],
   requirement: "F-OD-01",
   slot: "dither",
   family: "ordered",
@@ -41,6 +45,8 @@ export const PATTERN_EFFECT: EffectDescriptor = {
     {
       key: PATTERN_OFFSET_X,
       label: "Offset X",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "float",
       animatable: true,
       legal: [-1024, 1024],
@@ -50,6 +56,8 @@ export const PATTERN_EFFECT: EffectDescriptor = {
     {
       key: PATTERN_OFFSET_Y,
       label: "Offset Y",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "float",
       animatable: true,
       legal: [-1024, 1024],
@@ -59,6 +67,8 @@ export const PATTERN_EFFECT: EffectDescriptor = {
     {
       key: PATTERN_ROTATION,
       label: "Tile rotation",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "float",
       animatable: true,
       legal: [-1, 1],
@@ -68,6 +78,8 @@ export const PATTERN_EFFECT: EffectDescriptor = {
     {
       key: "spread",
       label: "Spread",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "float",
       animatable: true,
       legal: [0, 2],
@@ -77,6 +89,8 @@ export const PATTERN_EFFECT: EffectDescriptor = {
     {
       key: "cells",
       label: "Cells",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "int",
       animatable: true,
       legal: [1, 16],
@@ -86,6 +100,8 @@ export const PATTERN_EFFECT: EffectDescriptor = {
     {
       key: "shape",
       label: "Shape",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "enum",
       animatable: false,
       values: [
@@ -102,6 +118,10 @@ export const PATTERN_EFFECT: EffectDescriptor = {
 export const SEEDED_EFFECT: EffectDescriptor = {
   id: "test-seeded",
   name: "Test seeded",
+  summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+  description:
+    "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+  keywords: ["fixture", "test"],
   requirement: "F-SP-01",
   slot: "preprocess",
   family: "special",
@@ -113,6 +133,8 @@ export const SEEDED_EFFECT: EffectDescriptor = {
     {
       key: "seed",
       label: "Seed",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "seed",
       animatable: false,
       default: 1234,
@@ -121,6 +143,8 @@ export const SEEDED_EFFECT: EffectDescriptor = {
     {
       key: "second",
       label: "Second seed",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "seed",
       animatable: false,
       default: 99,
@@ -129,6 +153,8 @@ export const SEEDED_EFFECT: EffectDescriptor = {
     {
       key: "amount",
       label: "Amount",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "float",
       animatable: true,
       legal: [0, 1],
@@ -148,6 +174,10 @@ export const SEEDED_EFFECT: EffectDescriptor = {
 export const DIFFUSION_EFFECT: EffectDescriptor = {
   id: "test-diffusion",
   name: "Test diffusion",
+  summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+  description:
+    "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+  keywords: ["fixture", "test"],
   requirement: "F-ED-01",
   slot: "dither",
   family: "error-diffusion",
@@ -159,6 +189,8 @@ export const DIFFUSION_EFFECT: EffectDescriptor = {
     {
       key: "strength",
       label: "Diffusion strength",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "float",
       animatable: true,
       legal: [0, 1],
@@ -168,6 +200,8 @@ export const DIFFUSION_EFFECT: EffectDescriptor = {
     {
       key: "serpentine",
       label: "Serpentine",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "bool",
       animatable: false,
       default: true,
@@ -180,6 +214,10 @@ export const DIFFUSION_EFFECT: EffectDescriptor = {
 export const PLAIN_EFFECT: EffectDescriptor = {
   id: "test-plain",
   name: "Test plain",
+  summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+  description:
+    "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+  keywords: ["fixture", "test"],
   requirement: "F-PP-02",
   slot: "preprocess",
   family: "preprocess",
@@ -191,6 +229,8 @@ export const PLAIN_EFFECT: EffectDescriptor = {
     {
       key: "gain",
       label: "Gain",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
       type: "float",
       animatable: true,
       legal: [0, 4],

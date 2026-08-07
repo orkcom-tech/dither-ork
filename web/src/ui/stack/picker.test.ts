@@ -9,6 +9,10 @@ import { buildPicker, firstAvailable, flatten, stepHighlight } from "./picker";
 const TONE = defineEffect({
   id: "test-tone",
   name: "Test Tone",
+  summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+  description:
+    "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+  keywords: ["fixture", "test"],
   requirement: "F-PP-02",
   slot: "preprocess",
   family: "preprocess",
@@ -22,6 +26,10 @@ const TONE = defineEffect({
 const QUANTIZER = defineEffect({
   id: "test-quantizer",
   name: "Test Quantizer",
+  summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+  description:
+    "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+  keywords: ["fixture", "test"],
   requirement: "F-OD-01",
   slot: "dither",
   family: "ordered",
@@ -35,6 +43,10 @@ const QUANTIZER = defineEffect({
 const DIFFUSION = defineEffect({
   id: "test-diffusion",
   name: "Test Diffusion",
+  summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+  description:
+    "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+  keywords: ["fixture", "test"],
   requirement: "F-ED-01",
   slot: "dither",
   family: "error-diffusion",
@@ -48,6 +60,10 @@ const DIFFUSION = defineEffect({
 const OUTLINE = defineEffect({
   id: "test-outline",
   name: "Test Outline",
+  summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+  description:
+    "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+  keywords: ["fixture", "test"],
   requirement: "F-SP-10",
   slot: "postprocess",
   family: "special",
@@ -63,6 +79,10 @@ const OUTLINE = defineEffect({
 const GRAIN = defineEffect({
   id: "test-zgrain",
   name: "Test Zgrain",
+  summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+  description:
+    "Not one of the sixty-seven. It exists so this test can exercise one rule in isolation, which a real descriptor cannot do without dragging its whole parameter set along.",
+  keywords: ["fixture", "test"],
   requirement: "F-SP-01",
   slot: "postprocess",
   family: "special",

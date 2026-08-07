@@ -28,6 +28,22 @@ export const THEME_MODES: readonly ThemeMode[] = ["system", "dark", "light"];
 
 const STORAGE_KEY = "dither-ork.theme-mode";
 
+/**
+ * What the application opens as before anybody has chosen.
+ *
+ * `dark`, not `system`. That is the committed default and the reason is in
+ * `src/ui/theme/tokens.css`: a light ground around an image raises its apparent
+ * contrast and cools its midtones, so a tone decision made against a light
+ * chrome does not survive being looked at anywhere else. Following the OS would
+ * mean the same document is judged against two different grounds depending on
+ * which machine it is opened on, which is exactly the thing a colour tool must
+ * not do.
+ *
+ * Light is still one of the three modes — F-UI-09 requires it — and a user who
+ * picks it keeps it. This is the starting point, not a restriction.
+ */
+export const DEFAULT_MODE: ThemeMode = "dark";
+
 export function resolveTheme(mode: ThemeMode, prefersDark: boolean): Theme {
   if (mode === "system") return prefersDark ? "dark" : "light";
   return mode;
@@ -58,15 +74,15 @@ export function labelForMode(mode: ThemeMode, resolved: Theme): string {
 export function readStoredMode(): ThemeMode {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw === null) return "system";
+    if (raw === null) return DEFAULT_MODE;
     if (isThemeMode(raw)) return raw;
     log.warn("stored theme mode is not one this build knows", { value: raw });
-    return "system";
+    return DEFAULT_MODE;
   } catch (error) {
     log.warn("theme preference cannot be read from this browser's storage", {
       error: String(error),
     });
-    return "system";
+    return DEFAULT_MODE;
   }
 }
 

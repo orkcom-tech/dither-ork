@@ -16,5 +16,10 @@ import { errorDiffusionEffect } from "./error-diffusion";
 export default errorDiffusionEffect({
   id: "stevenson-arce",
   name: "Stevenson-Arce",
+  summary:
+    "Twelve taps on a hexagonal lattice, so the texture has no horizontal or vertical grain at all.",
+  description:
+    "Designed for a hex-addressed display, and the lattice is the reason to choose it: because no taps line up on the row or column axes, the result carries none of the rectilinear structure the other kernels leave behind. It reaches three rows below the current one, so it is among the widest and most expensive here.",
+  keywords: ["stevenson", "arce", "hex", "hexagonal", "lattice", "wide", "isotropic"],
   requirement: "F-ED-10",
 });

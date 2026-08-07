@@ -94,7 +94,7 @@ export const LIGHT_LEAK_PARAMS: readonly ParamDescriptor[] = [
     key: LIGHT_LEAK_PARAM.positionX,
     label: "Position X",
     type: "float",
-    hint: "Where the leak comes from, in frame widths. 0 is the left edge, 1 the right.",
+    description: "Where the leak comes from, in frame widths. 0 is the left edge, 1 the right.",
     animatable: true,
     // Past the edges on purpose: a leak enters through a gap in the body, so its
     // source is usually just outside the picture and only its tail is in frame.
@@ -111,7 +111,7 @@ export const LIGHT_LEAK_PARAMS: readonly ParamDescriptor[] = [
     key: LIGHT_LEAK_PARAM.positionY,
     label: "Position Y",
     type: "float",
-    hint: "Where the leak comes from, in frame heights. 0 is the top edge, 1 the bottom.",
+    description: "Where the leak comes from, in frame heights. 0 is the top edge, 1 the bottom.",
     animatable: true,
     legal: [-1, 2],
     default: 0.1,
@@ -126,7 +126,7 @@ export const LIGHT_LEAK_PARAMS: readonly ParamDescriptor[] = [
     key: LIGHT_LEAK_PARAM.radius,
     label: "Radius",
     type: "float",
-    hint: "Size of the fully-lit core, in half-diagonals. 1 spans the whole frame.",
+    description: "Size of the fully-lit core, in half-diagonals. 1 spans the whole frame.",
     animatable: true,
     legal: [0, 2],
     default: 0.3,
@@ -144,7 +144,7 @@ export const LIGHT_LEAK_PARAMS: readonly ParamDescriptor[] = [
     key: LIGHT_LEAK_PARAM.softness,
     label: "Softness",
     type: "float",
-    hint: "How far the leak takes to fade out, in the same units as the radius.",
+    description: "How far the leak takes to fade out, in the same units as the radius.",
     animatable: true,
     // Strictly positive: `smoothstep` with a zero-width band is indeterminate in
     // WGSL, and a hard-edged leak is a circle of paint, not light.
@@ -161,7 +161,7 @@ export const LIGHT_LEAK_PARAMS: readonly ParamDescriptor[] = [
     key: LIGHT_LEAK_PARAM.lightness,
     label: "Colour lightness",
     type: "float",
-    hint: "OKLab lightness of the light itself. Low is a deep, dense leak; high is a pale wash.",
+    description: "OKLab lightness of the light itself. Low is a deep, dense leak; high is a pale wash.",
     animatable: true,
     legal: [0, 1],
     default: 0.9,
@@ -178,7 +178,7 @@ export const LIGHT_LEAK_PARAMS: readonly ParamDescriptor[] = [
     key: LIGHT_LEAK_PARAM.chroma,
     label: "Colour chroma",
     type: "float",
-    hint: "OKLab chroma. Zero is a colourless flare; this is where the leak gets its colour.",
+    description: "OKLab chroma. Zero is a colourless flare; this is where the leak gets its colour.",
     animatable: true,
     legal: [0, MAX_CHROMA],
     default: 0.12,
@@ -198,7 +198,7 @@ export const LIGHT_LEAK_PARAMS: readonly ParamDescriptor[] = [
     // Degrees rather than turns, unlike the ordered dithers' tile rotation: this
     // is a colour wheel, where 360 is the unit everyone reads, and a modulator
     // ramping 0 -> 360 still closes the loop exactly.
-    hint: "OKLab hue in degrees. Around 60 is the warm orange of a classic leak.",
+    description: "OKLab hue in degrees. Around 60 is the warm orange of a classic leak.",
     animatable: true,
     legal: [0, 360],
     default: 55,
@@ -216,7 +216,7 @@ export const LIGHT_LEAK_PARAMS: readonly ParamDescriptor[] = [
     key: LIGHT_LEAK_PARAM.intensity,
     label: "Intensity",
     type: "float",
-    hint: "How much light is added at the centre of the leak. Above 1 blows the highlight out.",
+    description: "How much light is added at the centre of the leak. Above 1 blows the highlight out.",
     animatable: true,
     legal: [0, 2],
     default: 0.55,
@@ -268,6 +268,12 @@ export const LIGHT_LEAK_GPU: GpuEffect = {
 export default defineEffect({
   id: "light-leak",
   name: "Light leak",
+  summary:
+    "A soft coloured pool of stray light across the frame, as if it had got in through a gap in the camera body.",
+  description:
+    "A leak knows nothing about the picture it lands on: it is a coloured falloff placed at a point in the frame and added to whatever is underneath. That is the difference from Epsilon glow, which is derived from the image — a glow finds bright pixels and spreads them, a leak arrives from outside and would look the same over a blank frame. Position, radius and softness place and shape the pool; the colour is given as OKLab lightness, chroma and hue, and around 60 degrees is the warm orange of a classic film leak.",
+  keywords: ["light leak", "leak", "flare", "lens flare", "haze", "warm", "film", "analog", "analogue", "lomo", "bleed", "sun", "glow"],
+  concept: "optical",
   requirement: "F-SP-15",
   // Preprocess. Downstream of a quantizer the added light would be a colour the
   // palette does not contain while the index map beside it still named the old

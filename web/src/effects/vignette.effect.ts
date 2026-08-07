@@ -61,7 +61,7 @@ export const VIGNETTE_PARAMS: readonly ParamDescriptor[] = [
     type: "float",
     // 1 is the edge midpoint and sqrt(2) the corners, so the legal range has to
     // go past 1 for "corners only" to be reachable at all.
-    hint: "Where the falloff starts. 1 reaches the middle of each edge, 1.41 the corners.",
+    description: "Where the falloff starts. 1 reaches the middle of each edge, 1.41 the corners.",
     animatable: true,
     legal: [0, 2],
     default: 0.7,
@@ -78,7 +78,7 @@ export const VIGNETTE_PARAMS: readonly ParamDescriptor[] = [
     key: VIGNETTE_PARAM.softness,
     label: "Softness",
     type: "float",
-    hint: "How far the falloff takes to complete, in the same units as the radius.",
+    description: "How far the falloff takes to complete, in the same units as the radius.",
     animatable: true,
     // Strictly positive: `smoothstep` with a zero-width band is indeterminate in
     // WGSL, and a hard-edged vignette is a circular mask, not this effect.
@@ -97,7 +97,7 @@ export const VIGNETTE_PARAMS: readonly ParamDescriptor[] = [
     key: VIGNETTE_PARAM.strength,
     label: "Strength",
     type: "float",
-    hint: "How dark the far edge gets. 1 takes it to black.",
+    description: "How dark the far edge gets. 1 takes it to black.",
     animatable: true,
     legal: [0, 1],
     // Not 1: a vignette that goes fully black at the edge is a spotlight, and
@@ -151,6 +151,12 @@ export const VIGNETTE_GPU: GpuEffect = {
 export default defineEffect({
   id: "vignette",
   name: "Vignette",
+  summary:
+    "Darkens the frame towards its edges, the way a lens loses light off-axis.",
+  description:
+    "The attenuation is a multiply in linear light, because a lens vignette is lost light and lost light is multiplicative; darkening the encoded value instead gives a muddier falloff that does not read as optics. The contour is an ellipse matched to the frame's aspect ratio rather than a circle measured in pixels, so radius 1 reaches the middle of each edge and about 1.41 reaches the corners. Placed before a dither it changes which palette colours the edges land on, which is a far stronger effect than the same darkening applied after.",
+  keywords: ["vignette", "edges", "corners", "darken", "falloff", "lens", "frame", "border", "spotlight", "fade", "burn"],
+  concept: "optical",
   requirement: "F-SP-12",
   // Preprocess, and this is the more interesting half of the decision rather
   // than a formality. Downstream of a quantizer the multiply would produce

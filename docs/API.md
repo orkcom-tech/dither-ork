@@ -297,6 +297,15 @@ samples from it. There is no second list anywhere.
 interface EffectDescriptor {
   readonly id: string;                 // "floyd-steinberg", "bayer-8"
   readonly name: string;
+  /** One line: what it does to a picture. Shown on every picker row. */
+  readonly summary: string;
+  /** The full account — what it does, what the controls change, where it
+      belongs in a stack, and what it is confused with. */
+  readonly description: string;
+  /** What a person would type looking for this. Searched, never displayed. */
+  readonly keywords: readonly string[];
+  /** The family idea, if it belongs to one — a key of `EFFECT_CONCEPTS`. */
+  readonly concept?: EffectConcept;
   /** The spec requirement this implements, e.g. "F-ED-01". */
   readonly requirement: string;
   readonly slot: "preprocess" | "dither" | "postprocess";
@@ -312,6 +321,9 @@ interface EffectDescriptor {
   readonly requiresIndexMap: boolean;
   /** Effect ids it must not share a stack with; the grammar excludes them. */
   readonly excludes?: readonly string[];
+  /** True when it writes a different extent than it reads. Such a node cannot
+      composite against its own input, so the row hides opacity and blend. */
+  readonly resamples?: boolean;
 }
 ```
 
@@ -320,8 +332,19 @@ optional fields: `float`, `int`, `bool`, `enum`, `color`, `seed` and `curve`
 each carry the surprise metadata that kind actually needs. A bool has a
 `trueProbability` and no range; an enum draws from a weighted subset of its own
 values; a colour samples in OKLab, because sampling sRGB channels independently
-clumps around muddy mid-greys. Read the file for the full set — it is the
-authority and this section does not duplicate it.
+clumps around muddy mid-greys. Every kind also carries a `label` and a
+`description` — the one sentence saying what moving this control does to the
+picture. Read the file for the full set — it is the authority and this section
+does not duplicate it.
+
+**The descriptive fields are the only copy.** The properties panel, the effect
+picker, the hover help (F-UI-13) and the generated catalogue in the user guide
+(F-UI-14) all read them; none of those four contains prose about an effect. That
+is F-UI-15, and the validator below enforces it rather than trusting it.
+`EFFECT_CONCEPTS`, in the same file, holds the nine *family* ideas — error
+diffusion, ordered dithering, halftone screens, tone and colour, neighbourhood
+filters, optical artefacts, glitch, the index map, working resolution — because
+those are about a group of effects and belong to no single descriptor.
 
 `execution` has exactly two values and needs no third; see
 docs/ARCHITECTURE.md, "The constraint everything follows from", for why, and for
@@ -342,12 +365,28 @@ what F-GL-06 would cost.
 
 Totals: 15 `wasm`, 52 `gpu`; 18 preprocess, 29 dither, 20 postprocess.
 
-One of the spec's 61 named effects is deliberately absent: **F-GL-06** JPEG
-glitch, which needs an encoder and therefore an execution kind that does not
-exist. **F-SP-14** nearest-neighbour upscale was the second such gap and is now
-built: it is the other half of the F-PP-01 pair — internal resolution runs the
-middle of the stack small, nearest upscale brings the frame back to size with
-the chunk intact — which is what made it a pass rather than a resampling stage.
+Four requirements the spec names have no descriptor, and **the application says
+so by name** rather than leaving a search to come back empty. They are declared
+in `web/src/registry/unbuilt.ts`, with the reason and the closest built
+alternatives, and `search.test.ts` asserts that none of them is a registered
+effect — so an entry that becomes real fails the build instead of going on
+telling people a shipped effect does not exist:
+
+| Requirement | | Why not |
+| --- | --- | --- |
+| **F-GL-06** | JPEG glitch | Needs a JPEG encoder inside the render path, and therefore an execution kind that does not exist |
+| **F-PT-09** | Luminance-displaced line screen | Nothing in the catalogue displaces by the picture; the missing piece is that, plus hidden-line removal |
+| **F-PT-10** | Wave field with obstacle interaction | Needs a signed distance field — shared infrastructure (F-INF-01) that is not built |
+| **F-PP-08** | Node masking | A mask is a second image edge on the graph, and the graph carries one per node |
+
+`registry/search.ts` consults that table only after the catalogue has returned
+nothing, and `describeMiss` writes the sentence — one implementation, so the
+picker, the hover help and the guide give the same account of the same miss.
+
+**F-SP-14** nearest-neighbour upscale was a fifth such gap and is now built: it
+is the other half of the F-PP-01 pair — internal resolution runs the middle of
+the stack small, nearest upscale brings the frame back to size with the chunk
+intact — which is what made it a pass rather than a resampling stage.
 
 The `preprocess` family holds F-PP-01 (internal resolution), F-PP-02
 (brightness/contrast), F-PP-03 (levels), F-PP-04 (HSL), F-PP-05 (curves) and
@@ -402,6 +441,17 @@ an index-map consumer in the `preprocess` slot — each fails the whole
 catalogue. Nothing is repaired and nothing is dropped: a catalogue that is 66
 effects because one was quietly discarded is worse than one that refuses to
 start.
+
+**The prose is validated on the same terms** (F-UI-15). A missing `summary`,
+`description` or `keywords` on an effect, or a missing `description` on any
+parameter, is `missing-summary` / `missing-description` / `missing-keywords` and
+fails the catalogue. So does a duplicated keyword. So — and this is the one that
+matters in practice — does `unhelpful-description`: text that normalises to the
+same thing as the label, the key, the name or, for a description, the summary.
+An effect whose description echoes its name arrives undocumented exactly as one
+with no description does, and costs a reader the same time while looking like it
+was written. **The fix for a validation failure here is the text, never the
+rule.**
 
 Startup is expected to surface that rather than continue. `app/boot.ts` returns
 `registry-failed` and `app/StartupFailureScreen.tsx` puts the verdict and every
@@ -811,6 +861,25 @@ without a reload. A region nothing registered into is not rendered at all.
 Panels take no props: the shell's slot takes a component with no props, so
 dependencies arrive by closure at registration time. A context would need a
 provider in a file no panel owns.
+
+`toolbarSlots` is where everything that is not one of the four panels goes —
+documents, export, batch, Surprise Me and the guide, ordered by the `order` each
+registration carries rather than by the order of the calls in `main.tsx`.
+
+**Contextual help uses neither registry.** `installHelp({ registry })` mounts a
+React root of its own on `document.body` and returns the uninstaller; the shell
+knows nothing about it. That is not a shortcut around the slots — help describes
+controls drawn by panels that mount and unmount underneath it, and a component
+living in one of the four regions would be unmounted along with that region. A
+control opts in with one attribute:
+
+```tsx
+<div {...helpFor({ kind: "param", effect: effect.id, param: param.key })}>…</div>
+```
+
+Nothing is drawn until an annotated control is dwelt on, so installing it against
+a build where no call site has been annotated costs one empty `<div>` and shows
+nothing — which is the honest behaviour rather than an empty panel.
 
 ## 8. Export
 

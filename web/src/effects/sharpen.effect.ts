@@ -62,7 +62,7 @@ const AMOUNT: ParamDescriptor = {
   label: "Amount",
   type: "float",
   animatable: true,
-  hint: "Gain on the detail the blur removed. 1 doubles local contrast at the radius.",
+  description: "Gain on the detail the blur removed. 1 doubles local contrast at the radius.",
   legal: [0, 4],
   default: 1,
   step: 0.05,
@@ -82,7 +82,7 @@ const RADIUS: ParamDescriptor = {
   label: "Radius",
   type: "float",
   animatable: true,
-  hint: "Size of the detail the mask isolates, in pixels. Small is edges, large is local contrast.",
+  description: "Size of the detail the mask isolates, in pixels. Small is edges, large is local contrast.",
   // Half the blur node's ceiling. Past about 32 an unsharp mask has stopped
   // sharpening and become a contrast curve with a very slow falloff.
   legal: [0, 32],
@@ -100,7 +100,7 @@ const THRESHOLD: ParamDescriptor = {
   label: "Threshold",
   type: "float",
   animatable: true,
-  hint: "Lightness difference below which nothing is sharpened. 0 sharpens everything.",
+  description: "Lightness difference below which nothing is sharpened. 0 sharpens everything.",
   legal: [0, 1],
   // Zero: a sharpen should render as the plain unsharp mask unless asked
   // otherwise, and that is the case a golden image can pin.
@@ -120,6 +120,12 @@ const THRESHOLD: ParamDescriptor = {
 export default defineEffect({
   id: "sharpen",
   name: "Sharpen",
+  summary:
+    "Unsharp mask — subtracts a blurred copy to bring detail back, so edges survive a small palette.",
+  description:
+    "The picture minus a blurred version of itself is the detail that blur removed; amount is the gain on it, radius decides which size of detail counts as detail, and threshold is the floor below which a difference is left alone so grain is not amplified along with the edges. Sharpening before a dither is how edges stay legible through a handful of colours. After a dither it operates on the dither's own texture rather than on the picture, which only makes the grain louder.",
+  keywords: ["sharpen", "unsharp", "unsharp mask", "clarity", "detail", "crisp", "edges", "acutance", "definition", "punch"],
+  concept: "neighbourhood-filter",
   requirement: "F-SP-03",
   slot: "preprocess",
   family: "special",

@@ -60,7 +60,7 @@ export const LENS_DISTORTION_PARAMS: readonly ParamDescriptor[] = [
     key: LENS_DISTORTION_PARAM.amount,
     label: "Distortion",
     type: "float",
-    hint: "Negative barrels the frame outward; positive pinches it into a pincushion.",
+    description: "Negative barrels the frame outward; positive pinches it into a pincushion.",
     animatable: true,
     // Stops short of ±1. At k = -1 the corner term cancels the radius exactly
     // and all four corners sample the single centre texel — a degenerate map
@@ -84,7 +84,7 @@ export const LENS_DISTORTION_PARAMS: readonly ParamDescriptor[] = [
     key: LENS_DISTORTION_PARAM.scale,
     label: "Zoom",
     type: "float",
-    hint: "Scales the frame after the distortion. Raise it to crop away the corners a pincushion empties.",
+    description: "Scales the frame after the distortion. Raise it to crop away the corners a pincushion empties.",
     animatable: true,
     legal: [0.25, 4],
     default: 1,
@@ -102,7 +102,7 @@ export const LENS_DISTORTION_PARAMS: readonly ParamDescriptor[] = [
     key: LENS_DISTORTION_PARAM.edge,
     label: "Outside the frame",
     type: "enum",
-    hint: "What fills the pixels whose source lies off the image.",
+    description: "What fills the pixels whose source lies off the image.",
     animatable: false,
     values: [
       { value: "clamp", label: "Stretch edge" },
@@ -131,7 +131,7 @@ export const LENS_DISTORTION_PARAMS: readonly ParamDescriptor[] = [
     // Not a quality setting. Bilinear invents colours between palette entries,
     // which is right on continuous tone and wrong on an already-indexed buffer;
     // nearest keeps the palette and stair-steps the geometry instead.
-    hint: "Bilinear is right for continuous tone; nearest keeps an already-quantized image on its palette.",
+    description: "Bilinear is right for continuous tone; nearest keeps an already-quantized image on its palette.",
     animatable: false,
     values: [
       { value: "bilinear", label: "Bilinear" },
@@ -191,6 +191,12 @@ export const LENS_DISTORTION_GPU: GpuEffect = {
 export default defineEffect({
   id: "lens-distortion",
   name: "Lens distortion",
+  summary:
+    "Bends the frame outward into a barrel or inward into a pincushion.",
+  description:
+    "The first radial term of the Brown–Conrady lens model, run as an inverse map so every output pixel is filled exactly once. Negative amounts bulge the image outward — the fisheye, or the face of a CRT — and positive amounts pinch it in. A pincushion empties the corners, which is what zoom is there to crop back into. Bilinear filtering is right for continuous tone; nearest keeps an already-dithered image on its palette instead of averaging neighbouring palette entries into colours the palette does not contain.",
+  keywords: ["barrel", "pincushion", "fisheye", "lens", "distortion", "warp", "bulge", "curve", "crt", "bend", "wide angle", "geometry"],
+  concept: "optical",
   requirement: "F-SP-13",
   // Preprocess, because this moves pixels. Downstream of a quantizer it would
   // resample the colour buffer while the index map beside it kept describing

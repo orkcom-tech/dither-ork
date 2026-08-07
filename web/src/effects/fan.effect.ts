@@ -16,5 +16,10 @@ import { errorDiffusionEffect } from "./error-diffusion";
 export default errorDiffusionEffect({
   id: "fan",
   name: "Fan",
+  summary:
+    "Floyd–Steinberg with the bottom row shifted one column left, which drags the error cone sideways.",
+  description:
+    "The row below runs from two columns left to directly underneath, where Floyd–Steinberg's runs from one left to one right. That is the whole trick: nothing lands diagonally ahead of the scan, so the diagonal worm Floyd–Steinberg produces has nowhere to start. Worth trying whenever those diagonals are showing and serpentine alone has not settled them.",
+  keywords: ["fan", "shifted", "variant", "asymmetric"],
   requirement: "F-ED-11",
 });

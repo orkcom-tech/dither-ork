@@ -331,7 +331,7 @@ export const CURVES_PARAMS: readonly ParamDescriptor[] = [
     key: CURVES_PARAM.curve,
     label: "Curve",
     type: "curve",
-    hint: "Transfer curve on the encoded tone scale. The diagonal is no change.",
+    description: "Transfer curve on the encoded tone scale. The diagonal is no change.",
     // A curve is bulk data rebuilt from its control points, not a number a
     // modulator can ramp. Animating a *shape* is F-AN's keyframe track over the
     // points, which is a different mechanism from a bound modulator.
@@ -363,7 +363,7 @@ export const CURVES_PARAMS: readonly ParamDescriptor[] = [
     key: CURVES_PARAM.mode,
     label: "Mode",
     type: "enum",
-    hint: "Run the curve on each channel, or on luminance alone and scale the colour by the ratio.",
+    description: "Run the curve on each channel, or on luminance alone and scale the colour by the ratio.",
     animatable: false,
     // Append-only: the shader reads the ordinal, so inserting a value in the
     // middle renumbers every document already saved.
@@ -435,6 +435,12 @@ export const CURVES_GPU: GpuEffect = {
 export default defineEffect({
   id: "curves",
   name: "Curves",
+  summary:
+    "An editable transfer curve — drag the shape of the tone response by hand.",
+  description:
+    "The curve maps input tone to output tone on the display-referred scale, so the diagonal is no change and the shape you draw is the shape you get. It is a monotone cubic rather than a Catmull–Rom on purpose: a spline that overshoots between control points inverts local contrast, and a lifted shadow point would produce a dip below black on the way to it — a hard band in the darks that is nowhere in the shape that was drawn. Per channel runs the curve on red, green and blue independently, which is how a colour cast is put in; luma runs it on brightness alone and scales the colour to match.",
+  keywords: ["curves", "curve", "tone curve", "s curve", "spline", "transfer", "contrast", "film look", "fade", "crush"],
+  concept: "tone-and-colour",
   requirement: "F-PP-05",
   // Preprocess: a transfer curve decides how much of the tone scale the kernel
   // downstream has to work with. After a quantizer it would rewrite every

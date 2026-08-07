@@ -1,0 +1,92 @@
+/*
+ * Document base.
+ *
+ * The one place the type decision of `tokens.css` is actually made: the
+ * document is set in the sans family, and monospace is opted into by the things
+ * that show a *quantity*. That direction matters — defaulting to mono and
+ * opting out would mean every panel added later arrives as a terminal until
+ * somebody notices.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: var(--text-md) / 1.5 var(--font-sans);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  height: 100%;
+}
+
+:where(button, input, select, textarea) {
+  font: inherit;
+  color: inherit;
+}
+
+/*
+ * Values, wherever they are.
+ *
+ * A numeric entry is a column of digits that the user compares against the one
+ * above it and drags to change, so it is set in mono with tabular figures — the
+ * width of the field must not jitter as the digits change under a drag, which
+ * is the single most visible failure of proportional numerals in a parameter
+ * panel.
+ *
+ * Declared globally rather than per-panel so that a panel written later gets it
+ * without knowing this rule exists. `inputMode="decimal"` is the convention the
+ * numeric control (`ui/properties/NumberField.tsx`) already uses.
+ */
+:where(input[inputmode="decimal"], input[inputmode="numeric"], input[type="number"]),
+:where(code, kbd, samp, output),
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Links.
+ *
+ * Neutral, not accent: a link is not a live state, and the status bar's three
+ * links are the only ones in the application. They are told apart by the
+ * underline, which is what an underline is for.
+ */
+:where(a) {
+  color: var(--fg-dim);
+  text-decoration-color: var(--rule-strong);
+  text-underline-offset: 2px;
+}
+
+:where(a):hover {
+  color: var(--fg);
+  text-decoration-color: var(--rule-hover);
+}
+
+/*
+ * One focus treatment for the whole app. `:focus-visible` rather than `:focus`
+ * so a pointer user never sees a ring they did not ask for, and a keyboard user
+ * always does — the viewport is focusable and its keyboard controls are useless
+ * if you cannot tell whether it has focus.
+ *
+ * This ring is the one place the accent is allowed outside a document state:
+ * "the keyboard is here" is itself a live state, and a neutral ring on a
+ * neutral chrome is a ring nobody finds.
+ */
+:where(:focus-visible) {
+  outline: 1px solid var(--focus);
+  outline-offset: 1px;
+}

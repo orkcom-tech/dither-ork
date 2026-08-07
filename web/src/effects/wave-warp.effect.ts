@@ -83,7 +83,7 @@ const PARAMS = [
     key: WAVE_WARP_PARAM.amplitude,
     label: "Amplitude",
     type: "float",
-    hint: "How far the wave pushes the image, in pixels.",
+    description: "How far the wave pushes the image, in pixels.",
     animatable: true,
     legal: [0, 512],
     default: 12,
@@ -106,7 +106,7 @@ const PARAMS = [
     type: "float",
     // Cycles across the image rather than pixels per cycle, so the shape of the
     // warp survives the resolution change between preview and export.
-    hint: "Wave cycles across the image. 0 holds the image still.",
+    description: "Wave cycles across the image. 0 holds the image still.",
     animatable: true,
     legal: [0, 64],
     default: 3,
@@ -124,7 +124,7 @@ const PARAMS = [
     // Turns, not degrees or radians: a modulator ramping 0 -> 1 lands back
     // where it started, so an animated wave closes the loop without the UI
     // having to know that some number is special (F-AN-03).
-    hint: "Position along the wave, in turns. A 0 → 1 ramp scrolls it once.",
+    description: "Position along the wave, in turns. A 0 → 1 ramp scrolls it once.",
     animatable: true,
     legal: [-1, 1],
     default: 0,
@@ -139,7 +139,7 @@ const PARAMS = [
     key: WAVE_WARP_PARAM.waveform,
     label: "Waveform",
     type: "enum",
-    hint: "Sine bends; triangle creases.",
+    description: "Sine bends; triangle creases.",
     animatable: false,
     values: [
       { value: "sine", label: "Sine" },
@@ -161,7 +161,7 @@ const PARAMS = [
     key: WAVE_WARP_PARAM.axis,
     label: "Axis",
     type: "enum",
-    hint: "Which way the image is pushed. Both gives a ripple.",
+    description: "Which way the image is pushed. Both gives a ripple.",
     animatable: false,
     values: [
       { value: "horizontal", label: "Horizontal" },
@@ -187,7 +187,7 @@ const PARAMS = [
     type: "enum",
     // Not an implementation detail left to a sampler's address mode: at any
     // useful amplitude the border band is a visible part of the result.
-    hint: "What the wave finds past the border once it pushes off the image.",
+    description: "What the wave finds past the border once it pushes off the image.",
     animatable: false,
     values: [
       { value: "mirror", label: "Mirror" },
@@ -210,7 +210,7 @@ const PARAMS = [
     key: WAVE_WARP_PARAM.smoothing,
     label: "Smooth resampling",
     type: "bool",
-    hint: "Interpolate between texels. Off snaps the warp to whole pixels.",
+    description: "Interpolate between texels. Off snaps the warp to whole pixels.",
     animatable: false,
     default: true,
     surprise: {
@@ -226,6 +226,12 @@ const PARAMS = [
 const DESCRIPTOR = defineEffect({
   id: EFFECT_ID,
   name: "Wave warp",
+  summary:
+    "Pushes the picture along a sine or triangle wave — a ripple, a wobble, or a hard crease.",
+  description:
+    "The displacement is a fixed geometric function of position: amplitude is how far the image is pushed in pixels, frequency how many cycles cross the frame, and phase where along the wave it starts, so a modulator ramping 0 to 1 scrolls the wave exactly once and the loop closes by construction. This is the distinction worth keeping: wave warp displaces by a geometric function, row displacement displaces by a seed, and neither displaces by the picture's own brightness. Sine bends and triangle creases. There is no seed, because a wave is a shape rather than a draw.",
+  keywords: ["wave", "waves", "warp", "ripple", "wobble", "distort", "sine", "undulate", "water", "liquid", "bend", "wavy", "squiggle", "heat haze", "flag"],
+  concept: "glitch",
   requirement: "F-GL-10",
   // Glitch effects sit after the primary dither in the stack grammar
   // (F-SM-03). A warp before one would be dithered over and disappear.

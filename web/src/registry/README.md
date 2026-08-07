@@ -30,6 +30,10 @@ import { defineEffect } from "../types/registry";
 export default defineEffect({
   id: "pixel-sort",
   name: "Pixel Sort",
+  summary: "Sorts runs of pixels along a row or column, smearing the picture into clean streaks.",
+  description: "A span is a run of consecutive pixels whose sort key clears the threshold …",
+  keywords: ["pixel sort", "streak", "smear", "databend"],
+  concept: "glitch",
   requirement: "F-GL-01",
   slot: "postprocess",
   family: "glitch",
@@ -44,6 +48,39 @@ export default defineEffect({
 That is the whole procedure. No registration call, no import into a list. The
 catalogue is 63 effects arriving as 63 independent contributions, and a central
 array would put every one of them on the same line of the same file.
+
+### The descriptive text is not optional and not a courtesy
+
+`summary`, `description`, `keywords` and every parameter's `description` are
+**required**, and `validateRegistry` rejects a catalogue that is missing one
+exactly as it rejects a missing surprise range (F-UI-15). That is deliberate:
+hover help, the effect picker and the user guide all read these fields, and the
+alternative to one required source is three hand-written copies that drift
+within a release.
+
+Write them to this standard:
+
+- **Say what it does to the image.** "Displaces pixels along a sine wave" beats
+  "applies wave distortion". A description that only restates the label or the
+  name is rejected as `unhelpful-description` — the check exists because that is
+  what an undocumented effect looks like when somebody has filled the field in.
+- **Name the difference where two effects are confused.** Wave warp displaces by
+  a fixed geometric function, row displacement displaces by a seed, and neither
+  displaces by the picture.
+- **Name what it pairs with** when the combination is the point. Epsilon glow
+  over a dark two-colour palette is what produces a neon look, and that is not
+  discoverable from either control alone.
+- **Keywords are what a person calls it, not what it is called.** The field
+  exists because the owner of this tool could not find the glow effect: it is
+  named "Epsilon glow" after the reference product, and search matched only
+  names and structural fields. It now answers to glow, neon, bloom and halo.
+- **`concept` points at the family idea**, written once in `EFFECT_CONCEPTS`.
+  Say only what makes this effect different from its siblings; everything they
+  share is already there. A concept with no entry is rejected.
+
+Do not invent behaviour to fill the field. If you cannot tell what a parameter
+does, report it — a confident wrong description costs a reader exactly what a
+wrong coefficient table costs.
 
 Rules the glob enforces:
 
@@ -137,12 +174,37 @@ parameter and the module. Checked, among other things:
 - every effect declares a slot, a family and an execution kind;
 - every parameter declares a surprise range, a distribution and a weight;
 - surprise ranges sit **inside** legal ranges, defaults sit inside legal ranges,
-  `log` distributions have a positive range, `normal` has a mean inside its range.
+  `log` distributions have a positive range, `normal` has a mean inside its range;
+- every effect declares a summary, a description and at least one keyword, every
+  parameter declares a description, no two keywords are the same word twice, and
+  a declared `concept` has an entry that explains it (F-UI-15).
 
 Missing surprise metadata is a validation failure, not a runtime surprise. The
 generator has no per-effect logic, so a parameter nobody described is a
 parameter Surprise Me silently never touches — which is a bug that shows up
 months later as "the random results all look the same".
+
+Missing descriptive text is a validation failure for the same reason one level
+up: the guide's effect catalogue is generated from these fields and hover help
+reads them directly, so an effect that arrives without them arrives
+undocumented, and the fix a hurried reader reaches for is to write the sentence
+in the UI instead — which is where the three drifting copies come from.
+
+## Searching, and saying so when there is nothing
+
+`searchCatalogue()` is the entry point for any surface a person reads.
+`searchEffects()` is the ranking primitive under it and returns the list alone:
+on a miss it hands back an empty array, and an empty array is indistinguishable
+from "you spelled it wrong".
+
+A miss from `searchCatalogue()` carries a reason — the nearest effects, the fact
+that the current filter is what hid the match, or, when the query names
+something the spec has and this build does not, the requirement and why it is
+not built (`unbuilt.ts`, covering F-GL-06, F-PT-09, F-PT-10 and F-PP-08). Near
+misses are **reported, never returned as results**: mixing them in would make a
+poor answer indistinguishable from a good one, which is the same failure again.
+`describeMiss()` renders any miss as one sentence, so the three surfaces do not
+each write their own wording.
 
 ## Parameter helpers
 

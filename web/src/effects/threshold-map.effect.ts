@@ -296,6 +296,12 @@ export const THRESHOLD_MAP_PARAMS: readonly ParamDescriptor[] = ORDERED_CONTROL_
 export default defineEffect({
   id: "threshold-map",
   name: "Threshold map",
+  summary:
+    "An ordered dither whose threshold tile is an image you supply, so any picture can be used as a dither matrix.",
+  description:
+    "Everything about it is the ordered-dither program — the same tile scale, rotation, offset and spread controls, the same index map — except that the matrix is a decoded image rather than a tile generated from a recursion. Bright texels of your image become high thresholds, so the picture you upload shows up as the texture of the one you are dithering. A node with no image refuses to render rather than falling back to a plain threshold, because a plain threshold is a different effect wearing this one's label.",
+  keywords: ["custom matrix", "uploaded image", "user matrix", "own image", "texture", "stencil", "threshold map", "second image"],
+  concept: "ordered-dithering",
   requirement: "F-PP-07",
   // The dither slot and the ordered family, whatever its requirement id says:
   // it quantizes against the palette and emits the index map, which is what

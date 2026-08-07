@@ -27,7 +27,9 @@ import {
 import type { DiscoveredEffect } from "./discovery";
 import {
   matchesFilter,
+  searchCatalogue,
   searchEffects,
+  type CatalogueSearch,
   type EffectFilter,
   type EffectSearchResult,
 } from "./search";
@@ -55,8 +57,19 @@ export interface EffectRegistry {
   byFamily(family: EffectFamily): readonly EffectDescriptor[];
   /** Structural narrowing with no text query. */
   filter(filter: EffectFilter): readonly EffectDescriptor[];
-  /** Ranked search over the whole catalogue (F-ST-08). */
+  /**
+   * Ranked search over the whole catalogue (F-ST-08).
+   *
+   * Returns the list alone. Prefer {@link EffectRegistry.searchWithMiss} in any
+   * surface a person reads: this one answers an empty query with an empty array
+   * and no way to tell "you spelled it wrong" from "that does not exist".
+   */
   search(query: string, filter?: EffectFilter): readonly EffectSearchResult[];
+  /**
+   * The same search, plus an explanation when it finds nothing (F-ST-08,
+   * F-UI-15).
+   */
+  searchWithMiss(query: string, filter?: EffectFilter): CatalogueSearch;
   /** Module an effect was discovered in. Diagnostics only. */
   origin(id: string): string | undefined;
 }
@@ -214,6 +227,35 @@ export class EffectRegistryBuilder {
           of: descriptors.length,
         });
         return results;
+      },
+      searchWithMiss: (query, f) => {
+        const search = searchCatalogue(descriptors, query, f ?? {});
+        // A miss is logged at info rather than debug. It is the event that cost
+        // the owner time — the search box coming back empty with no reason —
+        // and a support question about it should be answerable from the log
+        // without asking anyone to turn verbose logging on and reproduce.
+        if (search.miss === null) {
+          log.debug("effect search", {
+            query,
+            slot: f?.slot,
+            family: f?.family,
+            execution: f?.execution,
+            matched: search.results.length,
+            of: descriptors.length,
+          });
+        } else {
+          log.info("effect search found nothing", {
+            query,
+            slot: f?.slot,
+            family: f?.family,
+            execution: f?.execution,
+            miss: search.miss.kind,
+            requirement:
+              search.miss.kind === "unbuilt" ? search.miss.feature.requirement : undefined,
+            of: descriptors.length,
+          });
+        }
+        return search;
       },
       origin: (id) => origins.get(id),
     };
