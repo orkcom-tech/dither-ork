@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/orkcom-tech/dither-ork/security/advisories/new
+    about: Report privately. Do not open a public issue.
+  - name: It will not start
+    url: https://github.com/orkcom-tech/dither-ork/blob/main/docs/DEVELOPMENT.md
+    about: DEVELOPMENT.md lists what you should see and what to do when you do not.

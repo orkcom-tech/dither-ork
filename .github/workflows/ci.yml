@@ -25,6 +25,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # The documentation site is built here as well as in pages.yml, and the
+  # duplication is the point: pages.yml runs on a push to main, which is after
+  # the change has landed. `docs/site/markdown.mjs` refuses Markdown outside the
+  # subset it covers, so a construct nobody checked turns into a failed deploy
+  # rather than a bad page — and this is what turns that failed deploy into a red
+  # check on the pull request that wrote it. Ten seconds, no install, no cache.
+  docs-site:
+    name: docs site (build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node docs/site/build.mjs --out _site
+
   core:
     name: core (fmt, clippy, test)
     runs-on: ubuntu-latest

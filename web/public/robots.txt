@@ -1,0 +1,9 @@
+# robots.txt is per-origin, and every Cloudflare Pages project is its own
+# origin. orkcom-tech.cc carries development sites as well as this one, so the
+# indexing decision belongs to the project, not the domain: this file speaks
+# for dither.orkcom-tech.cc and nothing else. A site that should stay out of
+# search ships its own robots.txt saying so.
+#
+# dither-ork is meant to be found.
+User-agent: *
+Allow: /

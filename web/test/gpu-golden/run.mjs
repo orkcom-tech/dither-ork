@@ -258,22 +258,31 @@ function describe(diff) {
   );
 }
 
-/** How far a frame moved from the fixture, and how bright it came out. */
-function vitals(fixture, frame) {
-  let changed = 0;
+/**
+ * How far a frame moved from the fixture, and how bright it came out.
+ *
+ * A frame at a different extent than the fixture cannot be compared pixel by
+ * pixel, and does not need to be: a resampling node rewrote every texel and the
+ * shape as well, so `changed` is 1 by construction. Saying so beats aligning two
+ * grids to answer a question already answered.
+ */
+function vitals(fixture, fixtureWidth, fixtureHeight, frame, width, height) {
   let luma = 0;
   const pixels = frame.length / 4;
+  const comparable = width === fixtureWidth && height === fixtureHeight;
+  let changed = 0;
   for (let i = 0; i < frame.length; i += 4) {
     if (
-      Math.abs(frame[i] - fixture[i]) > 1 ||
-      Math.abs(frame[i + 1] - fixture[i + 1]) > 1 ||
-      Math.abs(frame[i + 2] - fixture[i + 2]) > 1
+      comparable &&
+      (Math.abs(frame[i] - fixture[i]) > 1 ||
+        Math.abs(frame[i + 1] - fixture[i + 1]) > 1 ||
+        Math.abs(frame[i + 2] - fixture[i + 2]) > 1)
     ) {
       changed += 1;
     }
     luma += (0.2126 * frame[i] + 0.7152 * frame[i + 1] + 0.0722 * frame[i + 2]) / 255;
   }
-  return { changed: changed / pixels, luma: luma / pixels };
+  return { changed: comparable ? changed / pixels : 1, luma: luma / pixels };
 }
 
 /**
@@ -512,22 +521,31 @@ async function main() {
       }
 
       const rgba = new Uint8Array(Buffer.from(result.rgba, "base64"));
+      // The render's own shape. Two effects resample (F-PP-01, F-SP-14), so the
+      // fixture's extent is the input's and not necessarily the output's.
+      const { width, height } = result;
+      const shape =
+        width === info.fixture.width && height === info.fixture.height
+          ? ""
+          : ` ${width}x${height}`;
       const seen = vitalsByEffect.get(planned.effect) ?? [];
-      seen.push(vitals(fixtureRgba, rgba));
+      seen.push(
+        vitals(fixtureRgba, info.fixture.width, info.fixture.height, rgba, width, height),
+      );
       vitalsByEffect.set(planned.effect, seen);
 
       const path = goldenPath(planned.effect, planned.variant);
       if (bless) {
-        writePng(path, rgba, info.fixture.width, info.fixture.height);
+        writePng(path, rgba, width, height);
         written += 1;
-        console.log(`${progress} ${label} written`);
+        console.log(`${progress} ${label} written${shape}`);
         continue;
       }
 
       checked += 1;
-      const outcome = settle(path, rgba, info.fixture.width, info.fixture.height);
+      const outcome = settle(path, rgba, width, height);
       if (outcome === null) {
-        console.log(`${progress} ${label} identical`);
+        console.log(`${progress} ${label} identical${shape}`);
       } else if (typeof outcome === "string") {
         failures.push(outcome);
         console.log(`${progress} ${label} MISMATCH`);
@@ -535,8 +553,8 @@ async function main() {
           writePng(
             join(artifactRoot, planned.effect, `${planned.variant}.actual.png`),
             rgba,
-            info.fixture.width,
-            info.fixture.height,
+            width,
+            height,
           );
           if (existsSync(path)) {
             mkdirSync(join(artifactRoot, planned.effect), { recursive: true });
@@ -573,8 +591,21 @@ async function main() {
       }
     }
   } finally {
-    browser.close();
-    server.close();
+    // Neither of these is allowed to decide the run. A throw out of a `finally`
+    // *replaces* whatever the block was about to return or raise, and that is
+    // not a hypothetical: a GitHub runner reported `ENOTEMPTY` on a temporary
+    // profile directory in place of the eight effects that had just failed to
+    // render. Shutdown reports itself and stops there.
+    try {
+      await browser.close();
+    } catch (error) {
+      process.stderr.write(`closing the browser failed: ${String(error)}\n`);
+    }
+    try {
+      server.close();
+    } catch (error) {
+      process.stderr.write(`closing the harness server failed: ${String(error)}\n`);
+    }
   }
 
   if (bless) {

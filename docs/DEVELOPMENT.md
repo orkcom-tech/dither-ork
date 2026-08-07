@@ -652,6 +652,128 @@ The browser side of that requirement is cross-origin isolation, which the dev
 server provides. **Production hosting must send the same two headers** — see
 `docs/ARCHITECTURE.md`, "Hosting". GitHub Pages cannot, so it is not an option.
 
+## Deploy
+
+The application is on Cloudflare Pages, project `dither-ork`. Cloudflare builds
+nothing — the project has no git connection, and `.github/workflows/deploy.yml`
+uploads a tree the workflow built itself.
+
+| Setting | Value |
+| --- | --- |
+| Pages project | `dither-ork` |
+| Root directory | `web` |
+| Build command | `npm ci && npm run build` |
+| Output directory | `web/dist` |
+| Production branch | `main` |
+| Cloudflare alias | <https://dither-ork.pages.dev> |
+| Custom domain | <https://dither.orkcom-tech.cc> |
+| Repository secrets | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` |
+
+### Why the app has a Pages project of its own
+
+`web/public/_headers` sets `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`, without which there is no
+`SharedArrayBuffer` and the capability check refuses to start. Cross-origin
+isolation is a property of an origin and cannot be scoped to a path, so the app
+cannot live in a directory of a site that hosts anything else. The documentation
+site is on GitHub Pages, which sets no response headers at all — see
+`.github/workflows/pages.yml`.
+
+### What the workflow does
+
+It runs on `workflow_run` when CI succeeds on `main`, not on the push itself. A
+push-triggered deploy races the suite and can put a red commit in front of every
+visitor before the run that would have caught it has finished.
+
+`web/src/wasm/pkg` is generated and not committed, so it has to exist before
+`npm run build`. On the CI-triggered path the workflow downloads the `wasm-pkg`
+artifact from the run that triggered it: the bytes that were tested are the
+bytes that ship, and Rust is built once per commit instead of twice. On
+`workflow_dispatch` there is no such run, so it builds the package from the pins
+in `docker/wasm.Dockerfile`.
+
+Two header checks run, and they fail for different reasons. The first greps
+`web/dist/_headers` and catches a typo in the file. The second issues `curl -I`
+against the production alias after the upload and catches Cloudflare having
+dropped a rule it could not parse — Pages does not reject a malformed
+`_headers`, it ignores the line, and the only symptom is every visitor getting
+the unsupported screen.
+
+### The secrets
+
+Set once, by a repository admin, from the repository root:
+
+```bash
+gh secret set CLOUDFLARE_API_TOKEN
+gh secret set CLOUDFLARE_ACCOUNT_ID
+```
+
+Both prompt for the value rather than taking it as an argument, so neither ends
+up in shell history. The token needs `Account / Cloudflare Pages / Edit`;
+nothing in the workflow uses anything else.
+
+### DNS
+
+The custom domain is attached to the Pages project. It resolves once the
+`orkcom-tech.cc` zone has this record:
+
+| Type | Name | Target | Proxy |
+| --- | --- | --- | --- |
+| CNAME | `dither` | `dither-ork.pages.dev` | proxied |
+
+Cloudflare validates the domain and issues the certificate on its own once that
+record answers. The `.pages.dev` alias works either way and is what the
+workflow's header check measures.
+
+### Deploying by hand
+
+The same upload the workflow performs. Needs `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` in the environment.
+
+```bash
+docker compose exec -T web sh -c 'npm run build'
+rm -rf web/dist/probe
+npx wrangler@4 pages deploy web/dist --project-name=dither-ork --branch=main
+```
+
+Wrangler writes `.wrangler/cache/pages.json` into the repository root as it
+runs, and that file carries the account id. The repository is public: keep
+`.wrangler/` in `.gitignore`, and delete the directory rather than committing it
+if it is not there yet.
+
+`web/public/probe/` is git-ignored, so it is never in a CI checkout and the
+workflow has nothing to remove. Vite copies whatever is in `public/`, though, so
+on a machine that has run the probe stager that directory is six megabytes of
+test fixtures headed for production.
+
+`--branch=main` is what makes an upload a production deployment. Any other value
+produces a preview on its own hostname and leaves production untouched, which is
+how you look at a build before it is live.
+
+### Rollback
+
+```bash
+npx wrangler@4 pages deployment list --project-name=dither-ork
+```
+
+`git revert` on `main`, then let CI and the deploy run, is the only route that
+leaves the repository and production saying the same thing, and it is the
+default. When it has to be faster than a CI run, check out the last good commit,
+build, and upload by hand as above — the result is a new deployment carrying old
+bytes, which is a rollback that is still a deployment record.
+
+Cloudflare's dashboard also has a per-deployment rollback control. It is the
+fastest and the one that leaves `main` ahead of what is live, so whatever made
+it necessary still has to be reverted afterwards.
+
+### robots.txt
+
+`web/public/robots.txt` allows everything. That is a per-project decision and
+not a per-domain one: `orkcom-tech.cc` carries development sites as well as this
+one, `robots.txt` is per-origin, and every Pages project is its own origin. A
+site on that domain that should stay out of search ships its own `robots.txt`
+saying so. A blanket rule for the domain would take dither-ork with it.
+
 ## Troubleshooting
 
 **`SharedArrayBuffer: FAIL`, or `crossOriginIsolated` is false.**

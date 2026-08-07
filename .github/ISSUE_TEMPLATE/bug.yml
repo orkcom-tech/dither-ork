@@ -1,0 +1,62 @@
+name: Bug report
+description: Something behaves differently from what the docs say
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open an image
+        2. Add brightness/contrast, then Floyd-Steinberg
+        3. Drag the threshold slider
+    validations:
+      required: true
+
+  - type: input
+    id: env
+    attributes:
+      label: Browser, version and OS
+      placeholder: Chrome 141, macOS 15.2
+    validations:
+      required: true
+
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU adapter
+      description: The status bar prints it, next to the effect count.
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: Anything the browser console printed. Paste it as text, not a screenshot.
+      render: text
+
+  - type: textarea
+    id: document
+    attributes:
+      label: The document
+      description: >
+        A share link, or the contents of a `.dork` file. It carries the whole
+        recipe and no image, so it reproduces the stack exactly.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: It still happens after a reload with the same steps
+          required: true
+        - label: I read the "What it cannot do" section of the README, and this is not one of those
+          required: true

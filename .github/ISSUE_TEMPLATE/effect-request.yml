@@ -1,0 +1,59 @@
+name: Effect request
+description: An effect that should exist and does not
+labels: ["effect"]
+body:
+  - type: textarea
+    id: result
+    attributes:
+      label: What it does to a picture
+      description: >
+        Describe the visual result, not the implementation. "Parallel lines
+        displaced by brightness" is useful; "add a cool line thing" is not.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reference
+    attributes:
+      label: Reference
+      description: >
+        A paper, an algorithm name, a screenshot, or the application you saw it
+        in. Dithering algorithms are published work, and a citable description is
+        what makes one implementable.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: family
+    attributes:
+      label: Which family it belongs to
+      options:
+        - error diffusion
+        - ordered
+        - pattern
+        - glitch
+        - special
+        - preprocess
+        - not sure
+    validations:
+      required: true
+
+  - type: input
+    id: requirement
+    attributes:
+      label: Spec requirement id, if it has one
+      placeholder: F-PT-09
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: >
+            I searched the effect picker for what it does, not what it is called
+            — the glow effect is named "Epsilon glow", so a name search misses it
+          required: true
+        - label: >
+            It is not one of the four requirements the README lists as declared
+            absent (F-GL-06, F-PP-08, F-PT-09, F-PT-10). Those are tracked
+          required: true

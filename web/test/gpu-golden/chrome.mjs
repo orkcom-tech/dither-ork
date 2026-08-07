@@ -203,6 +203,19 @@ function isProblem(line) {
 /** How many lines of transcript to keep. Enough for a whole run; bounded anyway. */
 const MAX_DIAGNOSTICS = 4000;
 
+/**
+ * How long to wait for the browser to actually be gone before its profile
+ * directory is removed.
+ *
+ * `kill()` returns when the signal is *delivered*, not when the browser process
+ * and its renderer and GPU children have finished writing. Removing the
+ * directory inside that window fails with `ENOTEMPTY`, and on a GitHub runner it
+ * did — from a `finally`, where the throw replaced the run's real verdict with a
+ * stack trace about a temporary directory. Waiting closes the window; the
+ * retries below cover what is left of it, and the `catch` covers the rest.
+ */
+const EXIT_TIMEOUT_MS = 5_000;
+
 /** One connected page, with the protocol calls the harness makes. */
 export class Page {
   #socket;
@@ -465,9 +478,11 @@ async function fetchJson(url, attempts, delayMs) {
  * enabled and page hooks installed on a blank document, navigation second, so
  * the harness document cannot fail before anything is listening.
  *
- * The caller gets a `close()` that kills the process and removes the profile
- * directory. Leaving either behind turns a second run in the same container into
- * a confusing "profile in use" failure.
+ * The caller gets an async `close()` that kills the process, waits for it to be
+ * gone, and then removes the profile directory. Leaving either behind turns a
+ * second run in the same container into a confusing "profile in use" failure;
+ * removing the directory before the process has finished with it is the
+ * `ENOTEMPTY` described at {@link EXIT_TIMEOUT_MS}.
  */
 export async function launch(url, { port = 9222, onStderr, loadTimeoutMs = 60_000 } = {}) {
   const binary = resolveChrome();
@@ -480,7 +495,13 @@ export async function launch(url, { port = 9222, onStderr, loadTimeoutMs = 60_00
       `--user-data-dir=${profile}`,
       "about:blank",
     ],
-    { stdio: ["ignore", "pipe", "pipe"] },
+    // Its own process group, so shutdown can kill the whole browser rather than
+    // one process of it. Chrome forks a zygote, a GPU process and a renderer,
+    // and none of them is a child of Node — signalling the launcher leaves them
+    // running, still holding the profile directory open. That is what the
+    // `ENOTEMPTY` at {@link EXIT_TIMEOUT_MS} actually was, and waiting longer
+    // would not have fixed it.
+    { stdio: ["ignore", "pipe", "pipe"], detached: true },
   );
 
   const stderr = [];
@@ -492,13 +513,56 @@ export async function launch(url, { port = 9222, onStderr, loadTimeoutMs = 60_00
   child.stdout.on("data", (data) => stderr.push(String(data)));
 
   let exited = null;
-  child.on("exit", (code, signal) => {
-    exited = { code, signal };
+  const exit = new Promise((resolve) => {
+    child.on("exit", (code, signal) => {
+      exited = { code, signal };
+      resolve(exited);
+    });
   });
 
-  const cleanup = () => {
-    child.kill("SIGKILL");
-    rmSync(profile, { recursive: true, force: true });
+  /**
+   * Remove the profile directory, and never fail a run over it.
+   *
+   * `rmSync` retries `ENOTEMPTY` itself when asked, which covers a child that
+   * outlived the wait by a few milliseconds. Anything that survives ten retries
+   * is a leaked temporary directory in a container that is about to exit: worth
+   * a line on stderr, and not worth a verdict.
+   */
+  const removeProfile = () => {
+    try {
+      rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch (error) {
+      process.stderr.write(
+        `could not remove the browser profile at ${profile}: ${String(error)}\n` +
+          `this is a temporary directory and does not affect the run's result.\n`,
+      );
+    }
+  };
+
+  /**
+   * Kill the browser's whole process group, falling back to the launcher alone.
+   *
+   * `ESRCH` means it is already gone, which is the normal outcome of a second
+   * call and not a problem to report.
+   */
+  const killGroup = () => {
+    try {
+      if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+      else child.kill("SIGKILL");
+    } catch (error) {
+      if (error?.code !== "ESRCH") child.kill("SIGKILL");
+    }
+  };
+
+  const cleanup = async () => {
+    if (exited === null) {
+      killGroup();
+      await Promise.race([
+        exit,
+        new Promise((resolve) => setTimeout(resolve, EXIT_TIMEOUT_MS)),
+      ]);
+    }
+    removeProfile();
   };
 
   // Measured and reported on every run, not because anyone tunes it but because
@@ -549,13 +613,13 @@ export async function launch(url, { port = 9222, onStderr, loadTimeoutMs = 60_00
         loadedMs: Math.round(performance.now() - spawnedAt),
       },
       stderr,
-      close: () => {
+      close: async () => {
         page.close();
-        cleanup();
+        await cleanup();
       },
     };
   } catch (error) {
-    cleanup();
+    await cleanup();
     const detail = exited === null ? "" : ` (browser exited: ${JSON.stringify(exited)})`;
     throw new Error(
       `could not drive the browser${detail}: ${String(error)}\n${stderr.join("").slice(-2000)}`,

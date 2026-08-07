@@ -1,0 +1,165 @@
+# The application deploy: Cloudflare Pages project `dither-ork`.
+#
+# Triggered by CI finishing, not by the push itself. A push-triggered deploy
+# races the test suite and can put a red commit in front of every visitor before
+# the run that would have caught it has finished. This starts only after CI has
+# gone green for that commit, and reuses the WASM package CI already built —
+# so the bytes that were tested are the bytes that ship, and the Rust build
+# happens once per commit instead of twice.
+#
+# Pages is a separate host from the documentation site in pages.yml on purpose:
+# the app needs Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy for
+# SharedArrayBuffer, cross-origin isolation cannot be scoped to a path, and
+# GitHub Pages sets no response headers at all.
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  # Redeploy the current main without waiting for a code change — after a
+  # rollback, or to re-run a deploy that failed at the upload step.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Reading the WASM package out of the CI run that triggered this one.
+  actions: read
+
+# Never cancelled mid-flight: a cancelled upload leaves a partial deployment.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  PROJECT: dither-ork
+  # The production alias, checked below. Cloudflare keeps it pointed at the
+  # newest production deployment, so it is what the header assertion must hit —
+  # a per-deployment URL would pass even if the alias had not moved.
+  PRODUCTION_URL: https://dither-ork.pages.dev
+
+jobs:
+  deploy:
+    name: build and deploy
+    runs-on: ubuntu-latest
+    # `completed` fires for failure and cancellation too. workflow_dispatch has
+    # no workflow_run payload, so that conclusion is empty and the second arm
+    # lets the manual path through.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    environment:
+      name: production
+      url: https://dither-ork.pages.dev
+    steps:
+      # workflow_run checks out the default branch by default, which is not
+      # necessarily the commit CI tested — main can move while a run is in
+      # flight. Pin to the tested commit.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      # web/src/wasm/pkg is generated, not committed, and `npm run build` cannot
+      # resolve the bundle without it. Taken from the run that triggered this
+      # one, so what ships is the package the suite ran against.
+      #
+      # The two steps after it are the dispatch path, where there is no such run:
+      # the package is rebuilt from the pins in docker/wasm.Dockerfile, which is
+      # the only place those versions are written down.
+      - name: Fetch the WASM package from the CI run
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-pkg
+          path: web/src/wasm/pkg
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve pinned versions
+        if: github.event_name == 'workflow_dispatch'
+        id: pin
+        run: |
+          nightly=$(grep -oP '^ARG RUST_NIGHTLY=\K.+' docker/wasm.Dockerfile)
+          wasm_pack=$(grep -oP '^ARG WASM_PACK_VERSION=\K.+' docker/wasm.Dockerfile)
+          echo "nightly=${nightly}" >> "$GITHUB_OUTPUT"
+          echo "wasm_pack=${wasm_pack}" >> "$GITHUB_OUTPUT"
+
+      - name: Build the WASM package
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RUSTFLAGS: -C target-feature=+atomics,+bulk-memory,+mutable-globals
+        run: |
+          rustup toolchain install "${{ steps.pin.outputs.nightly }}" \
+            --profile minimal --component rust-src
+          rustup target add wasm32-unknown-unknown \
+            --toolchain "${{ steps.pin.outputs.nightly }}"
+          cargo install wasm-pack --locked --version "${{ steps.pin.outputs.wasm_pack }}"
+          rustup run "${{ steps.pin.outputs.nightly }}" wasm-pack build \
+            core/crates/dither-wasm \
+            --target web \
+            --out-dir ../../../web/src/wasm/pkg \
+            --out-name dither_wasm \
+            -- -Z build-std=panic_abort,std
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+
+      - run: npm run build
+        working-directory: web
+
+      # Same assertion as ci.yml, kept here because this is the step that
+      # decides what goes live. On the dispatch path ci.yml has not run at all.
+      - name: Verify the headers are in the build output
+        run: |
+          headers=web/dist/_headers
+          test -f "$headers" || { echo "::error::$headers missing from the build output"; exit 1; }
+          grep -q 'Cross-Origin-Opener-Policy: same-origin' "$headers" \
+            || { echo "::error::COOP header missing or malformed"; exit 1; }
+          grep -q 'Cross-Origin-Embedder-Policy: require-corp' "$headers" \
+            || { echo "::error::COEP header missing or malformed"; exit 1; }
+
+      # Direct upload: the project has no git connection, so Cloudflare never
+      # builds anything and this is the only path to production. Wrangler is
+      # transport, not a build input — pinned to the major so the command stays
+      # stable and fixes still arrive.
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx --yes wrangler@4 pages deploy web/dist \
+            --project-name="$PROJECT" \
+            --branch=main \
+            --commit-hash="${{ github.event.workflow_run.head_sha || github.sha }}"
+
+      # The build-output check above proves the file was written. This proves
+      # Cloudflare parsed it and is sending the headers. _headers has no schema
+      # and Pages does not reject a bad rule — it drops it, and the only symptom
+      # is every visitor getting the unsupported screen. Retried because the
+      # production alias takes a few seconds to move to the new deployment.
+      - name: Verify the headers are served
+        run: |
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            # `|| true`: the step runs under `bash -e`, and a curl that times out
+            # or fails to connect while the alias is still moving would otherwise
+            # end the job instead of being retried.
+            served=$(curl -sSI --max-time 20 "$PRODUCTION_URL/" 2>&1 | tr -d '\r' || true)
+            if grep -qi '^cross-origin-opener-policy: same-origin$' <<<"$served" \
+               && grep -qi '^cross-origin-embedder-policy: require-corp$' <<<"$served"; then
+              echo "cross-origin isolation headers served by $PRODUCTION_URL"
+              exit 0
+            fi
+            echo "attempt ${attempt}: $(head -1 <<<"$served") — headers not there yet"
+            sleep 10
+          done
+          echo "::error::$PRODUCTION_URL is not serving both cross-origin isolation headers."
+          echo "::error::SharedArrayBuffer will be absent and the app will refuse to start."
+          curl -sSI --max-time 20 "$PRODUCTION_URL/"
+          exit 1

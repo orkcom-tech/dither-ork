@@ -1,0 +1,103 @@
+# The documentation site.
+#
+# Separate from ci.yml on purpose. CI answers "does this change work"; this
+# answers "is what is published current", and the two have different triggers,
+# different permissions and different failure meanings. Folding the deploy into
+# CI would also mean every green run of the test suite held a `pages: write`
+# token, which nothing in it needs.
+#
+# **This publishes the documents only.** GitHub Pages sets no custom response
+# headers, so it cannot send Cross-Origin-Opener-Policy or
+# Cross-Origin-Embedder-Policy, so a document it serves is not cross-origin
+# isolated, so `SharedArrayBuffer` is absent, so the WASM core — built with
+# `+atomics`, therefore shared memory — cannot instantiate and the capability
+# check refuses to start the app for every visitor. The application is on
+# Cloudflare Pages, which sets headers from `web/public/_headers`. Nothing in
+# this file builds `web/`, and that is the reason.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+  # Built on every pull request that touches the documents, and not deployed.
+  # The renderer refuses Markdown outside the subset it covers rather than
+  # rendering a table as a paragraph of pipes, so this is the step that turns
+  # "the site quietly got worse" into a red check on the change that did it.
+  pull_request:
+    paths:
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Deploys are serialised and never cancelled mid-flight: a cancelled deploy
+# leaves the site in whatever state the upload reached.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build the site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The generator is Node built-ins and two local modules — no package.json,
+      # no install, nothing to cache. `setup-node` is here to pin the version
+      # rather than to fetch anything.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build
+        run: node docs/site/build.mjs --out _site
+
+      # The one claim this site makes that would be actively harmful if it were
+      # wrong: that the app is elsewhere and why. Asserted, because a broken
+      # anchor here sends somebody to a blank page on a host that cannot serve
+      # the thing they came for.
+      - name: Verify the hosting note ships
+        run: |
+          grep -q 'id="where-the-app-runs"' _site/index.html \
+            || { echo "::error::the Overview lost its \"Where the app runs\" section"; exit 1; }
+          grep -q 'Cross-Origin-Embedder-Policy' _site/index.html \
+            || { echo "::error::the Overview no longer names the headers Pages cannot send"; exit 1; }
+          grep -q 'dither-ork.pages.dev' _site/index.html \
+            || { echo "::error::the Overview no longer says where the app actually runs"; exit 1; }
+          echo "the hosting note is present"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: deploy to github pages
+    # Only ever from main — the branch, not the event. A pull request and a
+    # dispatch on a topic branch both build the site to prove it still builds;
+    # publishing from either would let any branch overwrite what is live.
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      # `enablement: true` turns Pages on and sets its source to Actions the
+      # first time this runs. Recorded here rather than done by hand in the
+      # settings UI, so the site's existence is a reviewable line of the
+      # repository like everything else about it.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

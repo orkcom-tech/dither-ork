@@ -19,3 +19,6 @@ web/public/probe/
 .DS_Store
 .idea/
 .vscode/
+
+# Wrangler writes cache and account metadata here.
+.wrangler/

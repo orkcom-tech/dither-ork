@@ -1,103 +1,66 @@
 # dither-ork
 
-A free, open-source dithering application that runs in the browser.
+[![CI](https://github.com/orkcom-tech/dither-ork/actions/workflows/ci.yml/badge.svg)](https://github.com/orkcom-tech/dither-ork/actions/workflows/ci.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
-Load an image, stack dither and glitch effects in a reorderable pipeline, bind
-any parameter to a modulator, and export a seamless animated loop — or a still,
-or a vector file for print and cutting.
+<p align="center">
+  <img src="docs/images/hero.gif" alt="One illustration of a cybernetic orc, cycling through six dithered variants: a cyan and magenta halftone, a sepia one, a green one, an RGB-shift glitch, a teal displacement, and a melted smear." width="760">
+</p>
 
-**Status: it animates, work leaves the browser, and it explains itself.**
-`docker compose up` then <http://localhost:5173> gives you an editor you can
-finish something in:
+### **[Try it now →](https://dither-ork.pages.dev)**
 
-- open a picture, build a stack out of 67 effects, reorder it, edit every
-  parameter, solo any node, set per-node opacity and blend mode, change or
-  extract the palette, compare against the source, zoom and pan, undo and redo
-  without limit;
-- **animate it** — bind any numeric parameter to a modulator (sine, triangle,
-  saw, square, smooth noise, stepped random) or draw a keyframe track with five
-  interpolations, then play the loop in the viewport. Loops close **by
-  construction**: cycles-per-loop is a positive integer in the type system, so
-  frame *N* is frame 0 — the same bits, not a value within a tolerance;
-- **export a still** — PNG (indexed automatically when the picture has 256
-  colours or fewer), JPEG, WebP, or **SVG** traced into one layer per colour for
-  a cutter or an embroidery machine — with an integer nearest-neighbour scale
-  for the raster formats, a measured size estimate before you commit, progress
-  with a cancel that stops work, and copy-to-clipboard;
-- **export the loop** — GIF, APNG, animated WebP, WebM/MP4, a PNG sequence or a
-  sprite sheet, with the loop checked before anything renders and any binding
-  that would break it named on screen;
-- **run one recipe over many images** — a batch queue with per-item status, a
-  name template, a ZIP or a directory, and a cancel that stops the workers. One
-  unreadable file fails on its own and the rest of the run continues;
-- **Surprise Me** — a seeded random document generator with locks, a chaos
-  slider and a history strip. The same seed reproduces the same document;
-- **save and open `.dork` documents**, with or without the picture inside them;
-  save, apply and share presets, including six starter presets and a share link
-  that carries the whole recipe in the URL fragment and no image at all;
-- the document autosaves and comes back on reload;
-- **find the effect you mean, and be told when it is not here.** The picker
-  searches everything an effect says about itself, not its name — the glow
-  effect is called *Epsilon glow*, so a name search finds nothing and every
-  reader concludes there is no glow — and it shows *why* each row matched. When
-  a query names something the specification has and this build does not, it says
-  so, names the requirement, gives the reason, and offers the closest built
-  effects. Four such gaps are declared, and a test fails the build if one of
-  them ever becomes a real effect;
-- **read what a control does before you move it.** Rest on any parameter for
-  700 ms, or focus it and press <kbd>F1</kbd>. Every word of it is the text
-  stored beside the shader, so there is no second copy to go stale — a
-  descriptor with a missing description, or one that only restates its own
-  label, fails the catalogue and the application refuses to start;
-- **a user guide in the application** — seven written chapters (getting started,
-  the stack and why order matters, what a palette is here, linear light, the
-  index map, animation, export) and a searchable catalogue of all 67 effects
-  **generated from the registry**, so an effect added today is documented today
-  in its own author's words.
+Free, no account, nothing to install. Your images never leave your machine —
+there is no server, and the whole pipeline runs in the page.
 
-The chrome is neutral graphite and the image is the only saturated thing on
-screen. That is not a style preference: this tool's whole subject is what happens
-to a picture when colour is taken away from it, and the eye adapts to whatever
-surrounds what it is looking at, so a coloured interface biases every palette
-decision made inside it. Green is kept for one meaning — *this is live*. Light
-and dark are both there; dark is the committed default.
+A dithering application that runs in the browser. Open an image, stack effects in
+a reorderable pipeline, animate any parameter, and export a still, a seamless
+loop, or a vector file. Nothing is uploaded: there is no server.
 
-The render loop, the SVG tracer and the GIF encoder run in a **web worker** that
-owns the GPU device and the Rust core, so the window stays live while a big
-picture renders. Measured on this machine: a 2400x1800 image through a seven-node
-stack including four serial diffusion kernels occupied the worker for 5.5
-seconds, during which the main thread logged **zero long tasks over 50 ms**, and
-845 real interface interactions completed with a median latency of 0.13 ms.
-While you drag, the preview renders at reduced resolution and says so in a badge;
-it goes back to full when you let go.
+<p align="center">
+  <img src="docs/images/before-after.png" alt="The source illustration beside the same illustration reduced to a cyan and magenta halftone." width="880">
+</p>
 
-### What is not built, and is left out rather than stubbed
+<p align="center"><em>Source, and one output.</em></p>
 
-- **Temporal variation (F-AN-04)** — stepping a node's *seed* or pattern offset
-  per frame, as opposed to interpolating a parameter. The evaluator is written
-  and tested (`web/src/animation/temporal.ts`); nothing in the UI reaches it and
-  `.dork` has no field for it.
-- **Keyframe tracks do not survive a save.** Modulator bindings do —
-  `document.bindings` is their field and they round-trip through `.dork`,
-  autosave and share links. Keyframes have no place in the schema yet, so they
-  live in the timeline for the session and are gone on reload. This is stated in
-  the timeline panel.
-- **Hue-targeted recolour**.
-- Four requirements the specification names and this build does not implement.
-  They are declared in `web/src/registry/unbuilt.ts` and **the search box names
-  them** rather than coming back empty: **JPEG glitch (F-GL-06)**, which needs a
-  JPEG encoder in the render path; the **luminance-displaced line screen
-  (F-PT-09)**, the *Unknown Pleasures* ridgeline, which needs a displacement
-  driven by the picture itself; the **wave field with obstacle interaction
-  (F-PT-10)**, which needs a signed distance field that four other things also
-  want and that should be built once; and **node masking (F-PP-08)**, which is a
-  second image edge on a graph that carries one per node.
-- **Node groups** — the graph carries the edges; nothing builds them.
+## What it does
 
-Everything below under "What it will do" that is not in the lists above is still
-a plan.
+- **67 effects** in a stack you can reorder — 15 error diffusion, 6 ordered, 8
+  pattern, 16 glitch, 16 special, 6 preprocess. Any effect, any number of times,
+  each with its own opacity and blend mode.
+- **Palettes** — extract one from the image, or use one of 15 built-in hardware
+  palettes (Game Boy DMG and Pocket, six CGA modes, EGA, C64, ZX Spectrum,
+  PICO-8, Teletext, 1-bit). Import your own at runtime.
+- **Animation** — bind any numeric parameter to a modulator (sine, triangle,
+  saw, square, smooth noise, stepped random) or draw a keyframe track, then play
+  it in the viewport. Loops close by construction: cycles-per-loop is an integer
+  in the type system, so the last frame *is* frame 0, bit for bit.
+- **Export** — PNG (indexed automatically at 256 colours or fewer), JPEG, WebP,
+  and SVG traced into one layer per colour for a cutter or an embroidery
+  machine. Animated: GIF, APNG, animated WebP, WebM/MP4, PNG sequence, sprite
+  sheet. Size is estimated before you commit and cancel actually stops the work.
+- **Surprise Me** — a seeded random document with locks, a chaos slider and a
+  history strip. The same seed gives the same document.
+- **Batch** — one recipe over many images, to a ZIP or a directory. One
+  unreadable file fails alone; the run continues.
+- **Documents** — `.dork` files with or without the image inside, a preset
+  library, and share links that carry the whole recipe in the URL fragment and
+  no image at all. The document autosaves and returns on reload.
+- **Help in place** — rest on any parameter for 700 ms or press <kbd>F1</kbd>.
+  A seven-chapter guide ships with the app, and its effect catalogue is
+  generated from the registry, so a new effect is documented the day it lands.
 
----
+Rendering, the SVG tracer and the animated encoders run in a web worker that
+owns the GPU device and the Rust core, so the window stays responsive while a
+large image renders.
+
+### Nine outputs from that one source
+
+<p align="center">
+  <img src="docs/images/contact-sheet.png" alt="A three-by-three grid of nine dithered versions of the same illustration, each in a different palette and style." width="880">
+</p>
+
+Nine Surprise Me documents, same input, no hand-tuning. Six of them are the
+animation at the top.
 
 ## Run it
 
@@ -105,97 +68,93 @@ a plan.
 docker compose up
 ```
 
-Open <http://localhost:5173>. First run takes several minutes — it builds a Rust
-toolchain. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for what you should
-see and what to do when you do not.
+Then <http://localhost:5173>. That is the whole setup — Rust, `wasm-pack` and
+Node live inside the images. First run takes several minutes because it builds a
+Rust toolchain; after that the cargo registry, git cache and target directory are
+named volumes and survive `down`.
 
-`/proof.html` beside it is a development page, not part of the product: it
-renders the whole catalogue end to end and states per effect how much of the
-frame moved. It is how a shader that compiles but does not do what its name says
-gets caught.
-
-There is also a manual browser probe in `web/test/probe/` — it drives the running
-application from the console and measures the things a unit test cannot, such as
-whether the main thread stays free during a large render. See
-[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) describes what you should see and what
+to do when you do not.
 
 ## Requirements
 
-A browser that ships WebGPU: Chrome/Edge 113+, Safari 26+, Firefox 141+ on
-Windows or 145+ on macOS.
+| | |
+| --- | --- |
+| Browser | Chrome/Edge 113+, Safari 26+, Firefox 141+ (Windows) or 145+ (macOS) |
+| OS | macOS or Windows |
+| Host tooling | Docker with Compose v2 |
 
-**There is no WebGL2 fallback.** Target platforms are macOS and Windows, where
-every major browser ships WebGPU. The reasoning, and what a fallback would have
-cost, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+**WebGPU is required and there is no WebGL2 fallback.** WebGL2 has no compute
+shaders and no storage buffers; the reasoning and what a fallback would have cost
+are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## What it will do
+**Linux is not a target.** Chrome on Linux ships WebGPU only on Intel Gen12+ and
+NVIDIA under Wayland, and Firefox on Linux is Nightly-only.
 
-- **67 effects, built** — 15 error diffusion, 6 ordered, 8 pattern, 16 glitch,
-  16 special, 6 preprocess. Every one of them carries its own description and
-  search keywords, and the catalogue refuses to load without them. Four of the
-  specification's named requirements are absent and are listed above
-- **A stackable, reorderable pipeline, built** — any effect, any number of
-  times, in any order, each with its own opacity and blend mode
-- **Full colour** — automatic palette extraction, a hardware palette library
-  and CMYK halftone are built; hue-targeted recolour is not
-- **Animation, built** — a timeline editor with keyframes, parameter modulators,
-  live playback, and loops that are seamless by construction rather than by
-  luck. Temporal variation (stepping a seed per frame) is written but not
-  reachable
-- **Surprise Me, built** — a seeded random document generator with locks, a
-  chaos slider and reproducible seeds, which will animate what it makes
-- **Export, built** — PNG, JPEG, WebP and SVG with per-colour groups for cutting
-  and embroidery; GIF, APNG, animated WebP, WebM/MP4, PNG sequence and sprite
-  sheet
-- **Documents and presets, built** — `.dork` files, a preset library, starter
-  presets and share links
-- **Batch, built** — one pipeline over many images, to a ZIP or a directory
-- **It explains itself, built** — search over what an effect *is*, hover help on
-  every parameter, an in-app guide whose effect catalogue is generated, and one
-  home for every sentence: the descriptor beside the shader
+The page must be cross-origin isolated — WASM threads need `SharedArrayBuffer`,
+which needs COOP and COEP. The dev server sends both headers and the production
+build ships a `_headers` file; CI fails if either goes missing.
 
-Every requirement is numbered in the project specification.
+## What it cannot do
 
-## What it will not do
+- **No video editing.** Animated *output* is in scope. Video *input* is not, and
+  it is a separate application rather than a backlog item.
+- **No server and no API.** Everything happens in the page. A CLI is planned and
+  does not exist.
+- **No general image editing** — no layers with independent sources, no
+  selections, brushes, text or shape tools.
+- **No accounts, no collaboration, nothing generative.**
+- **Keyframe tracks do not survive a save.** Modulator bindings do; they
+  round-trip through `.dork`, autosave and share links. Keyframes have no field
+  in the schema yet, so they last the session. The timeline panel says so.
+- **Four named requirements are declared absent rather than stubbed.** They are
+  listed in `web/src/registry/unbuilt.ts`, and searching for one of them returns
+  the requirement, the reason and the nearest built effects instead of nothing.
+  A test fails the build if one of them ever becomes real:
 
-- Video editing. That is a separate future application. Animated *output* is in
-  scope; video *input* is not.
-- General image editing — layers with independent sources, selections, brushes,
-  text or shape tools.
-- Cloud accounts, server-side rendering, collaboration.
-- Anything AI or generative.
+| Requirement | What it would do | Why it is not built |
+| --- | --- | --- |
+| F-GL-06 JPEG glitch | Re-encode as JPEG at a chosen quality, corrupt the compressed bytes | Needs a JPEG encoder in the render path. Every node is a compute pass or a serial CPU kernel; this would be a third execution kind |
+| F-PP-08 Node masking | Limit any node to part of the picture, by luminance range, colour range or an uploaded mask | A mask is a second image edge, and the graph carries one image edge per node. A graph change, not an effect |
+| F-PT-09 Luminance-displaced line screen | Lines displaced by the picture's brightness — the *Unknown Pleasures* ridgeline | Nothing in the catalogue displaces by the picture itself, and it needs hidden-line removal to read as depth |
+| F-PT-10 Wave field with obstacle interaction | Waves that bend around the subject, or are blocked and leave a shadow | Needs a signed distance field, which is shared infrastructure four other things also want and should be built once |
+
+## Tests
+
+```bash
+docker compose exec -T web sh -c 'npm test -- --run'                                # 1826 tests, 118 files
+docker compose run --rm --entrypoint bash wasm -c 'cd /app/core && cargo test --all' # 157 tests
+```
+
+CI runs both, plus `cargo fmt`, `clippy -D warnings`, a typecheck, a production
+build, and a GPU golden-image comparison against a pinned Chrome for Testing
+build on SwiftShader.
 
 ## Documentation
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how it is built and why
-- [docs/API.md](docs/API.md) — the contracts between layers
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — running it locally
+| File | What is in it |
+| --- | --- |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it is built, and why |
+| [docs/API.md](docs/API.md) | The contracts between layers |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Running it locally |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | The `core/` boundary rule, and adding an effect |
+| [SECURITY.md](SECURITY.md) | What the attack surface is, and is not |
 
 ## Prior art
 
 Dithering algorithms are published academic and industry work from the 1970s
-onward and are implemented here from their descriptions.
+onward, implemented here from their descriptions. The feature set is modelled on
+[Dither Boy](https://studioaaa.com/product/dither-boy/) by Studio AAA, a
+commercial desktop application worth its price.
 
-The feature set is modelled on [Dither Boy](https://studioaaa.com/product/dither-boy/)
-by Studio AAA, which is a commercial desktop application and worth its price.
-
-Bundled palettes are factual hardware colour specifications. Curated community
-palettes are not redistributed — import them at runtime.
+The bundled palettes are factual hardware colour specifications and nothing else.
+A palette whose real values could not be established is left out rather than
+shipped with invented numbers — the NES and Apple II are the two omissions, both
+because their RGB tables are measurements of composite output rather than
+specifications. Curated community palettes are not redistributed; import them at
+runtime.
 
 ## License
 
-Copyright (C) 2026 Eduard Lugovtsov
-
-This program is free software: you can redistribute it and/or modify it under
-the terms of the GNU Affero General Public License as published by the Free
-Software Foundation, either version 3 of the License, or (at your option) any
-later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY
-WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
-PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License along
-with this program. If not, see <https://www.gnu.org/licenses/>.
-
-Full text: [LICENSE](LICENSE).
+Copyright (C) 2026 Eduard Lugovtsov. GNU Affero General Public License v3.0 or
+later — see [LICENSE](LICENSE). No warranty.
