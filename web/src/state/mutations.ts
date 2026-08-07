@@ -19,17 +19,20 @@
  * adjustment is logged. That is the same path a loaded document takes, which is
  * the point: there is no second opinion about what a legal parameter is.
  *
- * ## What is deliberately absent
+ * ## Per-node opacity and blend (F-ST-03)
  *
- * **Per-node opacity and blend (F-ST-03).** They are in the schema, they round
- * trip, and nothing here changes them — neither backend implements compositing,
- * and a control that moves nothing is worse than a missing one. See
- * `render/gpu-backend.ts`, which refuses a node carrying a non-identity
- * composite rather than ignoring it.
+ * {@link setNodeOpacity} and {@link setNodeBlend}. Both backends composite now
+ * — `graph/blend.ts` holds the arithmetic and each execution kind applies it in
+ * its own — so these change the picture rather than only the file.
+ *
+ * They are two mutations rather than one because they are two gestures: opacity
+ * is dragged and coalesces into a single undo step, blend is chosen from a menu
+ * and is one step per choice.
  */
 
 import type {
   Binding,
+  BlendMode,
   Clock,
   DitherDocument,
   Palette,
@@ -223,6 +226,60 @@ export function setNodeEnabled(
   const stack = [...document.stack];
   stack[at] = { ...node, enabled };
   log.info("node " + (enabled ? "enabled" : "disabled"), { nodeId });
+  return withStack(document, stack);
+}
+
+/**
+ * Set a node's opacity (F-ST-03).
+ *
+ * `[0, 1]`, and refused outside it rather than clamped. Opacity is not a
+ * registry parameter — it has no descriptor and therefore no legal range for
+ * `coerceParams` to clamp against — so the bound has to be stated somewhere,
+ * and stating it as a refusal keeps the one place that knows it from being a
+ * silent correction the caller never learns about.
+ */
+export function setNodeOpacity(
+  document: DitherDocument,
+  nodeId: string,
+  opacity: number,
+): DitherDocument {
+  const at = indexOfNode(document, nodeId);
+  const node = document.stack[at];
+  if (node === undefined) throw new DocumentError("unknown-node", `no node "${nodeId}"`);
+  if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) {
+    throw new DocumentError(
+      "invalid-value",
+      `opacity ${opacity} is outside 0..1`,
+      { nodeId, opacity },
+    );
+  }
+  if (node.opacity === opacity) return document;
+
+  const stack = [...document.stack];
+  stack[at] = { ...node, opacity };
+  log.info("node opacity set", { nodeId, opacity });
+  return withStack(document, stack);
+}
+
+/**
+ * Set a node's blend mode (F-ST-03).
+ *
+ * Against the node's own input, never against "the layer below": a stack node
+ * is a filter, not a layer. The arithmetic is `graph/blend.ts`.
+ */
+export function setNodeBlend(
+  document: DitherDocument,
+  nodeId: string,
+  blend: BlendMode,
+): DitherDocument {
+  const at = indexOfNode(document, nodeId);
+  const node = document.stack[at];
+  if (node === undefined) throw new DocumentError("unknown-node", `no node "${nodeId}"`);
+  if (node.blend === blend) return document;
+
+  const stack = [...document.stack];
+  stack[at] = { ...node, blend };
+  log.info("node blend set", { nodeId, blend });
   return withStack(document, stack);
 }
 

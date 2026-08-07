@@ -35,7 +35,7 @@ import type { GraphTopology } from "./topology";
 import { PORT_ORDER, analyseGraph } from "./topology";
 import { ASSET_PARAM_KEY, PALETTE_PARAM_KEY, contentHash, paletteDigest } from "./hash";
 import type { NodeAssets } from "./assets";
-import { expect } from "./errors";
+import { GraphError, expect } from "./errors";
 
 /**
  * Where a buffer a node reads comes from.
@@ -67,6 +67,11 @@ export interface ResolvedInput {
  *
  * `null` on a node at full opacity in normal blend, where the composite is the
  * identity and running it would be a full-resolution copy for nothing.
+ *
+ * The arithmetic is in `blend.ts`, and each backend applies it in its own
+ * execution kind — `gpu/composite.ts` for the parallel half, `blend.ts`'s own
+ * `compositeLinearSurface` for the serial one — so a composite never costs a
+ * boundary crossing.
  */
 export interface CompositeOp {
   readonly opacity: number;
@@ -363,6 +368,11 @@ export function planRender(
   const plannedOf = (nodeId: string, inBatch: ReadonlySet<string>): PlannedNode => {
     const node = expect(topology.byId.get(nodeId), "invariant", `node ${nodeId} missing`);
     const resolved = expect(inputs.get(nodeId), "invariant", `node ${nodeId} has no inputs`);
+    const descriptor = expect(
+      topology.descriptors.get(nodeId),
+      "invariant",
+      `node ${nodeId} has no descriptor`,
+    );
     return {
       node,
       hash: expect(hashes.get(nodeId), "invariant", `node ${nodeId} has no hash`),
@@ -371,11 +381,7 @@ export function planRender(
         "invariant",
         `node ${nodeId} has no execution kind`,
       ),
-      descriptor: expect(
-        topology.descriptors.get(nodeId),
-        "invariant",
-        `node ${nodeId} has no descriptor`,
-      ),
+      descriptor,
       inputs: resolved.map((input) => ({
         port: input.port,
         origin:
@@ -383,7 +389,7 @@ export function planRender(
             ? { kind: "batch" as const, nodeId: input.origin.nodeId }
             : input.origin,
       })),
-      composite: compositeOf(node),
+      composite: compositeOf(node, descriptor),
     };
   };
 
@@ -437,9 +443,25 @@ export function planRender(
 /**
  * Full opacity in normal blend is the identity composite, so it is `null`
  * rather than a pass that copies a full-resolution buffer onto itself.
+ *
+ * **A resampling node cannot carry one.** A composite is a node's output
+ * blended with its own input, pixel against pixel; a node that writes a
+ * different extent than it reads has no pixel-for-pixel correspondence with its
+ * input at all, so there is no picture "50% of it" could mean. Refused here,
+ * naming the node, rather than at the backend with two textures already
+ * allocated — and refused rather than silently ignored, because an opacity
+ * slider that has no effect on one node in the stack is precisely the thing
+ * this round was for.
  */
-function compositeOf(node: GraphNode): CompositeOp | null {
+function compositeOf(node: GraphNode, descriptor: EffectDescriptor): CompositeOp | null {
   if (node.opacity === 1 && node.blend === "normal") return null;
+  if (descriptor.resamples === true) {
+    throw new GraphError(
+      "unsupported-composite",
+      `node ${node.id} runs ${descriptor.name}, which writes a different extent than it reads, and asks for opacity ${node.opacity} in blend "${node.blend}"; a composite blends a node's output with its own input pixel for pixel, and those two are different pixel grids`,
+      { nodeId: node.id, effect: node.effect, opacity: node.opacity, blend: node.blend },
+    );
+  }
   return { opacity: node.opacity, blend: node.blend };
 }
 

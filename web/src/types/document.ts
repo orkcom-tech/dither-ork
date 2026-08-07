@@ -11,12 +11,31 @@ export const DOCUMENT_SCHEMA_VERSION = 1 as const;
 /** Where a node may sit in the stack. Surprise Me's grammar reads this. */
 export type NodeSlot = "preprocess" | "dither" | "postprocess";
 
+/**
+ * How a node's output is combined with the node's own input (F-ST-03).
+ *
+ * The arithmetic is in `web/src/graph/blend.ts`, evaluated in linear light like
+ * everything else in the pipeline — which is what makes the three pivoted modes
+ * (`overlay`, `hard-light`, `soft-light`) look different here than in a
+ * gamma-space compositor. That is argued where the formulas are.
+ *
+ * **Append-only.** A mode's position in `BLEND_MODES` is the ordinal that
+ * crosses into the composite shader, so inserting one in the middle renumbers
+ * the modes after it and every saved document naming one renders differently.
+ */
 export type BlendMode =
   | "normal"
   | "multiply"
   | "screen"
   | "overlay"
-  | "difference";
+  | "hard-light"
+  | "soft-light"
+  | "darken"
+  | "lighten"
+  | "difference"
+  | "exclusion"
+  | "add"
+  | "subtract";
 
 export type ColorMetric = "oklab" | "srgb";
 

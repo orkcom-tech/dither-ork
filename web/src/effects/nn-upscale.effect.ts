@@ -158,6 +158,13 @@ export default defineEffect({
   // and dilate/erode have: a rewriter, not a quantizer.
   producesIndexMap: true,
   requiresIndexMap: true,
+  // It resamples, and unlike internal resolution it is *allowed* to do so while
+  // an index map is live, because it carries the map across with it. Integer
+  // nearest replication is the only rule under which that is meaningful: every
+  // output texel takes exactly one source index, so no index is ever averaged
+  // with another. `registry/stack.ts` reads `resamples` together with
+  // `producesIndexMap` for precisely this distinction.
+  resamples: true,
 });
 
 /** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */

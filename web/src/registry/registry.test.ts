@@ -353,6 +353,19 @@ describe("validateEffect rejects", () => {
     );
   });
 
+  it("a serial effect that claims to resample", () => {
+    // A changed extent is a `PassExtent` on a compute pass and a serial kernel
+    // has none, so nothing could honour the claim — while the stack grammar and
+    // the plan would both start refusing placements that in fact work.
+    rejects(
+      validateEffect({ ...DIFFUSION, resamples: true }),
+      "resampler-must-run-on-gpu",
+      "a serial kernel has no extent rule",
+    );
+    // The same claim on the parallel path is exactly what F-PP-01 declares.
+    accepts(withFields({ resamples: true }));
+  });
+
   it("an effect that excludes itself", () => {
     rejects(
       validateEffect(withFields({ excludes: ["bayer-4"] })),
@@ -947,6 +960,7 @@ const EVERY_FAILURE_MODE: Record<RegistryIssueCode, true> = {
   "self-exclusion": true,
   "diffusion-must-run-serially": true,
   "index-map-consumer-in-preprocess": true,
+  "resampler-must-run-on-gpu": true,
   "duplicate-param-key": true,
   "empty-param-key": true,
   "missing-surprise": true,

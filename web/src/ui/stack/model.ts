@@ -64,15 +64,33 @@ export const BLEND_LABEL: Record<BlendMode, string> = {
   multiply: "Multiply",
   screen: "Screen",
   overlay: "Overlay",
+  "hard-light": "Hard light",
+  "soft-light": "Soft light",
+  darken: "Darken",
+  lighten: "Lighten",
   difference: "Difference",
+  exclusion: "Exclusion",
+  add: "Add",
+  subtract: "Subtract",
 };
 
+// Menu order, which is the order `graph/blend.ts` numbers them in: the
+// separable pairs together (multiply/screen, the three pivots, darken/lighten,
+// difference/exclusion, add/subtract) so the menu reads as pairs rather than as
+// a list.
 export const BLEND_MODES = [
   "normal",
   "multiply",
   "screen",
   "overlay",
+  "hard-light",
+  "soft-light",
+  "darken",
+  "lighten",
   "difference",
+  "exclusion",
+  "add",
+  "subtract",
 ] as const satisfies readonly BlendMode[];
 
 export function isBlendMode(value: string): value is BlendMode {

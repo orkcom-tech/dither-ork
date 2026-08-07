@@ -227,6 +227,14 @@ export default defineEffect({
   surpriseWeight: 1.3,
   producesIndexMap: false,
   requiresIndexMap: false,
+  // It writes an extent it did not read, and it writes no index map. That pair
+  // is what `registry/stack.ts` refuses downstream of a quantizer: interpolating
+  // palette indices is meaningless — the average of index 3 and index 7 is not a
+  // colour — so there is nothing this node could do to the map, and leaving it
+  // at the old extent beside resampled colour is a buffer whose two halves name
+  // different pixel grids. `gpu/compiler.ts` checks this flag against the extent
+  // rules on the two passes above, so it cannot drift from them.
+  resamples: true,
 });
 
 /** Resolves this effect's id to its passes; see `registry/gpu-effects.ts`. */

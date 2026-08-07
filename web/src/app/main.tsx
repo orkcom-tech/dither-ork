@@ -1,8 +1,11 @@
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
 
+import { hasPresetStorage, opfsPresetStorage } from "../io/document";
 import { correlationId, logger } from "../lib/log";
 import { createEditorSession, type EditorSession } from "../state";
+import { registerDocumentsToolbar } from "../ui/documents";
+import { registerExportControls } from "../ui/export";
 import { paletteStore } from "../ui/palette";
 import { registerStackPanel } from "../ui/stack";
 import { registerPropertiesPanel } from "../ui/properties";
@@ -114,6 +117,19 @@ async function start(): Promise<void> {
   registerStackPanel({ store: session.store, registry: outcome.registry });
   registerPropertiesPanel({ store: session.store, registry: outcome.registry });
   registerToolbar(session);
+  // Documents before export, which is the order the two are reached in: you
+  // save or open the recipe far more often than you write the finished file.
+  // `hasPresetStorage()` decides only whether the preset *library* exists;
+  // saving a `.dork` and making a share link never depend on OPFS, so a browser
+  // without it loses one section of one dialog and says so there.
+  registerDocumentsToolbar({
+    store: session.store,
+    openImageFile: (file) => session.openFile(file),
+    storage: hasPresetStorage() ? opfsPresetStorage() : null,
+    href: window.location.href,
+    hash: window.location.hash,
+  });
+  registerExportControls(session);
   installHistoryShortcuts(session);
 
   // Autosave is debounced, so a tab closing mid-debounce would lose the last

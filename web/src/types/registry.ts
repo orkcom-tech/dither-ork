@@ -350,6 +350,26 @@ export interface EffectDescriptor {
    * are excluded by the grammar, not filtered after generation (F-SM-03).
    */
   readonly excludes?: readonly string[];
+  /**
+   * True when this node writes a different extent than it reads — internal
+   * resolution (F-PP-01) down, nearest upscale (F-SP-14) up.
+   *
+   * Optional because sixty-five of the sixty-seven effects in the catalogue
+   * write what they read, and making all of them restate `resamples: false`
+   * would put the interesting declaration where nobody looks. Absent means the
+   * same extent, exactly as an absent `PassExtent` does.
+   *
+   * It is here rather than derived from the effect's passes because the two
+   * readers that need it have no passes to look at. `registry/stack.ts` checks
+   * a stack the user is *building*, before anything is compiled, and refuses a
+   * resampler placed where an index map is live — indices cannot be resampled
+   * meaningfully, so that combination is not renderable and must not be
+   * buildable. `graph/plan.ts` refuses a composite on a resampling node, whose
+   * output and input are different pixel grids. The declaration cannot drift
+   * from the passes: `gpu/compiler.ts` checks the two agree, both ways, every
+   * time an effect is compiled.
+   */
+  readonly resamples?: boolean;
 }
 
 /**
@@ -520,6 +540,7 @@ export type RegistryIssueCode =
   | "self-exclusion"
   | "diffusion-must-run-serially"
   | "index-map-consumer-in-preprocess"
+  | "resampler-must-run-on-gpu"
   | "duplicate-param-key"
   | "empty-param-key"
   | "missing-surprise"
@@ -1128,6 +1149,21 @@ export function validateEffect(effect: EffectDescriptor): readonly RegistryIssue
         id,
         "index-map-consumer-in-preprocess",
         "reads the index map but sits before the dither slot, where none exists yet",
+      ),
+    );
+  }
+
+  // Resampling is expressed as a `PassExtent` on a compute pass, and a serial
+  // kernel has none. A `wasm` effect claiming to resample is a declaration
+  // nothing could honour: the WASM backend hands back a buffer at the extent it
+  // was given, so the stack grammar would refuse combinations that in fact
+  // render, and the graph would refuse composites that in fact compose.
+  if (effect.resamples === true && effect.execution !== "gpu") {
+    issues.push(
+      issue(
+        id,
+        "resampler-must-run-on-gpu",
+        `declares resamples: true with execution "${effect.execution}"; a changed extent is a PassExtent on a compute pass and a serial kernel has none`,
       ),
     );
   }

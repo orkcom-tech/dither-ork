@@ -31,6 +31,14 @@ export {
   paletteDigest,
 } from "./hash";
 
+export {
+  BLEND_MODES,
+  BLEND_ORDINAL,
+  blendChannel,
+  compositeChannel,
+  compositeLinearSurface,
+} from "./blend";
+
 export { NodeAssetStore } from "./assets";
 export type { NodeAsset, NodeAssetStoreOptions, NodeAssets } from "./assets";
 

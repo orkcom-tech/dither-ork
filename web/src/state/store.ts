@@ -30,6 +30,7 @@
 
 import type {
   Binding,
+  BlendMode,
   Clock,
   DitherDocument,
   Palette,
@@ -177,6 +178,56 @@ export class DocumentStore {
     this.#changed();
   }
 
+  /**
+   * Replace the open document — a `.dork` opened, a preset applied, a shared
+   * link taken (F-DO-01, F-DO-03, F-DO-06).
+   *
+   * One undo step, like every other command: opening a document is something a
+   * person can change their mind about, and the alternative — clearing the
+   * history — throws away the work that was on screen with no way back to it.
+   *
+   * ## The source reference is rewritten to the image that is open
+   *
+   * The decoded image is *not* touched: whether to open one is the caller's
+   * decision, and the documents panel makes it — a self-contained `.dork` goes
+   * back through the ordinary intake immediately after this returns, which
+   * rewrites the reference again through `openSource`.
+   *
+   * But a document arriving here names whatever image it was built on, and that
+   * may not be the image the session holds. `openSource` maintains the
+   * invariant that no reachable state names an image that is not loaded, and a
+   * document dropped in over the top would break it — a save or an autosave
+   * would then record a picture the recipe was not applied to. So when an image
+   * is open the incoming reference is replaced by it: the document is now the
+   * recipe for the picture on screen, and that is what it says. With nothing
+   * open the document keeps its own reference, which is what lets the panel
+   * tell the user which image to go and find.
+   */
+  loadDocument(document: DitherDocument, label: string): void {
+    const next =
+      this.#source === null ? document : mutate.setSource(document, sourceRefOf(this.#source));
+    log.info("document loaded", {
+      label,
+      nodes: next.stack.length,
+      palette: next.palette.id,
+      source: next.source?.name ?? "none",
+    });
+    // Selection and solo are positions in a stack that has just been replaced,
+    // and they are cleared *before* the commit so the whole replacement is one
+    // notification rather than two. Solo is the one that matters:
+    // `buildRenderGraph` refuses a solo point that is not in the stack, so a
+    // stale one turns every later render into an error rather than into a wrong
+    // picture — the same reason `#afterHistoryMove` clears it after undo.
+    if (this.#selected !== null && !next.stack.some((node) => node.id === this.#selected)) {
+      this.#selected = null;
+    }
+    if (this.#solo !== null && !next.stack.some((node) => node.id === this.#solo)) {
+      log.info("solo cleared: the loaded document has no such node", { nodeId: this.#solo });
+      this.#solo = null;
+    }
+    this.#commit(next, label);
+  }
+
   // --- stack (F-ST-01, F-ST-02) ----------------------------------------
 
   addNode(effectId: string, index?: number): string {
@@ -222,6 +273,29 @@ export class DocumentStore {
     const next = mutate.setNodeEnabled(this.document, nodeId, enabled);
     if (next === this.document) return;
     this.#commit(next, `${enabled ? "Enable" : "Disable"} ${this.#effectNameOf(nodeId)}`);
+  }
+
+  /**
+   * Per-node opacity (F-ST-03).
+   *
+   * `continuous` for the same reason `setNodeParam` has it: a drag is one
+   * gesture and one undo step, not one per pointer move.
+   */
+  setNodeOpacity(nodeId: string, opacity: number, options: CommitOptions = {}): void {
+    const next = mutate.setNodeOpacity(this.document, nodeId, opacity);
+    if (next === this.document) return;
+    this.#commit(
+      next,
+      `${this.#effectNameOf(nodeId)}: opacity`,
+      options.continuous === true ? `opacity:${nodeId}` : null,
+    );
+  }
+
+  /** Per-node blend mode (F-ST-03). One undo step per choice. */
+  setNodeBlend(nodeId: string, blend: BlendMode): void {
+    const next = mutate.setNodeBlend(this.document, nodeId, blend);
+    if (next === this.document) return;
+    this.#commit(next, `${this.#effectNameOf(nodeId)}: blend`);
   }
 
   /** The node's own seed, not a `seed` parameter (F-SM-02). */

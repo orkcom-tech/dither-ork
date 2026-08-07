@@ -15,6 +15,7 @@
  * - `instance.ts`   per-node bulk data: curve LUTs, uploaded threshold tiles
  * - `boundary.ts`   readback and upload, every crossing measured
  * - `scheduler.ts`  pass coalescing and batch execution
+ * - `composite.ts`  per-node opacity and blend (F-ST-03); the one non-effect program
  * - `prepare.ts`    one node to its scheduled passes: extent, uniforms, bulk data
  * - `matrices.ts`   the threshold-matrix upload interface
  * - `effects/`      per-effect passes; the WGSL lives in `web/src/shaders/`
@@ -41,6 +42,7 @@ export {
 
 export {
   dispatchCounts,
+  validateResamplingDeclaration,
   PassCompileError,
   PassCompiler,
   type BindingPlan,
@@ -50,6 +52,9 @@ export {
   type ScratchBinding,
   type TableBinding,
 } from "./compiler";
+
+export { CompositeError, CompositeProgram } from "./composite";
+export type { CompositeRequest } from "./composite";
 
 export {
   assertExtent,

@@ -6,22 +6,34 @@ Load an image, stack dither and glitch effects in a reorderable pipeline, bind
 any parameter to a modulator, and export a seamless animated loop — or a still,
 or a vector file for print and cutting.
 
-**Status: it is an application, and it is early.** `docker compose up` then
-<http://localhost:5173> gives you a working still-image editor: open a picture,
-build a stack out of 67 effects, reorder it, edit every parameter, solo any
-node, change or extract the palette, compare against the source, zoom and pan,
-undo and redo without limit. The document autosaves and comes back on reload.
+**Status: it is a still-image application, and work leaves the browser.**
+`docker compose up` then <http://localhost:5173> gives you an editor you can
+finish something in:
 
-What is **not** built: export of any kind — nothing leaves the browser yet, so
-what you make you can only look at. Nor is there animation (no timeline, no
-modulators, no playback), Surprise Me, presets, batch, or saving a `.dork` to a
-file you choose. Per-node opacity and blend are in the document format but have
-no implementation, so the editor does not offer them. The render loop runs on
-the main thread rather than in a worker, which a long stack at a large size will
-show you.
+- open a picture, build a stack out of 67 effects, reorder it, edit every
+  parameter, solo any node, set per-node opacity and blend mode, change or
+  extract the palette, compare against the source, zoom and pan, undo and redo
+  without limit;
+- **export** PNG (indexed automatically when the picture has 256 colours or
+  fewer), JPEG, WebP, or **SVG** traced into one layer per colour for a cutter
+  or an embroidery machine — with an integer nearest-neighbour scale for the
+  raster formats, a measured size estimate before you commit, progress with a
+  cancel that stops work, and copy-to-clipboard;
+- **save and open `.dork` documents**, with or without the picture inside them;
+  save, apply and share presets, including six starter presets and a share link
+  that carries the whole recipe in the URL fragment and no image at all;
+- the document autosaves and comes back on reload.
 
-Everything below under "What it will do" that is not in the first paragraph is
-still a plan.
+What is **not** built, and is left out rather than stubbed: **animation** — no
+timeline, no modulators, no playback, and therefore none of the animated export
+formats (GIF, APNG, MP4/WebM, sprite sheet, PNG sequence). Nor is there Surprise
+Me, batch, or hue-targeted recolour. The render loop runs on the **main thread**
+rather than in a worker, which a long stack at a large size will show you; an
+SVG trace of a large image blocks it for the length of the trace for the same
+reason.
+
+Everything below under "What it will do" that is not in the list above is still
+a plan.
 
 ---
 
@@ -55,16 +67,18 @@ cost, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
   16 special, 6 preprocess. One of the specification's named effects is
   deliberately absent: JPEG glitch, which needs an encoder in the render path
 - **A stackable, reorderable pipeline, built** — any effect, any number of
-  times, in any order. Per-node blend and opacity are specified and not yet
-  implemented
+  times, in any order, each with its own opacity and blend mode
 - **Full colour** — automatic palette extraction, a hardware palette library
   and CMYK halftone are built; hue-targeted recolour is not
 - **Animation** — a timeline editor with keyframes, parameter modulators, live
   playback, and loops that are seamless by construction rather than by luck
 - **Surprise Me** — a seeded random document generator with locks and a chaos
   slider, built to produce usable results rather than noise
-- **Export** — PNG, JPEG, WebP, GIF, APNG, MP4/WebM, PNG sequence, sprite
-  sheet, and SVG with per-colour groups for cutting and embroidery
+- **Export** — PNG, JPEG, WebP and SVG with per-colour groups for cutting and
+  embroidery are built; GIF, APNG, MP4/WebM, PNG sequence and sprite sheet wait
+  on animation
+- **Documents and presets, built** — `.dork` files, a preset library, starter
+  presets and share links
 - **Batch** — one pipeline over many images
 
 Every requirement is numbered in the project specification.

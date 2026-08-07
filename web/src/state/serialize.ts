@@ -40,12 +40,23 @@ import { DocumentError } from "./errors";
 
 const log = logger("app");
 
+// The accepted set, in the order `graph/blend.ts` numbers them. A `.dork`
+// naming anything else is rejected rather than defaulted to `normal`: a blend
+// mode a build does not have is a document from a newer build, and rendering it
+// as normal would show a picture the file does not describe.
 const BLEND_MODES: readonly BlendMode[] = [
   "normal",
   "multiply",
   "screen",
   "overlay",
+  "hard-light",
+  "soft-light",
+  "darken",
+  "lighten",
   "difference",
+  "exclusion",
+  "add",
+  "subtract",
 ];
 
 const MODULATOR_SHAPES: readonly ModulatorShape[] = [

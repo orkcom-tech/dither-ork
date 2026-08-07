@@ -51,6 +51,12 @@ export type GraphErrorCode =
   | "node-set-mismatch"
   /** A frame count that is not a positive integer. */
   | "invalid-frame-count"
+  /**
+   * A node asks for a composite that cannot be expressed — today, opacity or a
+   * blend mode on a node that resamples, whose output and input are different
+   * pixel grids (F-ST-03).
+   */
+  | "unsupported-composite"
   /** An internal invariant the graph maintains itself was violated. */
   | "invariant";
 

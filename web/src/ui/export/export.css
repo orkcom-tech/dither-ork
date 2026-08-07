@@ -1,0 +1,153 @@
+/*
+ * The export dialog.
+ *
+ * Every colour is a token from src/ui/theme.css — the shell's rule, and what
+ * makes both themes work (F-UI-09). Nothing here is a literal.
+ */
+
+.xp-dialog {
+  width: min(420px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--fg);
+  box-shadow: var(--shadow);
+}
+
+.xp-dialog::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.xp-dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  height: var(--panel-header-h);
+  padding: 0 var(--gap);
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-sunken);
+}
+
+.xp-dialog__title {
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+
+.xp {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--gap);
+}
+
+.xp__row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.xp__row .ui-label {
+  flex: 0 0 56px;
+}
+
+.xp__group {
+  display: flex;
+  gap: 4px;
+}
+
+.xp__value {
+  min-width: 44px;
+  text-align: right;
+  font-size: var(--text-sm);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.xp__note {
+  font-size: var(--text-xs);
+  color: var(--fg-dim);
+}
+
+.xp__detail {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--fg-faint);
+}
+
+.xp__slider {
+  flex: 1 1 auto;
+  accent-color: var(--accent);
+}
+
+.xp__readout {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+}
+
+.xp__size {
+  font-size: var(--text-md);
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+.xp__notice {
+  margin: 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--warn);
+  background: var(--bg-inset);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--fg-dim);
+}
+
+.xp__notice--error {
+  border-left-color: var(--fail);
+  color: var(--fail);
+}
+
+.xp__notice--ok {
+  border-left-color: var(--ok);
+  color: var(--fg-dim);
+}
+
+.xp__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.xp__actions .ui-button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.xp__actions .ui-button--primary:hover:not(:disabled) {
+  color: var(--accent-fg);
+}
+
+.xp__spacer {
+  flex: 1 1 auto;
+}
+
+.xp__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.xp__progress progress {
+  flex: 1 1 auto;
+  height: 6px;
+  accent-color: var(--accent);
+}

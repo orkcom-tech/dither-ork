@@ -1,9 +1,14 @@
 /**
- * The Rust core, as the renderer uses it.
+ * The Rust core, as the application uses it.
  *
- * Three surfaces come out of `dither-wasm` and nothing else in the render path
- * touches the generated package: the diffusion kernels, the two threshold-tile
- * generators, and the shipped hardware palettes.
+ * Four surfaces come out of `dither-wasm` and nothing else touches the
+ * generated package: the diffusion kernels, the two threshold-tile generators,
+ * the shipped hardware palettes, and the SVG tracer.
+ *
+ * The tracer is here rather than in `export/` for the same reason as the rest
+ * of it: this is the one file allowed to hold a `wasm-bindgen` handle, and the
+ * tracer's result is one. `export/trace.ts` states what it needs as an
+ * interface and `ui/export/session.ts` satisfies it from here.
  *
  * **Handles are freed here and nowhere else.** Everything returned across the
  * boundary that is not a typed array is a `wasm-bindgen` handle holding linear
@@ -18,6 +23,7 @@
  */
 
 import type { Palette } from "../../types/document";
+import type { TracedDocument, VectorTraceSettings } from "../../export";
 import { logger } from "../../lib/log";
 import type { DiffusionPort, DiffusionRequest, DiffusionResult } from "./wasm-backend";
 import type { ThresholdRankSource } from "./effects";
@@ -48,6 +54,22 @@ export interface DitherCore extends ThresholdRankSource, DiffusionPort {
   readonly kernels: readonly CoreKernel[];
   /** The hardware palette library (F-CO-04), in catalogue order. */
   readonly palettes: readonly Palette[];
+  /**
+   * Trace an index map to SVG (F-EX-08, F-EX-09, F-EX-10).
+   *
+   * Synchronous, and deliberately: it is one call over a buffer that is already
+   * in memory, and making it a promise would suggest a cancellation point that
+   * does not exist inside it. It blocks the main thread for as long as the
+   * trace takes, which is the same statement `renderer.ts` already makes about
+   * the render loop.
+   */
+  traceSvg(
+    indices: Uint16Array,
+    width: number,
+    height: number,
+    paletteRgb: Uint8Array,
+    settings: VectorTraceSettings,
+  ): TracedDocument;
 }
 
 /** Load and initialise the core. Called once, at boot. */
@@ -73,6 +95,8 @@ export async function loadDitherCore(): Promise<DitherCore> {
     bayerRanks: (size) => mod.bayerRanks(size),
     blueNoiseRanks: (size, seed) => mod.blueNoiseRanks(size, seed),
     dither: (request) => runDither(mod, request),
+    traceSvg: (indices, width, height, paletteRgb, settings) =>
+      runTrace(mod, indices, width, height, paletteRgb, settings),
   };
 }
 
@@ -139,6 +163,56 @@ function runDither(mod: CoreModule, request: DiffusionRequest): DiffusionResult 
       return { pixels: output.pixels, indices: output.indices };
     } finally {
       output.free();
+    }
+  } finally {
+    options.free();
+  }
+}
+
+/**
+ * One trace (F-EX-08).
+ *
+ * Two handles, both freed in a `finally`, for the reason {@link runDither}
+ * gives: every getter copies out of linear memory, and a value read after
+ * `free()` is a read of memory the allocator has handed to something else.
+ * `traceSvg` throws on a palette index the palette does not have, so the
+ * failure path through here is live and neither handle may leak on it.
+ */
+function runTrace(
+  mod: CoreModule,
+  indices: Uint16Array,
+  width: number,
+  height: number,
+  paletteRgb: Uint8Array,
+  settings: VectorTraceSettings,
+): TracedDocument {
+  const options = new mod.TraceOptions();
+  try {
+    options.mode =
+      settings.mode === "simplified" ? mod.TraceMode.Simplified : mod.TraceMode.PixelPerfect;
+    options.tolerance = settings.tolerance;
+    options.minFeatureArea = settings.minFeatureArea;
+    options.strokeOnly = settings.strokeOnly;
+    options.strokeWidth = settings.strokeWidth;
+
+    const traced = mod.traceSvg(indices, width, height, paletteRgb, options);
+    try {
+      return {
+        svg: traced.svg,
+        report: {
+          layers: traced.layers,
+          contours: traced.contours,
+          points: traced.points,
+          contoursDropped: traced.contoursDropped,
+          regionsDropped: traced.regionsDropped,
+          regionPixelsDropped: traced.regionPixelsDropped,
+          holesFilled: traced.holesFilled,
+          holePixelsFilled: traced.holePixelsFilled,
+          uncoveredPixels: traced.uncoveredPixels,
+        },
+      };
+    } finally {
+      traced.free();
     }
   } finally {
     options.free();

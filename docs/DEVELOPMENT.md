@@ -23,10 +23,18 @@ all named volumes and survive `down`.
 
 ### What you should see
 
-The application: a toolbar, a stack panel on the left, a viewport in the middle,
-properties and palette on the right, and a status bar reading `effects 67` with
-the GPU adapter beside it. Press **open image**, choose a picture, press **add
-node**, and pick an effect.
+The application: a toolbar reading **open image · undo · redo · fit · 100% ·
+save · open · presets · export**, a stack panel on the left, a viewport in the
+middle, properties and palette on the right, and a status bar reading
+`effects 67` with the GPU adapter beside it. Press **open image**, choose a
+picture, press **add node**, and pick an effect.
+
+To check the whole application in one pass: open an image, add
+brightness/contrast then Floyd-Steinberg, press **export** and write a PNG;
+raise the scale to 4x and write another; switch the format to **SVG** and write
+that; press **save** for a `.dork`, reload the page, press **open** and load it
+back — the picture should return exactly. Every one of those is a path a person
+takes, and none of them is covered by any of the three test suites.
 
 If instead you get one full-page screen naming a missing capability, that is
 F-UI-12 and it is working: WebGPU and `SharedArrayBuffer` are hard requirements
@@ -193,8 +201,14 @@ What the web suite covers today:
 | `src/graph/sha256.test.ts` | The published SHA-256 vectors, and both sides of every padding boundary |
 | `src/registry/catalogue.test.ts` | The **acceptance gate**: the real startup validator over the real shipped descriptors, plus the asserted counts by family, execution and slot |
 | `src/registry/gpu-effects.test.ts` | That every `gpu` effect resolves to passes and every source belongs to a registered effect |
-| `src/registry/stack.test.ts` | Stack grammar: slot order, and that an index-map reader sits downstream of a quantizer |
+| `src/registry/stack.test.ts` | Stack grammar: slot order, that an index-map reader sits downstream of a quantizer, and that a resampler is refused where an index map is live unless it carries the map |
 | `src/registry/document-round-trip.test.ts` | A `.dork` parameter set survives save and load |
+| `src/graph/blend.test.ts` | The twelve blend formulas, in linear light, and that full opacity in normal is the identity |
+| `src/export/png.test.ts`, `zlib.test.ts`, `crc32.test.ts` | The PNG encoder written here: chunk framing, filters, bit depths 1/2/4/8, `tRNS`, and a deflate stream a real inflater accepts |
+| `src/export/census.test.ts` | F-EX-01's "is the output indexed" — the colour count, the bail past 256, the palette order, and index replication under the scale multiplier |
+| `src/export/trace.test.ts` | The vector path either side of the WASM call: index widening, the palette flatten in linear light, the clamps that keep a slider off a value the core throws on, and that a >256-colour frame is refused rather than quantized again |
+| `src/export/estimate.test.ts` | That the estimate below the budget *is* the file size, and above it lands close |
+| `src/io/document/*.test.ts` | `.dork` in and out including the self-contained variant, presets, the preset library, share fragments, and the starter set validated against the **real** catalogue |
 
 `registry.test.ts` ends with a coverage assertion built on a
 `Record<RegistryIssueCode, true>`: adding a rejection code to the validator
@@ -632,5 +646,17 @@ entrypoint reinstall.
   (`app/slots.ts`); the integration is one import from `app/main.tsx`. Nothing
   central is edited, so two panels written in parallel cannot conflict.
 - **A control that cannot work is left out, not disabled with a tooltip.**
-  Per-node opacity and blend are the standing example: in the schema, refused by
-  both backends, and absent from the stack row.
+  Per-node opacity and blend used to be the standing example — in the schema,
+  refused by both backends, and absent from the stack row. They are now
+  implemented and the controls are back, which is how that rule is supposed to
+  end. The rule still holds on the same node: the two controls are **hidden** on
+  a node that resamples, because its output and its own input are different
+  pixel grids and there is nothing a person could change to make a composite
+  apply. Hidden rather than disabled, for exactly that reason.
+- **A control that would do nothing in a given mode is hidden, not shown inert.**
+  The export panel is the other example: no scale multiplier for SVG, which has
+  no pixel grid; no quality slider for a lossless format; no tolerance slider
+  outside the simplified trace mode; no stroke width unless outlines are on.
+- **Every refusal names the thing and the way out.** "This picture has more than
+  256 distinct colours, so it cannot be traced to SVG. Put a quantizing node in
+  the stack, or export PNG" is the shape — not "unsupported".

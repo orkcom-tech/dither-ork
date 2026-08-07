@@ -65,11 +65,20 @@ const EXPECTED_BY_SLOT: Readonly<Record<NodeSlot, number>> = {
 
 const EXPECTED_TOTAL = 67;
 
-/** Every WGSL file the build ships, keyed by the effect id it is named for. */
+/**
+ * Every WGSL file the build ships, keyed by the effect id it is named for.
+ *
+ * A leading underscore marks a shader that is **not** an effect and therefore
+ * has no id to be named for. There is one: `_composite.wgsl`, the per-node
+ * opacity and blend program (F-ST-03), which belongs to the GPU layer rather
+ * than to the catalogue. The prefix is the whole convention — it keeps the
+ * "every shader is claimed" check below strict for the 52 that are effects
+ * instead of turning it into a list of exceptions.
+ */
 const SHADER_IDS: ReadonlySet<string> = new Set(
-  Object.keys(
-    import.meta.glob("../shaders/*.wgsl", { eager: true, query: "?raw" }),
-  ).map((path) => path.replace(/^.*\//, "").replace(/\.wgsl$/, "")),
+  Object.keys(import.meta.glob("../shaders/*.wgsl", { eager: true, query: "?raw" }))
+    .map((path) => path.replace(/^.*\//, "").replace(/\.wgsl$/, ""))
+    .filter((id) => !id.startsWith("_")),
 );
 
 describe("the shipped catalogue", () => {

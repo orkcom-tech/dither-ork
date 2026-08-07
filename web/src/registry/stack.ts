@@ -10,6 +10,10 @@
  *   (outline F-SP-10, dilate/erode F-SP-11, and, when they arrive, hue-targeted
  *   recolour F-CO-09, index remap F-CO-10 and the SVG tracer F-EX-08), and
  *   `producesIndexMap` names the quantizers that emit one;
+ * - **extents** — `resamples` names the nodes that write a different extent than
+ *   they read (internal resolution F-PP-01 down, nearest upscale F-SP-14 up),
+ *   and one of those may not run while an index map is live unless it carries
+ *   the map with it. See "Extents" below;
  * - **exclusions** — `excludes` names effects that must not share a stack
  *   (F-SM-03: "mutually incompatible combinations are excluded by the grammar
  *   rather than filtered after the fact").
@@ -25,6 +29,37 @@
  * know that was in the descriptors the whole time. Surprise Me must not
  * *generate* that stack, and the stack editor must not let it be *built*, so
  * both call this and neither carries a copy of the rule.
+ *
+ * ## Extents, and why resampling an index map is not merely unimplemented
+ *
+ * A quantizing node leaves the pipeline carrying two things that describe the
+ * same pixel grid: RGBA colour, and one palette index per pixel. A node that
+ * resamples rewrites the colour onto a *different* grid. What should happen to
+ * the indices?
+ *
+ * Nothing defensible, is the answer, and that is a fact about palette indices
+ * rather than a gap in the code. An index is a **name**, not a quantity: the
+ * average of index 3 and index 7 is index 5, which is some unrelated colour,
+ * and no filter — box, Lanczos, bilinear — means anything applied to names.
+ * **Nearest is the only rule that is even coherent**, because it copies a name
+ * instead of averaging two, and even nearest only lines up with the colour when
+ * the colour is resampled by nearest at the same integer factor. That is
+ * exactly one node in the catalogue: nearest upscale (F-SP-14), which
+ * replicates each texel into the block it now covers and carries colour and
+ * index across together, and which therefore declares `producesIndexMap`.
+ *
+ * So the rule is not "no resampling after a quantizer". It is: **a node that
+ * resamples while an index map is live must produce the map it leaves behind.**
+ * Internal resolution (F-PP-01) offers box and Lanczos filters — genuine
+ * interpolations — and writes no index map, so after a dither it would leave
+ * indices at the old extent naming a different pixel grid than the colours
+ * beside them. Losslessly wrong, and invisible until an outline or the SVG
+ * tracer read them.
+ *
+ * `web/src/gpu/scheduler.ts` already refuses that combination, and refuses it
+ * correctly — but at render time, as an error banner, after the user has built
+ * the thing. The information was in the descriptors the whole time. It is the
+ * same shape as the index-map rule above and it belongs in the same place.
  *
  * ## Disabled nodes
  *
@@ -60,6 +95,12 @@ export type StackIssueCode =
   | "unknown-effect"
   /** A node reads the index map with no live quantizer in front of it. */
   | "index-map-missing"
+  /**
+   * A node resamples colour while an index map is live, and writes no index map
+   * of its own — so the two halves of the buffer would name different pixel
+   * grids. See "Extents" above.
+   */
+  | "index-map-resampled"
   /** Two nodes the grammar declares incompatible. */
   | "excluded-combination";
 
@@ -146,6 +187,25 @@ export function validateStack(
           blame === null || blameDescriptor === undefined
             ? `${descriptor.name} (node ${node.id}) reads the index map, and nothing in front of it quantizes — add a dither that emits one`
             : `${descriptor.name} (node ${node.id}) reads the index map, but the dither in front of it is ${blameDescriptor.name} (node ${blame.id}), which emits none`,
+      });
+    }
+
+    // Extents. Checked before the producer is updated, because what matters is
+    // the map that is live *as this node runs* — a resampler that writes its own
+    // map (nearest upscale) is legal precisely because it replaces the one it
+    // was handed rather than leaving it behind.
+    if (descriptor.resamples === true && producer !== null && !descriptor.producesIndexMap) {
+      const producerDescriptor = descriptors.get(producer.id);
+      issues.push({
+        code: "index-map-resampled",
+        nodeId: node.id,
+        effect: node.effect,
+        otherNodeId: producer.id,
+        otherEffect: producer.effect,
+        message:
+          producerDescriptor === undefined
+            ? `${descriptor.name} (node ${node.id}) resamples the image while the index map from node ${producer.id} is still live, and writes no index map of its own`
+            : `${descriptor.name} (node ${node.id}) resamples the image while the index map from ${producerDescriptor.name} (node ${producer.id}) is still live, and writes no index map of its own — palette indices cannot be interpolated, so the colours and the indices would end up naming different pixel grids. Move it in front of ${producerDescriptor.name}, or use Nearest upscale, which carries the map across.`,
       });
     }
 

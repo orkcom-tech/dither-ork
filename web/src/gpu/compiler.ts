@@ -26,7 +26,7 @@ import {
 } from "../types/gpu";
 import { logger } from "../lib/log";
 import type { GpuContext, GpuLimits } from "./device";
-import { passExtentRule } from "./extent";
+import { passExtentRule, resizes } from "./extent";
 import type { BufferCache } from "./resources";
 import { validateUniformLayout } from "./uniforms";
 
@@ -343,6 +343,39 @@ function validateExtent(pass: ComputePass, plan: MutablePlan): void {
 }
 
 /**
+ * `EffectDescriptor.resamples` against what the passes actually declare.
+ *
+ * The descriptor's flag is read by two layers that never see a pass:
+ * `registry/stack.ts`, which refuses a resampler placed where an index map is
+ * live, and `graph/plan.ts`, which refuses a composite on a node whose output
+ * and input are different pixel grids. Both are refusals — so a flag that has
+ * drifted from the passes does not produce a wrong picture, it produces a
+ * *permission*: a stack the grammar accepts and the scheduler then rejects with
+ * a `ScheduleError`, which is the exact defect the flag exists to close.
+ *
+ * Checked in both directions, once per effect, at compile time. This is the
+ * only place both facts are in scope at once.
+ */
+export function validateResamplingDeclaration(
+  descriptor: EffectDescriptor,
+  gpu: GpuEffect,
+): void {
+  const resizing = gpu.passes.filter((pass) => resizes(passExtentRule(pass)));
+  const declared = descriptor.resamples === true;
+
+  if (declared && resizing.length === 0) {
+    throw new PassCompileError(
+      `effect "${descriptor.id}" declares resamples: true, but none of its ${gpu.passes.length} pass(es) declares an extent rule; the stack grammar would refuse placements that render perfectly well`,
+    );
+  }
+  if (!declared && resizing.length > 0) {
+    throw new PassCompileError(
+      `effect "${descriptor.id}" does not declare resamples: true, but pass(es) ${resizing.map((pass) => pass.id).join(", ")} write a different extent than they read; the stack grammar would accept this node after a quantizer, which the scheduler then refuses at render time`,
+    );
+  }
+}
+
+/**
  * How many workgroups to dispatch for a pass at a given resolution.
  *
  * `per-row` and `per-column` divide by the *whole* workgroup, not by its x
@@ -431,6 +464,7 @@ export class PassCompiler {
     if (gpu.passes.length === 0) {
       throw new PassCompileError(`effect "${descriptor.id}" declares no passes`);
     }
+    validateResamplingDeclaration(descriptor, gpu);
 
     const passes: CompiledPass[] = [];
     for (const pass of gpu.passes) {

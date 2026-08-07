@@ -40,6 +40,7 @@ interface DescriptorOverrides {
   readonly producesIndexMap?: boolean;
   readonly requiresIndexMap?: boolean;
   readonly excludes?: readonly string[];
+  readonly resamples?: boolean;
 }
 
 function effect(id: string, overrides: DescriptorOverrides = {}): EffectDescriptor {
@@ -56,6 +57,7 @@ function effect(id: string, overrides: DescriptorOverrides = {}): EffectDescript
     producesIndexMap: overrides.producesIndexMap ?? false,
     requiresIndexMap: overrides.requiresIndexMap ?? false,
     ...(overrides.excludes === undefined ? {} : { excludes: overrides.excludes }),
+    ...(overrides.resamples === undefined ? {} : { resamples: overrides.resamples }),
   };
 }
 
@@ -79,6 +81,86 @@ const CONSUMER = effect("consumer", {
   producesIndexMap: true,
 });
 const PLAIN = effect("plain");
+/** F-PP-01's shape: resamples colour, writes no index map. */
+const CRUSH = effect("crush", { slot: "preprocess", resamples: true });
+/** F-SP-14's shape: resamples, and carries the index map across with it. */
+const NEAREST_UP = effect("nearest-up", {
+  resamples: true,
+  requiresIndexMap: true,
+  producesIndexMap: true,
+});
+
+// --- extents -------------------------------------------------------------
+
+describe("the extent rule", () => {
+  const registry = registryOf(QUANTIZER, INK, CRUSH, NEAREST_UP, PLAIN);
+
+  it("accepts a resampler in front of every quantizer", () => {
+    // Where F-PP-01 is meant to sit, and the whole reason the node exists: it
+    // decides the grid every kernel downstream measures itself against.
+    const result = validateStack(registry, [
+      node("n1", "crush"),
+      node("n2", "quantizer"),
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("refuses a colour resampler downstream of a live index map", () => {
+    // Interpolating palette indices is meaningless — the average of index 3 and
+    // index 7 is not a colour — so this node would leave indices at the old
+    // extent naming a different pixel grid than the colours beside them. It was
+    // refused before, by the scheduler, after the user had built the stack.
+    const result = validateStack(registry, [
+      node("n1", "quantizer"),
+      node("n2", "crush"),
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.issues).toHaveLength(1);
+    const issue = result.issues[0];
+    expect(issue?.code).toBe("index-map-resampled");
+    // Both nodes named, which is what makes the message actionable.
+    expect(issue?.nodeId).toBe("n2");
+    expect(issue?.otherNodeId).toBe("n1");
+    expect(issue?.message).toContain("crush");
+    expect(issue?.message).toContain("quantizer");
+  });
+
+  it("accepts a resampler that carries the index map across", () => {
+    // Nearest upscale replicates each texel into the block it now covers, so
+    // every output index is copied rather than averaged with another. It is the
+    // only rule under which resampling an index map means anything.
+    const result = validateStack(registry, [
+      node("n1", "quantizer"),
+      node("n2", "nearest-up"),
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("accepts a colour resampler after a dither that emits no index map", () => {
+    // CMYK halftone's case from the other side: nothing is live, so there is
+    // nothing for the resample to contradict.
+    const result = validateStack(registry, [node("n1", "ink"), node("n2", "crush")]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("ignores a disabled quantizer in front of a resampler", () => {
+    // A disabled node is not in the render (F-ST-02), so it produces no map for
+    // the resampler to invalidate.
+    const result = validateStack(registry, [
+      node("n1", "quantizer", false),
+      node("n2", "crush"),
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("ignores a disabled resampler after a quantizer", () => {
+    const result = validateStack(registry, [
+      node("n1", "quantizer"),
+      node("n2", "crush", false),
+    ]);
+    expect(result.ok).toBe(true);
+  });
+});
 
 // --- the index map -------------------------------------------------------
 

@@ -110,11 +110,10 @@ export function createStackNode(
     id,
     effect,
     enabled: true,
-    // Opacity and blend are in the schema and are written and read back, but
-    // nothing in this build changes them: per-node compositing (F-ST-03) has no
-    // implementation in either backend, and a control that moves nothing is
-    // worse than a missing one. See `state/render/gpu-backend.ts`, which refuses
-    // a composite rather than ignoring one.
+    // The identity composite (F-ST-03). A node opens showing its own result and
+    // nothing else; `setNodeOpacity` and `setNodeBlend` move it from there.
+    // Full opacity in normal blend is the one combination the plan skips
+    // entirely rather than running as a pass that copies a buffer onto itself.
     opacity: 1,
     blend: "normal",
     params,

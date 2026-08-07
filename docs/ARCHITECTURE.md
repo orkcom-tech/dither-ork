@@ -252,6 +252,8 @@ core/                     Rust workspace, zero web dependencies
     src/quantize.rs       palette extraction: median cut, Wu, k-means
     src/noise.rs          Bayer and void-and-cluster tiles, seeded noise fields
     src/rng.rs            PCG32; the only source of randomness in the core
+    src/trace.rs          index map -> SVG: region labelling, contour following,
+                          Douglas-Peucker, the minimum feature filter (F-EX-08..10)
     src/fixture.rs        the generated test images the goldens are taken from
     tests/                golden-image and colour-correctness harnesses
   crates/dither-wasm/     wasm-bindgen bindings — the only web-aware crate
@@ -286,12 +288,20 @@ web/
   src/app/                the shell: boot gate, docked regions, panel and toolbar
                           slots, theme. It imports no panel — see "Slots" below
   src/io/                 image intake: sniff, probe, decode, linear light, limits
+  src/io/document/        .dork files, presets, the preset library on OPFS, the
+                          starter set, share links, download/read/clipboard
+  src/export/            the picture out: colour census, PNG encoder, zlib, the
+                          canvas encoders, the SVG tracer contract, nearest scale,
+                          matte flatten, size estimate, destination, job
   src/state/              the live document — mutations, history, autosave,
                           .dork serialisation — and state/render/, which is
                           document -> graph -> frame against the real backends
   src/ui/stack/           the stack editor
   src/ui/properties/      the properties panel, generated from the descriptor
   src/ui/palette/         the palette system: editor, library, extraction
+  src/ui/export/          the export dialog, and the adapter that satisfies
+                          export/'s two interfaces from the editor session
+  src/ui/documents/       save/open/presets/share, as a toolbar item and a dialog
   src/viewport/           the canvas. Not React; owns its own canvas and overlay
   src/main.ts             the proof page's module — reached at /proof.html in
                           dev, not an entry point of the production build
@@ -305,9 +315,17 @@ docs/                     this file, API.md, DEVELOPMENT.md
 ```
 
 Directories the build order will add and that do not exist yet: `core/gen`
-(surprise generator), `core/trace`, `core/encode`, `web/src/worker`, plus
-`palettes/` and `presets/`. They are named here so the target shape is on record
-without pretending it already exists.
+(surprise generator), `core/encode` (the animated formats), and
+`web/src/worker`. The tracer landed as `dither-core/src/trace.rs` rather than as
+a crate of its own, because it shares the palette and colour types with
+everything else in that crate and a second crate would have been a re-export
+with a `Cargo.toml`. The starter presets ship as code (`io/document/starter.ts`)
+rather than as a `presets/` directory of files, so that `starter.test.ts` can
+build them against the **real catalogue** and run `validateStack` over every
+one — an effect id that disappears fails the build rather than shipping a
+library entry that refuses to render when somebody clicks it. `palettes/` is
+likewise absent: the hardware palettes are facts in `core/…/palette.rs` and
+reach this side through `builtinPalettes()`.
 
 Nothing in `core/` may know a browser exists.
 
@@ -323,7 +341,11 @@ of the five can end the run with a screen of their own:
 4. **The editor session** — `state/session.ts`, which acquires the GPU device
    and the Rust core, restores the autosave, builds the document store, bridges
    the palette, installs the image intake and subscribes the renderer.
-5. **Registration**, then React.
+5. **Registration**, then React. Six registrations, in the order a person
+   reaches them: the stack panel, the properties panel, the toolbar (open, undo,
+   redo, fit, notices), the documents toolbar (save, open, presets, share), the
+   export action, and the history shortcuts. The palette panel registers on
+   import and so has no call.
 
 **Everything up to step 5 happens before React renders anything.** That is not
 tidiness. Panels register themselves into slots and a duplicate registration
@@ -376,7 +398,77 @@ readback to present, because a 2D canvas cannot draw a WebGPU texture; and
 adaptive preview resolution (F-UI-03) is declared by the viewport but not
 honoured by the renderer, which always renders at document resolution. The
 viewport's badge reports what it is given, so it never claims a reduction that
-did not happen.
+did not happen — it simply never appears.
+
+**What honouring F-UI-03 would take**, written down because the shape of the
+work is the reason it has not been done rather than an oversight. The viewport
+already computes the factor (`viewport/quality.ts`, `previewScaleFactor`) and
+already emits it on its `request` event; `session.ts` does not subscribe to that
+event, and `renderer.ts` hard-codes `quality: "full"`. Wiring those two together
+is the small half. The large half is that a reduced-resolution render needs a
+**source buffer at the reduced extent**, and the factor is fractional — it comes
+from the zoom and a pixel budget — so it is not expressible as the integer
+`PassExtent` the two resampling nodes use. It needs a fractional source
+resampler: one more compute program in `web/src/gpu`, plus the CPU-side
+equivalent for a stack that opens with a diffusion kernel. The graph itself
+needs nothing: `graph.width`/`graph.height` are already in every content hash, so
+preview and full renders key to different cache entries by construction.
+
+## Export
+
+**Preview and export do not merely share a graph — they share a frame.** The
+export panel calls `renderer.render` for the document that is on screen and
+encodes the `ImageData` the viewport was given, so the file cannot disagree with
+the picture. The size estimate encodes that same frame, which is why F-EX-14's
+number is measured rather than modelled: there is no formula for the size of a
+deflated dither, and a number that is wrong by a factor of three is worse than
+no number because it is believed.
+
+Two consequences follow and both are load-bearing:
+
+- **A solo point is part of what is on screen, so it is part of the export.**
+  The panel says out loud that it is happening rather than silently rendering
+  the whole stack.
+- **The scale multiplier is applied to the finished frame, never to the
+  render.** Re-running the graph at 4x would be a *different picture* — a dither
+  is a function of the pixel grid it ran on — so every output pixel is a copy of
+  a pixel that was on screen (F-EX-12).
+
+### "Indexed" is a fact about the pixels, not about the graph
+
+The graph carries an index map after a quantizing node, and it is the wrong
+thing to export. It describes the frame *at the quantizer*, and a stack can put
+a dozen postprocess nodes after it, each writing continuous colour over the top.
+So `export/census.ts` counts the colours in the finished frame: 256 or fewer and
+an indexed PNG holds it *exactly*, because the palette is built from the values
+that are there. The census bails the moment it sees a 257th colour, so a
+photograph pays for a few hundred pixels of it.
+
+That same census is the **SVG tracer's input**, which is what makes an SVG and a
+PNG of the same picture agree by construction rather than by two code paths
+being kept in step. The tracer itself is Rust (`dither-core/src/trace.rs`) and
+emits one `<g>` per colour, marked as an Inkscape layer, on integer pixel
+corners so adjacent colours share their boundary with no seam. The consequence
+worth stating: **a frame of more than 256 distinct colours cannot be traced**,
+and it is refused rather than quantized a second time behind the user's back.
+
+### Who writes what
+
+PNG is written here (`export/png.ts` over `export/zlib.ts`), because no browser
+will write a palette PNG. JPEG and WebP are the browser's, because nobody should
+write a JPEG encoder. SVG is the core's. `export/encode.ts` is the only file
+that knows which is which.
+
+### The layering
+
+`web/src/export/` may not know that a document store, a renderer or a session
+exist. It states what it needs as two interfaces in its own vocabulary —
+`ExportImageSource` (a frame, a subject, a change notification) and
+`VectorTracer` (an index map in, an SVG document out) — and
+`web/src/ui/export/session.ts` is the single adapter that satisfies both from an
+`EditorSession`. That is the same arrangement the panels used while the document
+store was being written, and it is why the export module is testable without a
+browser, a GPU or a WASM build.
 
 ## The proof page
 
@@ -510,9 +602,19 @@ bar JPEG glitch (F-GL-06); F-SP-14 nearest-neighbour upscale, previously
 recorded here as deliberately absent, is built — as the second half of the
 F-PP-01 pair, which is what made it a pass rather than a resampling stage.
 
-Steps 8 onward — clock, modulators, timeline, export, tracer, presets, batch —
-have not started. Export is the one whose absence is felt immediately: the
-application can make a picture and cannot give it to you.
+**Still export, the tracer, documents and presets are done, out of order.** They
+sit at steps 10 to 12 in the list above, and they were taken ahead of the clock
+and the timeline for one reason: an application that can make a picture and
+cannot give it to you is not an application. What is built is PNG (indexed
+automatically), JPEG, WebP and SVG with per-colour layers, an integer
+nearest-neighbour scale, a measured size estimate, progress with a cancel that
+stops work, clipboard, `.dork` save and open in both variants, the preset
+library on OPFS with a starter set, and share links.
+
+The **animated** half of export (F-EX-04 through F-EX-07, and the PNG sequence
+and sprite sheet) is not built and cannot be until the clock and the modulators
+are, because there is nothing yet to render a second frame *of*. Steps 8, 9, 13
+and 14 — clock, modulators, timeline, batch, Surprise Me — have not started.
 
 Two gaps this section used to record are closed. **Nothing resolved an effect id
 to its `GpuEffect`**: now every `gpu` effect module exports
@@ -522,14 +624,38 @@ with no source fails the catalogue the way a missing surprise range does. And
 **nothing was an application**: `app/main.tsx` is now the entry point and
 `web/src/main.ts` is the proof page it used to be pretending not to be.
 
-One gap this section adds. **The stack grammar does not know about extents.**
-`registry/stack.ts` checks index-map dependencies and exclusions, so it catches
-"nearest upscale reads an index map and nothing in front of it quantizes" in the
-picker, before the node is added. It does not catch a node that resamples colour
-while an index map is live at the old extent — `internal-resolution` placed
-after a dither. That is refused correctly, but by the *scheduler*, at render
-time, as an error banner rather than as a disabled entry in the picker. The
-check exists; it is in the wrong layer to be useful.
+Two gaps this section used to add are now closed.
+
+**The stack grammar knows about extents.** `EffectDescriptor.resamples` names
+the two nodes that write a different extent than they read, and
+`registry/stack.ts` refuses one placed where an index map is live *unless it
+produces the map it leaves behind*. That distinction is the whole rule and it is
+a fact about palette indices rather than a gap in the code: an index is a name,
+not a quantity, so no filter means anything applied to one — nearest is the only
+coherent rule, and it only lines up with the colour when the colour is resampled
+by nearest at the same integer factor. That is exactly `nn-upscale`, which
+carries colour and index across together and therefore declares
+`producesIndexMap`; `internal-resolution` offers box and Lanczos and writes no
+map, so after a dither it is refused in the picker, naming both nodes, before
+the node is added. The declaration cannot drift from the passes:
+`gpu/compiler.ts` checks the two agree, both ways, every time an effect is
+compiled.
+
+**Per-node opacity and blend (F-ST-03) is implemented, for both execution
+kinds.** The formulas are defined once in `graph/blend.ts` and applied by each
+backend in its own — a compute program in `gpu/composite.ts` over
+`shaders/_composite.wgsl`, and planar `f32` arithmetic in the WASM backend — so
+a composite costs no boundary crossing on either side, and a diffusion node at
+60% opacity looks like a blur at 60% opacity. Blending is in linear light, which
+is correct for the multiplicative and comparative modes and deliberately
+different from a gamma-space compositor for the three pivoted ones; the argument
+is at the top of `blend.ts`. Twelve modes. Two consequences are recorded where
+they are enforced rather than discovered: a node that resamples cannot carry a
+composite, because its output and its own input are different pixel grids
+(`graph/plan.ts` refuses it, the stack row hides the controls); and the index
+map is carried across a composite untouched, because it records which palette
+entry the node chose and opacity changes how much of that decision is shown
+rather than what it was.
 
 ## Known technical risks
 
@@ -541,8 +667,16 @@ check exists; it is in the wrong layer to be useful.
 - **GIF compresses dither noise poorly** — LZW hates high-entropy data, which is
   exactly what a dither produces. Managed by the pre-export size estimate and by
   offering APNG/WebP/MP4.
-- **SVG trace output size** in pixel-perfect mode. Managed by the
-  minimum-feature-size filter and a simplified mode.
+- **SVG trace output size** in pixel-perfect mode — real and measured: a
+  160x120 four-colour Floyd-Steinberg traces to 3210 contours and 16144 points,
+  64.6 kB. Managed by the minimum-feature-size filter (the same picture at 64
+  px² is 6.0 kB) and the simplified mode (2.5 kB at a 2 px tolerance), both of
+  which report what they cost — how many regions were removed and what
+  percentage of the picture they left bare.
+- **A large SVG trace blocks the main thread**, for the same reason the render
+  loop does. The tracer is one synchronous WASM call with no cancellation point
+  inside it; the export job's cancel stops on either side of it and no file is
+  written, but the trace itself runs to completion.
 - **WebGPU implementation variance** across browsers and drivers produces small
   visual differences; goldens run on a pinned environment.
 - **No fallback means the unsupported screen is a real user-facing surface** —

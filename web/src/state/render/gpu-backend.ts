@@ -32,13 +32,22 @@
  * described in this round's report rather than done here, because both files
  * belong to another part of the tree.
  *
- * ## What this refuses
+ * ## Per-node opacity and blend (F-ST-03)
  *
- * **A node carrying a composite** — per-node opacity or blend (F-ST-03). The
- * plan marks it, and nothing implements it: compositing needs a pass that reads
- * two colour textures, and the pass model has one input colour binding. It is
- * refused with a message naming the requirement rather than silently rendered
- * at full opacity, which would be an opacity slider that does nothing.
+ * Implemented, and in the same submission cadence as the node itself. The plan
+ * marks a node whose composite is not the identity; the node runs normally, and
+ * its output is then blended against **its own input** by `CompositeProgram`
+ * (`web/src/gpu/composite.ts`), which is a program of the GPU layer rather than
+ * a `ComputePass` because the effect pass model has one `input-color` binding
+ * and a composite needs two.
+ *
+ * The uncomposited output is released as soon as the composite has been
+ * encoded: nothing downstream can ask for it — the node's hash covers its
+ * opacity and blend, so the cache entry is the composited buffer — and it is a
+ * full working surface.
+ *
+ * The index map is carried across untouched. Why that is the only coherent
+ * choice is argued in `gpu/composite.ts`.
  */
 
 import type { Palette } from "../../types/document";
@@ -57,7 +66,8 @@ import type {
   TransferResult,
 } from "../../graph";
 import { GraphError, paletteDigest } from "../../graph";
-import type { PlannedNode } from "../../graph";
+import type { CompositeOp, PlannedNode } from "../../graph";
+import type { Extent } from "../../types/gpu";
 import type { EffectRegistry } from "../../registry";
 import type { GpuLayer } from "../../gpu";
 import {
@@ -163,16 +173,6 @@ export class GpuRenderBackend implements GpuBackend {
   ): Promise<FrameBuffer> {
     const nodeId = planned.node.id;
 
-    if (planned.composite !== null) {
-      throw new GraphError(
-        "invariant",
-        `node ${nodeId} asks for opacity ${planned.composite.opacity} in blend ` +
-          `"${planned.composite.blend}", and per-node compositing (F-ST-03) is not implemented ` +
-          `in this build. Nothing here renders it at full opacity instead.`,
-        { nodeId, effect: planned.node.effect, blend: planned.composite.blend },
-      );
-    }
-
     if (input.color.residency !== "gpu") {
       throw new GraphError(
         "invariant",
@@ -232,10 +232,19 @@ export class GpuRenderBackend implements GpuBackend {
       // texture it was seeded with, which belongs to the node upstream — handing
       // that to the cache would have two entries owning one texture, and the
       // second release would throw inside the pool, far from here.
-      const outColor =
+      const rendered =
         color.current === inputColor
           ? this.#copyTexture(color.current, "rgba16float", color.extent, `${nodeId}/color`)
           : color.current;
+
+      // F-ST-03. The node's output against the node's own input. `graph/plan.ts`
+      // has already refused a composite on a node that resamples, so the two
+      // extents here are the same by construction; `CompositeProgram` checks
+      // anyway, because it is the layer that would read out of bounds.
+      const outColor =
+        planned.composite === null
+          ? rendered
+          : this.#compositeOutput(nodeId, inputColor, rendered, color.extent, planned.composite);
 
       const producedIndex = index.hasContent ? index.current : null;
       const outIndex =
@@ -285,6 +294,57 @@ export class GpuRenderBackend implements GpuBackend {
   #releaseIfOwned(texture: GPUTexture | null, seeded: GPUTexture | null): void {
     if (texture === null || texture === seeded) return;
     this.#deps.layer.textures.release(texture);
+  }
+
+  /**
+   * Blend a node's rendered output against the node's own input (F-ST-03).
+   *
+   * `rendered` is handed back to the pool once the composite is encoded. It is
+   * this node's private surface and nothing downstream can ask for it: the
+   * node's content hash covers `opacity` and `blend`, so the buffer the cache
+   * files under that hash is the composited one, and an uncomposited copy would
+   * be a full working surface kept alive for nobody.
+   */
+  #compositeOutput(
+    nodeId: string,
+    base: GPUTexture,
+    rendered: GPUTexture,
+    extent: Extent,
+    op: CompositeOp,
+  ): GPUTexture {
+    const target = this.#deps.layer.textures.acquire(
+      "rgba16float",
+      extent.width,
+      extent.height,
+      `${nodeId}/composite`,
+    );
+    try {
+      this.#deps.layer.composite.run({
+        base,
+        top: rendered,
+        output: target,
+        extent,
+        opacity: op.opacity,
+        blend: op.blend,
+        label: nodeId,
+      });
+    } catch (error) {
+      // The target was never handed to a buffer, so nothing else will return it.
+      this.#deps.layer.textures.release(target);
+      throw error;
+    }
+    // Not `#releaseIfOwned`: `rendered` is never the seeded input by this point
+    // — the caller copies when the chain wrote no colour — so it is always this
+    // node's to hand back.
+    this.#deps.layer.textures.release(rendered);
+    log.debug("node composited", {
+      nodeId,
+      blend: op.blend,
+      opacity: op.opacity,
+      width: extent.width,
+      height: extent.height,
+    });
+    return target;
   }
 
   #frameBuffer(

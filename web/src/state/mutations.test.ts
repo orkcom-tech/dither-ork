@@ -19,7 +19,9 @@ import {
   removeNode,
   setBindings,
   setClock,
+  setNodeBlend,
   setNodeEnabled,
+  setNodeOpacity,
   setNodeParam,
   setPalette,
 } from "./mutations";
@@ -191,6 +193,44 @@ describe("setNodeEnabled and setNodeParam", () => {
     expect(() => setNodeParam(document, registry, ids[0], "nope", 1)).toThrow(
       /declares no parameter/,
     );
+  });
+});
+
+describe("setNodeOpacity and setNodeBlend (F-ST-03)", () => {
+  it("sets opacity and returns the same document when nothing moves", () => {
+    const { document, ids } = withThree();
+    const half = setNodeOpacity(document, ids[0], 0.5);
+    expect(half.stack[0]?.opacity).toBe(0.5);
+    // Identity rather than a new object: an unchanged document must not become
+    // an undo step or invalidate a cached node.
+    expect(setNodeOpacity(half, ids[0], 0.5)).toBe(half);
+    expect(document.stack[0]?.opacity).toBe(1);
+  });
+
+  it("refuses an opacity outside [0, 1] rather than clamping it", () => {
+    // Opacity has no registry descriptor, so there is no legal range for
+    // `coerceParams` to clamp against; the bound is stated here as a refusal so
+    // it is never a silent correction the caller does not learn about.
+    const { document, ids } = withThree();
+    for (const bad of [-0.01, 1.01, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => setNodeOpacity(document, ids[0], bad)).toThrow(DocumentError);
+    }
+  });
+
+  it("sets a blend mode and leaves the rest of the node alone", () => {
+    const { document, ids } = withThree();
+    const next = setNodeBlend(document, ids[1], "multiply");
+    expect(next.stack[1]?.blend).toBe("multiply");
+    expect(next.stack[1]?.params).toEqual(document.stack[1]?.params);
+    expect(next.stack[1]?.opacity).toBe(1);
+    expect(setNodeBlend(next, ids[1], "multiply")).toBe(next);
+    expect(document.stack[1]?.blend).toBe("normal");
+  });
+
+  it("refuses both on a node that is not in the stack", () => {
+    const { document } = withThree();
+    expect(() => setNodeOpacity(document, "n99", 0.5)).toThrow(DocumentError);
+    expect(() => setNodeBlend(document, "n99", "screen")).toThrow(DocumentError);
   });
 });
 

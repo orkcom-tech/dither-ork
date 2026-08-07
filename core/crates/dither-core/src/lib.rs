@@ -11,5 +11,6 @@ pub mod noise;
 pub mod palette;
 pub mod quantize;
 pub mod rng;
+pub mod trace;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -12,6 +12,7 @@ use dither_core::diffusion::{self, Options};
 use dither_core::noise;
 use dither_core::palette::{builtin, Metric, Palette};
 use dither_core::quantize;
+use dither_core::trace;
 use wasm_bindgen::prelude::*;
 
 /// Version of the compiled core. The web layer logs this at startup so a stale
@@ -687,4 +688,324 @@ pub fn blue_noise_ranks(size: u32, seed: u64) -> Result<Vec<u32>, JsError> {
         )));
     }
     Ok(noise::blue_noise_ranks(size, seed))
+}
+
+// ---------------------------------------------------------------------------
+// SVG tracer (F-EX-08, F-EX-09, F-EX-10)
+// ---------------------------------------------------------------------------
+
+/// Which of the two F-EX-09 output modes to emit.
+///
+/// The core carries the tolerance inside its `Simplified` variant, where it
+/// cannot be set for a mode that does not read it. It is flattened here because
+/// `wasm_bindgen` enums cannot carry data, and [`TraceOptions::to_core`] refuses
+/// a tolerance the core would have made unrepresentable.
+#[wasm_bindgen]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TraceMode {
+    /// The exact pixel staircase. Rasterized at 1:1 it reproduces the index map
+    /// cell for cell.
+    PixelPerfect = 0,
+    /// Douglas-Peucker over that staircase, at `tolerance` pixels. Vertices are
+    /// dropped, never moved, so the output still sits on the pixel grid.
+    Simplified = 1,
+}
+
+/// Every tracer control, as one object — same arrangement as [`DitherOptions`]
+/// and [`ExtractOptions`], and for the same reason.
+#[wasm_bindgen]
+pub struct TraceOptions {
+    mode: TraceMode,
+    tolerance: f32,
+    min_feature_area: u32,
+    stroke_only: bool,
+    stroke_width: f32,
+}
+
+#[wasm_bindgen]
+impl TraceOptions {
+    /// Pixel-perfect, no minimum feature size, filled output.
+    ///
+    /// `tolerance` and `strokeWidth` carry usable starting values rather than
+    /// zero so that switching a mode on does not immediately throw; neither is
+    /// read until the mode that uses it is selected.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> TraceOptions {
+        let defaults = trace::Options::default();
+        TraceOptions {
+            mode: TraceMode::PixelPerfect,
+            tolerance: 1.0,
+            min_feature_area: defaults.min_feature_area,
+            stroke_only: defaults.stroke_only,
+            stroke_width: defaults.stroke_width,
+        }
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn mode(&self) -> TraceMode {
+        self.mode
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_mode(&mut self, value: TraceMode) {
+        self.mode = value;
+    }
+
+    /// Douglas-Peucker tolerance in pixels. Only read in `Simplified` mode.
+    #[wasm_bindgen(getter)]
+    pub fn tolerance(&self) -> f32 {
+        self.tolerance
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_tolerance(&mut self, value: f32) {
+        self.tolerance = value;
+    }
+
+    /// Minimum feature size in whole pixels of area (F-EX-10).
+    ///
+    /// Connected regions below this are removed and enclosed holes below it are
+    /// filled, before anything is traced. 0 and 1 are both no-ops, since no
+    /// region has an area under 1. This is the control that decides whether the
+    /// file a cutter receives is usable or a hundred thousand specks.
+    #[wasm_bindgen(getter, js_name = minFeatureArea)]
+    pub fn min_feature_area(&self) -> u32 {
+        self.min_feature_area
+    }
+
+    #[wasm_bindgen(setter, js_name = minFeatureArea)]
+    pub fn set_min_feature_area(&mut self, value: u32) {
+        self.min_feature_area = value;
+    }
+
+    /// Emit outlines only — `fill="none"` plus a stroke — for cutting and
+    /// embroidery paths (F-EX-10).
+    #[wasm_bindgen(getter, js_name = strokeOnly)]
+    pub fn stroke_only(&self) -> bool {
+        self.stroke_only
+    }
+
+    #[wasm_bindgen(setter, js_name = strokeOnly)]
+    pub fn set_stroke_only(&mut self, value: bool) {
+        self.stroke_only = value;
+    }
+
+    /// Stroke width in pixel units. Only read when `strokeOnly` is set.
+    #[wasm_bindgen(getter, js_name = strokeWidth)]
+    pub fn stroke_width(&self) -> f32 {
+        self.stroke_width
+    }
+
+    #[wasm_bindgen(setter, js_name = strokeWidth)]
+    pub fn set_stroke_width(&mut self, value: f32) {
+        self.stroke_width = value;
+    }
+}
+
+impl Default for TraceOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TraceOptions {
+    /// Validate and convert. Range checks live here rather than in the setters
+    /// for the reason [`DitherOptions::to_core`] states: a setter that clamps
+    /// lies about what it stored, and one that throws turns a property
+    /// assignment into a `try` block.
+    fn to_core(&self) -> Result<trace::Options, JsError> {
+        let mode = match self.mode {
+            TraceMode::PixelPerfect => trace::Mode::PixelPerfect,
+            TraceMode::Simplified => {
+                if !self.tolerance.is_finite() || self.tolerance <= 0.0 {
+                    return Err(JsError::new(&format!(
+                        "tolerance must be finite and greater than zero, got {}",
+                        self.tolerance
+                    )));
+                }
+                trace::Mode::Simplified {
+                    tolerance: self.tolerance,
+                }
+            }
+        };
+        if self.stroke_only && (!self.stroke_width.is_finite() || self.stroke_width <= 0.0) {
+            return Err(JsError::new(&format!(
+                "strokeWidth must be finite and greater than zero, got {}",
+                self.stroke_width
+            )));
+        }
+        Ok(trace::Options {
+            mode,
+            min_feature_area: self.min_feature_area,
+            stroke_only: self.stroke_only,
+            stroke_width: self.stroke_width,
+        })
+    }
+}
+
+/// A traced index map: the SVG document, and what producing it actually did.
+///
+/// The report travels with the result for the same reason `ExtractedPalette`'s
+/// does — `dither-core` has no logger — and the two dropped counts are the ones
+/// a person needs, because they are the difference between "the tracer lost my
+/// detail" and "the minimum feature size you set removed 412 specks".
+#[wasm_bindgen]
+pub struct TracedSvg {
+    svg: String,
+    report: trace::Report,
+}
+
+#[wasm_bindgen]
+impl TracedSvg {
+    /// The complete SVG document. Every coordinate is an integer pixel corner,
+    /// so adjacent colours share their boundary exactly and there is no seam.
+    #[wasm_bindgen(getter)]
+    pub fn svg(&self) -> String {
+        self.svg.clone()
+    }
+
+    /// Groups emitted — one per palette colour that survived into the output. A
+    /// colour absent from the index map produces no group rather than an empty
+    /// one, so this can be below the palette size.
+    #[wasm_bindgen(getter)]
+    pub fn layers(&self) -> usize {
+        self.report.layers
+    }
+
+    /// Closed subpaths across every group, holes included.
+    #[wasm_bindgen(getter)]
+    pub fn contours(&self) -> usize {
+        self.report.contours
+    }
+
+    /// Vertices emitted. The honest input to a pre-export size estimate
+    /// (F-EX-14), since the document is very nearly a function of this.
+    #[wasm_bindgen(getter)]
+    pub fn points(&self) -> usize {
+        self.report.points
+    }
+
+    /// Connected regions removed by `minFeatureArea`.
+    #[wasm_bindgen(getter, js_name = regionsDropped)]
+    pub fn regions_dropped(&self) -> u32 {
+        self.report.regions_dropped
+    }
+
+    /// Pixels those regions covered, summed over every colour.
+    ///
+    /// Not the bare area — most of these are picked straight back up by the
+    /// hole fill of whichever colour surrounded them. Use `uncoveredPixels` for
+    /// the number to put in front of a person.
+    ///
+    /// `f64` rather than the core's `u64`: a pixel count cannot reach the point
+    /// where a double loses precision, and a `BigInt` in a log line is friction
+    /// for nothing.
+    #[wasm_bindgen(getter, js_name = regionPixelsDropped)]
+    pub fn region_pixels_dropped(&self) -> f64 {
+        self.report.region_pixels_dropped as f64
+    }
+
+    /// Pixels of the source that no emitted layer covers — the honest cost of
+    /// `minFeatureArea`, and zero whenever the filter is off.
+    ///
+    /// This is the one to show and to threshold on. On a Floyd-Steinberg dither
+    /// a `minFeatureArea` large enough to make the file usable can leave a
+    /// startling fraction of the image bare, and that is a thing a person
+    /// should be told before they send it to a cutter, not after.
+    #[wasm_bindgen(getter, js_name = uncoveredPixels)]
+    pub fn uncovered_pixels(&self) -> f64 {
+        self.report.uncovered_pixels() as f64
+    }
+
+    /// Enclosed holes filled in by `minFeatureArea`. A hole below the minimum
+    /// feature size is as uncuttable as a speck, so the filter closes both.
+    #[wasm_bindgen(getter, js_name = holesFilled)]
+    pub fn holes_filled(&self) -> u32 {
+        self.report.holes_filled
+    }
+
+    #[wasm_bindgen(getter, js_name = holePixelsFilled)]
+    pub fn hole_pixels_filled(&self) -> f64 {
+        self.report.hole_pixels_filled as f64
+    }
+
+    /// Contours that simplification collapsed past three distinct points, or to
+    /// zero area, and which were dropped rather than emitted as a degenerate
+    /// subpath. Non-zero means the tolerance is eating features.
+    #[wasm_bindgen(getter, js_name = contoursDropped)]
+    pub fn contours_dropped(&self) -> u32 {
+        self.report.contours_dropped
+    }
+}
+
+/// Trace an index map to an SVG document (F-EX-08, F-EX-09, F-EX-10).
+///
+/// * `indices` — one palette index per pixel, row-major: exactly what
+///   [`DitherOutput::indices`] and [`ExtractedPalette::indices`] hand back.
+/// * `palette_rgb` — packed 8-bit sRGB triplets, the layout everything else at
+///   this boundary already takes.
+///
+/// One `<g>` per palette colour, named by that colour and marked as a layer, so
+/// a cutter or an embroidery machine sees layers it understands rather than one
+/// undifferentiated drawing.
+///
+/// Every condition the core would panic on is checked here first, so a
+/// malformed call surfaces as a rejected promise rather than an aborted WASM
+/// instance.
+#[wasm_bindgen(js_name = traceSvg)]
+pub fn trace_svg(
+    indices: &[u16],
+    width: u32,
+    height: u32,
+    palette_rgb: &[u8],
+    options: &TraceOptions,
+) -> Result<TracedSvg, JsError> {
+    let (w, h) = (width as usize, height as usize);
+
+    if w == 0 || h == 0 {
+        return Err(JsError::new(&format!(
+            "image dimensions must both be positive, got {w}x{h}"
+        )));
+    }
+    // Against the product rather than the multiplication, for the reason
+    // `ditherImage` states: `width * height` overflows a u32 long before it runs
+    // out of memory, and a wrapped length that happened to match would read past
+    // the buffer.
+    let expected = (w as u64) * (h as u64);
+    if indices.len() as u64 != expected {
+        return Err(JsError::new(&format!(
+            "index map length {} does not match {w}x{h} (expected {expected})",
+            indices.len()
+        )));
+    }
+    if palette_rgb.is_empty() || !palette_rgb.len().is_multiple_of(3) {
+        return Err(JsError::new(
+            "palette_rgb must be a non-empty multiple of 3 bytes",
+        ));
+    }
+    let entries = palette_rgb.len() / 3;
+    if entries > usize::from(u16::MAX) + 1 {
+        return Err(JsError::new(&format!(
+            "palette of {entries} entries does not fit a u16 index map"
+        )));
+    }
+    // One sweep, so an index naming no colour is reported here with the value
+    // that caused it rather than reaching the core's assert. An out-of-range
+    // index is not a tolerable input: the alternative to refusing it is
+    // inventing a colour for it, and the tracer must not invent anything.
+    if let Some(&worst) = indices.iter().max() {
+        if usize::from(worst) >= entries {
+            return Err(JsError::new(&format!(
+                "index {worst} names no entry in a palette of {entries}"
+            )));
+        }
+    }
+
+    let opts = options.to_core()?;
+    let traced = trace::trace(indices, w, h, palette_rgb, opts);
+
+    Ok(TracedSvg {
+        svg: traced.to_svg(),
+        report: *traced.report(),
+    })
 }

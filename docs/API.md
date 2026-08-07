@@ -1,8 +1,8 @@
 # API
 
-Contracts between the layers. Eight surfaces: the WASM core, the node registry,
+Contracts between the layers. Nine surfaces: the WASM core, the node registry,
 the `.dork` document, the GPU pass layer, the render graph, the editor session,
-the shell's slots, and the worker RPC.
+the shell's slots, export, and the worker RPC.
 
 Items marked **planned** are specified but not yet implemented.
 
@@ -211,6 +211,46 @@ and has a fixed pattern of pixels that never cross their threshold.
 Blue noise is Ulichney's void-and-cluster method, not a white-noise texture with
 a blue name, and it costs `O(size^4)`: 64x64 is a fraction of a second, so build
 once and cache.
+
+### `traceSvg(indices, width, height, paletteRgb, options): TracedSvg`
+
+F-EX-08 through F-EX-10. `indices` is one palette index per pixel, row-major —
+exactly what `DitherOutput.indices` and `ExtractedPalette.indices` hand back —
+and `paletteRgb` is the packed sRGB triplet layout everything else at this
+boundary already takes.
+
+```ts
+const options = new core.TraceOptions();
+options.mode = core.TraceMode.Simplified;  // or PixelPerfect
+options.tolerance = 2;                     // px, read only in Simplified
+options.minFeatureArea = 64;               // px², regions and holes below go
+options.strokeOnly = false;                // outlines for a cutter
+options.strokeWidth = 1;
+const traced = core.traceSvg(indices, w, h, paletteRgb, options);
+const svg = traced.svg;                    // read once, then free
+traced.free(); options.free();
+```
+
+One `<g>` per palette colour that survives into the output, marked
+`inkscape:groupmode="layer"` and labelled with the colour, so a cutter or an
+embroidery machine sees layers it understands rather than one undifferentiated
+drawing. A colour absent from the index map produces **no** group rather than an
+empty one, so `layers` can be below the palette size. Every coordinate is an
+integer pixel corner, which is why adjacent colours share their boundary exactly
+and there is no seam.
+
+`TracedSvg` carries a report as well as the document — `layers`, `contours`,
+`points`, `contoursDropped`, `regionsDropped`, `regionPixelsDropped`,
+`holesFilled`, `holePixelsFilled`, `uncoveredPixels` — for the same reason
+`ExtractedPalette` does: `dither-core` has no logger, and the two dropped counts
+are the difference between "the tracer lost my detail" and "the minimum feature
+size you set removed 412 specks". `uncoveredPixels` is the one to put in front
+of a person: on a Floyd-Steinberg dither a `minFeatureArea` large enough to make
+the file usable can leave a startling fraction of the image bare, and that is a
+thing to be told before it goes to a cutter, not after.
+
+Every condition the core would panic on is checked at the boundary first, so a
+malformed call is a rejected promise rather than an aborted WASM instance.
 
 ### Rust-side contract
 
@@ -621,7 +661,10 @@ store.setNodeSeed(nodeId, seed, options?): void;
 store.setNodeParam(nodeId, key, value, options?): void;
 store.selectNode(nodeId | null): void;
 store.setSolo(nodeId | null): void;
+store.setNodeOpacity(nodeId, opacity, options?): void;
+store.setNodeBlend(nodeId, blend): void;
 store.setPalette(palette, options?): void;
+store.loadDocument(document, label): void;   // .dork opened, preset applied
 store.undo(): boolean;  store.redo(): boolean;
 ```
 
@@ -648,11 +691,61 @@ undone, and both are cleared when the node they name leaves the stack — solo
 because `buildRenderGraph` refuses a solo point that is not in the stack, which
 would otherwise turn every later render into an error.
 
-**Per-node opacity and blend (F-ST-03) have no mutator**, deliberately. The
-fields are in the schema and round trip; neither backend composites, and both
-refuse a node carrying a non-identity composite by name rather than drawing it
-at full opacity. A store command would be a control whose only effect is to make
-the next render fail.
+**Per-node opacity and blend (F-ST-03)** are `setNodeOpacity` and
+`setNodeBlend`. Two commands rather than one because they are two gestures:
+opacity is dragged and coalesces into a single undo step under
+`opacity:<nodeId>`, blend is chosen from a menu and is one step per choice.
+Opacity is refused outside `[0, 1]` rather than clamped — it has no registry
+descriptor and therefore no legal range for `coerceParams` to clamp against, so
+the bound is stated once, as a refusal.
+
+Both backends composite. The arithmetic is defined once, in
+`web/src/graph/blend.ts`, and applied by each execution kind in its own —
+`web/src/gpu/composite.ts` with `shaders/_composite.wgsl` for the parallel half,
+`compositeLinearSurface` on the planar `f32` for the serial one — so a composite
+costs no boundary crossing on either side. Blending is in **linear light**, like
+the rest of the pipeline; the consequence for the pivoted modes is argued in
+`blend.ts`.
+
+Two things a caller has to know:
+
+- **A node that resamples cannot carry a composite.** `internal-resolution` and
+  `nn-upscale` write a different extent than they read, so their output has no
+  pixel-for-pixel correspondence with their own input and there is no picture
+  "50% of it" could mean. `planRender` throws `unsupported-composite` naming the
+  node; the stack row hides the two controls on such a node rather than
+  disabling them, because there is nothing the user could change to make them
+  apply.
+- **The index map is not composited.** It records which palette entry the node
+  chose per pixel; opacity changes how much of that decision is shown, not what
+  the decision was, and blending two indices is meaningless. Dropping it instead
+  would mean a stack `validateStack` accepted at full opacity fails to render
+  the moment a slider moves.
+
+### `loadDocument(document, label)`
+
+The command everything that *replaces* the open document goes through: a `.dork`
+opened, a preset applied, a shared link taken. Four things it does, and a caller
+depends on all four:
+
+1. **One undo step**, labelled. Opening a document is something a person can
+   change their mind about; clearing the history instead would throw away the
+   work that was on screen with no way back to it.
+2. **Selection and solo are cleared if the new stack does not contain them**,
+   before the commit, so the replacement is one notification. Solo is the one
+   that matters — `buildRenderGraph` refuses a solo point that is not in the
+   stack, so a stale one turns every later render into an error rather than into
+   a wrong picture.
+3. **The decoded image is not touched.** Whether to open one is the caller's
+   decision; a self-contained `.dork` goes back through the ordinary intake
+   immediately after, so it gets the same sniff, the same extent ceiling
+   (F-IN-04) and the same log line every dropped file gets.
+4. **The source *reference* is rewritten to the image that is open**, when one
+   is. `openSource` maintains the invariant that no reachable state names an
+   image that is not loaded, and a document dropped in over the top would break
+   it — a later save would record a picture the recipe was not applied to. With
+   nothing open the document keeps its own reference, which is what lets the
+   documents panel say which image to go and find.
 
 ## 7. Shell slots
 
@@ -673,7 +766,84 @@ Panels take no props: the shell's slot takes a component with no props, so
 dependencies arrive by closure at registration time. A context would need a
 provider in a file no panel owns.
 
-## 8. Worker RPC — **planned**
+## 8. Export
+
+`web/src/export/`. **Nothing in it may know that a document store, a renderer or
+a session exist.** It states what it needs as two interfaces in its own
+vocabulary, and `web/src/ui/export/session.ts` is the single adapter that
+satisfies both from an `EditorSession`.
+
+```ts
+interface ExportImageSource {
+  subject(): ExportSubject | null;                       // name, extent, solo, revision
+  renderFrame(signal?: AbortSignal): Promise<ExportFrame>;
+  subscribe(listener: () => void): () => void;
+}
+
+interface VectorTracer {
+  trace(
+    indices: Uint16Array, width: number, height: number,
+    paletteRgb: Uint8Array, settings: VectorTraceSettings,
+  ): TracedDocument;                                     // { svg, report }
+}
+```
+
+`subject()` must be **referentially stable** until something changes, for the
+same reason `getSnapshot()` must be: it is read through `useSyncExternalStore`.
+
+### The pipeline
+
+```ts
+const frame  = await source.renderFrame();               // the picture on screen
+const census = { indexed: await indexImage(frame.width, frame.height, frame.data) };
+const size   = await estimateExportSize(frame, settings, { census, tracer });
+const where  = await chooseDestination(exportFileName(name, settings), settings.format);
+if (where !== null) await runExport({ frame, settings, census, tracer, destination: where, onProgress });
+```
+
+Four things this order encodes, each of which breaks something if changed:
+
+- **The destination is chosen inside the click.** `showSaveFilePicker` needs
+  transient user activation and a 4x PNG encode outlives it, so asking after the
+  work fails on exactly the exports large enough to matter.
+- **The census is taken once, on the frame**, and handed to every later estimate
+  and to the export itself. It depends on the frame alone — nearest-neighbour
+  replication cannot invent a colour — so a quality slider costs no pass over
+  the image, and an indexed export never builds the scaled RGBA buffer at all.
+- **The estimate encodes the same frame the export will.** Below a pixel budget
+  it encodes all of it and reports `exact: true`; above it, a centred band with
+  the real encoder, multiplied by the row ratio, with a known upward bias.
+- **The frame is already sRGB.** The renderer reapplies the transfer once on the
+  way to the screen, so export encodes the bytes the viewport drew.
+
+### `ExportSettings`
+
+```ts
+interface ExportSettings {
+  readonly format: "png" | "jpeg" | "webp" | "svg";
+  readonly quality: number;                   // 1..100, read by the lossy formats
+  readonly scale: number;                     // integer, nearest-neighbour (F-EX-12)
+  readonly trace: VectorTraceSettings;        // mode, tolerance, minFeatureArea,
+}                                             // strokeOnly, strokeWidth
+```
+
+`ExportFormatInfo` carries `alpha`, `lossy` and `vector` so the panel reads
+declarations rather than testing ids. `vector` is what turns the scale control
+off: the multiplier replicates pixels and an SVG has none. The panel **hides**
+the control rather than disabling it, because there is nothing a person could
+change to make it apply — the same rule the stack row uses for a composite on a
+resampling node.
+
+Two refusals a caller must expect, both stated rather than worked around:
+
+- **`encodeFrame` with `format: "svg"` and no `tracer` throws.** There is no
+  default; the tracer lives in WASM and this module may not import it.
+- **A frame of more than 256 distinct colours cannot be traced**, and is
+  refused. An SVG layer is a colour; quantizing at export time would be a second
+  dither the document never asked for. The panel knows this before the button is
+  pressed, from the census, and says so there.
+
+## 9. Worker RPC — **planned**
 
 Comlink interfaces. The main thread holds UI state only; it never renders.
 
@@ -717,7 +887,7 @@ render once and are reused across all frames.
 
 ---
 
-## 9. Capability report
+## 10. Capability report
 
 `web/src/lib/capabilities.ts`, implementing F-UI-12.
 
@@ -750,7 +920,7 @@ fallbacks.
 
 ---
 
-## 10. Logging
+## 11. Logging
 
 `web/src/lib/log.ts`.
 

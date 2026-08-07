@@ -49,7 +49,7 @@ export interface StackPanelProps {
  * Add, remove, duplicate and drag-reorder; per-node enable and solo. The
  * catalogue it adds from is the sealed registry, and the grammar it enforces is
  * `validateStack` — neither is restated here. F-ST-03 (per-node opacity and
- * blend) is not offered; the reason is on {@link StackRow}.
+ * blend) is on the row, for the reason given on {@link StackRow}.
  *
  * ## What it refuses, and what it does not
  *
@@ -258,6 +258,13 @@ export function StackPanel({ store, registry }: StackPanelProps): React.ReactEle
                   canMoveUp={position > 0}
                   canMoveDown={position < stack.length - 1}
                   onMove={(direction) => step(node.id, direction)}
+                  onOpacity={(opacity, continuous) => {
+                    store.setNodeOpacity(node.id, opacity, { continuous });
+                  }}
+                  onBlend={(blend) => {
+                    log.info("node blend changed", { node: node.id, blend });
+                    store.setNodeBlend(node.id, blend);
+                  }}
                   excluded={isExcludedBySolo(stack, snapshot.soloNodeId, position)}
                   issue={issues.get(node.id) ?? null}
                   onSelect={() => store.selectNode(node.id)}

@@ -11,6 +11,7 @@
 import { logger } from "../lib/log";
 import { StagingPool } from "./boundary";
 import { PassCompiler } from "./compiler";
+import { CompositeProgram } from "./composite";
 import { acquireGpuContext, type GpuContext, type GpuContextOptions } from "./device";
 import { BufferCache, TexturePool } from "./resources";
 import { BatchExecutor } from "./scheduler";
@@ -24,28 +25,54 @@ export class GpuLayer {
   readonly staging: StagingPool;
   readonly compiler: PassCompiler;
   readonly executor: BatchExecutor;
+  /**
+   * Per-node opacity and blend (F-ST-03).
+   *
+   * Compiled here, once, rather than on first use: its WGSL is constant and
+   * pipeline creation is asynchronous, so a composite that had to compile
+   * mid-render would stall the first frame a user dragged an opacity slider on
+   * — the one frame where the delay is most visible.
+   */
+  readonly composite: CompositeProgram;
 
-  private constructor(context: GpuContext) {
+  private constructor(
+    context: GpuContext,
+    buffers: BufferCache,
+    composite: CompositeProgram,
+  ) {
     this.context = context;
     this.textures = new TexturePool(context);
-    this.buffers = new BufferCache(context);
+    this.buffers = buffers;
     this.staging = new StagingPool(context);
     this.compiler = new PassCompiler(context, this.buffers);
     this.executor = new BatchExecutor(context, this.compiler, this.buffers);
+    this.composite = composite;
   }
 
   static async create(options: GpuContextOptions): Promise<GpuLayer> {
     const context = await acquireGpuContext(options);
+    // The buffer cache is built here rather than in the constructor because the
+    // composite program needs one to exist before the layer does, and one cache
+    // destroyed with the layer is the whole point of bundling these together —
+    // a second cache for the composite's uniform buffers would be a leak the
+    // size of one buffer per composited node.
+    const buffers = new BufferCache(context);
+    const composite = await CompositeProgram.create(context, buffers);
     log.info("gpu layer ready");
-    return new GpuLayer(context);
+    return new GpuLayer(context, buffers, composite);
   }
 
   /** Resident bytes and cache occupancy, for the UI's memory readout. */
   stats(): {
     readonly textures: ReturnType<TexturePool["stats"]>;
     readonly pipelines: ReturnType<PassCompiler["stats"]>;
+    readonly composites: ReturnType<CompositeProgram["stats"]>;
   } {
-    return { textures: this.textures.stats(), pipelines: this.compiler.stats() };
+    return {
+      textures: this.textures.stats(),
+      pipelines: this.compiler.stats(),
+      composites: this.composite.stats(),
+    };
   }
 
   destroy(): void {

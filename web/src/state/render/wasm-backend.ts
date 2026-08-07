@@ -23,6 +23,17 @@
  * already has. That is written down in this round's report rather than worked
  * around here, because working around it would mean a second colour path.
  *
+ * ## Per-node opacity and blend (F-ST-03)
+ *
+ * Applied here, on the planar `f32` the kernel just produced, against the same
+ * planes the kernel read. That is what keeps a composite free of any boundary
+ * crossing on this side: the buffer is already in WASM memory and both operands
+ * are already linear light.
+ *
+ * The formulas are `graph/blend.ts`, the same module the parallel half's shader
+ * transcribes, because a diffusion node at 60% opacity has to look like a blur
+ * at 60% opacity.
+ *
  * ## The port
  *
  * The core is reached through {@link DiffusionPort} rather than by importing
@@ -34,7 +45,7 @@
 import type { ColorMetric, Palette, ParameterValue } from "../../types/document";
 import type { CpuColorSurface, FrameBuffer } from "../../types/graph";
 import type { WasmBackend, WasmNodeRequest } from "../../graph";
-import { GraphError } from "../../graph";
+import { GraphError, compositeLinearSurface } from "../../graph";
 import { linearSurfaceFromSrgbBytes, srgbBytesFromLinearSurface } from "../../io";
 import { logger } from "../../lib/log";
 
@@ -84,16 +95,6 @@ export class WasmRenderBackend implements WasmBackend {
     const planned = request.node;
     const nodeId = planned.node.id;
 
-    if (planned.composite !== null) {
-      throw new GraphError(
-        "invariant",
-        `node ${nodeId} asks for opacity ${planned.composite.opacity} in blend ` +
-          `"${planned.composite.blend}", and per-node compositing (F-ST-03) is not implemented ` +
-          `in this build.`,
-        { nodeId, effect: planned.node.effect },
-      );
-    }
-
     const input = this.#inputOf(request);
     if (input.color.residency !== "cpu") {
       throw new GraphError(
@@ -135,13 +136,31 @@ export class WasmRenderBackend implements WasmBackend {
       );
     }
 
-    const color = linearSurfaceFromSrgbBytes(result.pixels, width, height);
+    const diffused = linearSurfaceFromSrgbBytes(result.pixels, width, height);
+
+    // F-ST-03, in linear light and in the same call, so a composite costs this
+    // node no boundary crossing. The arithmetic is `graph/blend.ts`, which the
+    // GPU half's shader is a transcription of — the two have to produce the
+    // same numbers or a diffusion node at 60% opacity would not match a blur at
+    // 60% opacity.
+    //
+    // The index map is left exactly as the kernel produced it. It records which
+    // palette entry this node chose for each pixel; opacity changes how much of
+    // that decision is shown, not what the decision was, and blending two
+    // indices is meaningless — the average of index 3 and index 7 is not a
+    // colour. The argument in full is in `gpu/composite.ts`.
+    const color =
+      planned.composite === null
+        ? diffused
+        : compositeLinearSurface(surface, diffused, planned.composite, width * height);
+
     log.debug("diffusion node complete", {
       nodeId,
       kernel: planned.node.effect,
       width,
       height,
       paletteEntries: request.palette.colors.length / 3,
+      composited: planned.composite !== null,
       ms: Math.round((performance.now() - started) * 100) / 100,
     });
 
