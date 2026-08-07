@@ -18,7 +18,7 @@ import type { Viewport } from "../viewport";
 import { App } from "./App";
 import { StartupFailureScreen } from "./StartupFailureScreen";
 import { UnsupportedScreen } from "./UnsupportedScreen";
-import { boot } from "./boot";
+import { boot, describeStartupError } from "./boot";
 import { registerPanel, registerToolbarItem } from "./slots";
 import { createThemeController } from "./theme";
 import { installHistoryShortcuts, registerToolbar } from "./toolbar";
@@ -89,7 +89,9 @@ async function start(): Promise<void> {
   if (outcome.kind === "registry-failed") {
     root.render(
       <React.StrictMode>
-        <StartupFailureScreen issues={outcome.issues} message={outcome.message} />
+        <StartupFailureScreen
+          failure={{ kind: "registry", issues: outcome.issues, message: outcome.message }}
+        />
       </React.StrictMode>,
     );
     return;
@@ -103,15 +105,28 @@ async function start(): Promise<void> {
       palette: paletteStore,
     });
   } catch (error) {
-    // The capability gate passed, so a GPU device or a WASM core that will not
-    // come up now is a real failure and not a supported state. It gets the same
-    // screen a bad catalogue gets, because the user's position is the same:
-    // nothing can be done here and the reason has to be readable.
-    const message = error instanceof Error ? error.message : String(error);
-    log.error("startup halted: the editor session could not be created", { error: message });
+    // The capability gate passed and the catalogue validated, so a render
+    // worker, GPU device or WASM core that will not come up now is a real
+    // failure and not a supported state. It gets its **own** screen: this is
+    // not a catalogue problem, and reporting it as one — which this did — sends
+    // the reader to the wrong half of the codebase.
+    //
+    // The cause chain goes with it. `RenderService` hangs the browser's own
+    // event on `Error.cause`, and that is where the specific fault lives.
+    const described = describeStartupError(error);
+    log.error("startup halted: the render engine could not be started", {
+      error: described.message,
+      causes: described.causes.join(" <- "),
+    });
     root.render(
       <React.StrictMode>
-        <StartupFailureScreen issues={[]} message={message} />
+        <StartupFailureScreen
+          failure={{
+            kind: "engine",
+            message: described.message,
+            causes: described.causes,
+          }}
+        />
       </React.StrictMode>,
     );
     return;

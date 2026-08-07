@@ -46,6 +46,34 @@
 import type { CapabilityReport } from "../lib/capabilities";
 import { correlationId, logger } from "../lib/log";
 import type { SourceImage } from "../io";
+/**
+ * The built render worker's URL.
+ *
+ * **Do not replace this with `new URL("./render.worker.ts", import.meta.url)`
+ * assigned to a variable.** Vite recognises a worker only from the exact
+ * `new Worker(new URL("...", import.meta.url))` expression, written inline. Lift
+ * that `new URL` into a local and the worker plugin stops seeing a worker: the
+ * expression falls through to plain asset handling, the **raw TypeScript file**
+ * is copied into `dist/assets/` unchanged, and the built application asks the
+ * browser to execute `.ts` as a module. It fails to parse, the browser fires a
+ * bare `error` event with no message at all, and the app dies at startup with
+ * nothing to say — the exact failure this file's error path was rewritten for.
+ * It builds, it typechecks, every unit test passes, and it only breaks once
+ * bundled: `web/test/boot/run.mjs` is the check that catches it.
+ *
+ * The `?worker&url` form asks for the same thing and says so in the import,
+ * which is why it is used here: it is bundled as a worker (its own chunk, ES
+ * format, per `worker.format` in vite.config.ts) *and* it hands back the URL,
+ * so the script the worker is constructed from and the script named in a
+ * failure report are the same value rather than two expressions that can drift.
+ */
+import renderWorkerUrl from "./render.worker.ts?worker&url";
+import {
+  describeWorkerError,
+  describeWorkerScriptResponse,
+  describeWorkerScriptUnreachable,
+  type WorkerErrorEvent,
+} from "./diagnose";
 import {
   RenderAbandoned,
   reviveError,
@@ -74,6 +102,16 @@ export function isAbandoned(error: unknown): error is RenderAbandoned {
   return error instanceof RenderAbandoned;
 }
 
+/**
+ * How long the worker-script probe gets before the report goes out without it.
+ *
+ * The application is already dead by the time this runs; the only cost of
+ * waiting is how long the failure screen takes to appear, and the only cost of
+ * not waiting is a report that cannot say why. Short enough that nobody is left
+ * looking at a blank page wondering, long enough for a real round trip.
+ */
+const WORKER_PROBE_TIMEOUT_MS = 5_000;
+
 export interface RenderServiceOptions {
   readonly report: CapabilityReport;
 }
@@ -87,23 +125,25 @@ interface Pending {
 
 export class RenderService {
   readonly #worker: Worker;
+  readonly #scriptUrl: string;
   readonly #pending = new Map<number, Pending>();
   #nextId = 1;
   #info: InitResult | null = null;
   #disposed = false;
 
-  private constructor(worker: Worker) {
+  private constructor(worker: Worker, scriptUrl: string) {
     this.#worker = worker;
+    this.#scriptUrl = scriptUrl;
     worker.addEventListener("message", (event: MessageEvent<WorkerOutbound>) => {
       this.#settle(event.data);
     });
-    worker.addEventListener("error", (event: ErrorEvent) => {
-      // A worker that fails to load leaves every call unanswered, so this both
-      // reports and fails them — a spinner that never stops is the worst
-      // possible symptom for the one thread that draws the picture.
-      const message = event.message === "" ? "the render worker failed to start" : event.message;
-      log.error("render worker error", { message, file: event.filename, line: event.lineno });
-      this.#failAll(new Error(`render worker error: ${message}`));
+    // Typed as `Event`, not `ErrorEvent`, and that is the fix rather than a
+    // detail of it: a worker whose script never ran fires a *plain* event with
+    // no `message`, no `filename` and no `error`. Reading it as an `ErrorEvent`
+    // is what put the word "undefined" on the startup failure screen instead of
+    // a reason. See `diagnose.ts`.
+    worker.addEventListener("error", (event: Event) => {
+      void this.#reportWorkerError(event);
     });
     worker.addEventListener("messageerror", (event: MessageEvent) => {
       log.error("a message to the render worker could not be deserialised", {
@@ -123,11 +163,11 @@ export class RenderService {
   static async create(options: RenderServiceOptions): Promise<RenderService> {
     const cid = correlationId();
     const started = performance.now();
-    const worker = new Worker(new URL("./render.worker.ts", import.meta.url), {
+    const worker = new Worker(renderWorkerUrl, {
       type: "module",
       name: "dither-ork-render",
     });
-    const service = new RenderService(worker);
+    const service = new RenderService(worker, new URL(renderWorkerUrl, location.href).href);
 
     // Only the verdict crosses: `GPUAdapterInfo` is a platform object and
     // posting one throws `DataCloneError`.
@@ -362,6 +402,66 @@ export class RenderService {
     for (const [id, pending] of [...this.#pending]) {
       this.#pending.delete(id);
       pending.reject(error);
+    }
+  }
+
+  /**
+   * The worker died or never started.
+   *
+   * Every call in flight is left unanswered by such an event, so they are all
+   * failed — a spinner that never stops is the worst possible symptom for the
+   * one thread that draws the picture. What matters as much is *what they are
+   * failed with*: this error is shown to a person on the startup failure screen,
+   * and it used to read "render worker error: undefined".
+   *
+   * Asynchronous, and deliberately: when the browser says only "that script did
+   * not work", the explanation is in the HTTP response and nowhere else, so it
+   * is fetched before anybody is told. One request, bounded, on a path that has
+   * already failed — and it cannot change the outcome, only describe it.
+   */
+  async #reportWorkerError(event: Event): Promise<void> {
+    // The cast is the honest direction: `WorkerErrorEvent` declares every field
+    // as optional and `unknown`, which is what this event actually is. A plain
+    // `Event` structurally satisfies it — that is the case being handled.
+    const described = describeWorkerError(event as WorkerErrorEvent, this.#scriptUrl);
+    const detail = described.failedToLoad ? await this.#probeWorkerScript() : null;
+    const summary = detail === null ? described.summary : `${described.summary}; ${detail}`;
+
+    log.error("render worker error", {
+      script: this.#scriptUrl,
+      failedToLoad: described.failedToLoad,
+      detail: summary,
+    });
+    this.#failAll(
+      new Error(`render worker error: ${summary}`, {
+        ...(described.cause === undefined ? {} : { cause: described.cause }),
+      }),
+    );
+  }
+
+  /**
+   * Ask the network what the worker script's URL actually answers with.
+   *
+   * Never throws and never retries: this runs on a fatal path, and a diagnostic
+   * that can fail the failure is worse than no diagnostic. A probe that cannot
+   * complete says so, which is itself informative — that is a network the page
+   * cannot reach rather than a file it cannot find.
+   */
+  async #probeWorkerScript(): Promise<string> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, WORKER_PROBE_TIMEOUT_MS);
+    try {
+      const response = await fetch(this.#scriptUrl, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      return describeWorkerScriptResponse(response.status, response.headers.get("content-type"));
+    } catch (error) {
+      return describeWorkerScriptUnreachable(error);
+    } finally {
+      clearTimeout(timer);
     }
   }
 }

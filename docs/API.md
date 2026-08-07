@@ -455,8 +455,18 @@ rule.**
 
 Startup is expected to surface that rather than continue. `app/boot.ts` returns
 `registry-failed` and `app/StartupFailureScreen.tsx` puts the verdict and every
-issue on the screen instead of the application. The proof page does the same
-thing on its own page.
+issue on the screen instead of the application, under
+`failure={{ kind: "registry", … }}`. The proof page does the same thing on its
+own page.
+
+That screen takes a **discriminated** failure, and the discrimination is load
+bearing. Its other arm, `kind: "engine"`, is what a render worker, GPU device or
+WASM core that will not come up gets — a different heading, a different
+explanation, and the `Error.cause` chain listed under "Caused by". The two used
+to share one screen, so a dead render worker was reported as a rejected effect
+catalogue: a wrong heading is worse than no heading, because it is followed.
+`app/boot.ts` exports `describeStartupError` to flatten the chain, and
+`worker/diagnose.ts` is what makes sure there is something in it worth reading.
 
 ### What the grammar checks, and what it does not
 

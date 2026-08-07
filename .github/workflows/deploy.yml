@@ -175,3 +175,26 @@ jobs:
           echo "::error::SharedArrayBuffer will be absent and the app will refuse to start."
           curl -sSI --max-time 20 "$PRODUCTION_URL/"
           exit 1
+
+      # The headers being served proves the response is configured. It does not
+      # prove the application starts — a deployment whose worker chunk is not
+      # executable serves perfect headers and a dead page, which is what this
+      # step exists to stop shipping silently. Same check CI runs against the
+      # build, pointed at the deployment that just went live: open it in the
+      # pinned browser and require a running editor session.
+      #
+      # It runs after the upload rather than before, because "the thing at the
+      # production URL works" is not a question a pre-deploy check can answer.
+      # A failure here is a live deployment that needs rolling back, and saying
+      # so loudly is the whole point.
+      - name: Build the pinned browser image
+        run: docker build -t dither-ork-gpu-golden web/test/gpu-golden
+
+      # The runner's checkout is bind-mounted the same way the goldens do it:
+      # the image carries a browser and nothing else, so the harness comes from
+      # the commit being deployed rather than from a baked-in copy.
+      - name: Verify the deployed application starts
+        run: |
+          docker run --rm -v "$PWD/web:/app/web" \
+            -e DITHER_ORK_BOOT_URL="$PRODUCTION_URL" \
+            dither-ork-gpu-golden node test/boot/run.mjs

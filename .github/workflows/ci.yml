@@ -187,6 +187,50 @@ jobs:
             || { echo "::error::COEP header missing or malformed"; exit 1; }
           echo "both headers present in $headers"
 
+  # Does what was built actually start? Nothing else in this file asks.
+  #
+  # `web` above builds `dist` and stops there, and a bundle that cannot boot is
+  # a bundle that builds perfectly — that is exactly how the render worker
+  # shipped as an unbundled `.ts` asset, past a green typecheck, a green suite
+  # and a green build. This job loads the built output in the pinned browser and
+  # requires it to reach a running editor session. See docs/DEVELOPMENT.md,
+  # "Does the built app start?".
+  boot:
+    name: production build boots
+    runs-on: ubuntu-latest
+    needs: wasm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm-pkg
+          path: web/src/wasm/pkg
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+
+      # The real production build, not a test-only bundle. The point of this job
+      # is that the artefact under test is the artefact that ships.
+      - run: npm run build
+        working-directory: web
+
+      # The GPU goldens' image: one pinned Chrome for Testing in this
+      # repository, not two.
+      - name: Build the pinned browser image
+        run: docker build -t dither-ork-gpu-golden web/test/gpu-golden
+
+      - name: Boot the built application
+        run: |
+          docker run --rm -v "$PWD/web:/app/web" \
+            dither-ork-gpu-golden node test/boot/run.mjs
+
   gpu-golden:
     name: gpu golden images
     runs-on: ubuntu-latest

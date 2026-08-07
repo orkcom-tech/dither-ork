@@ -93,3 +93,57 @@ export async function boot(): Promise<BootOutcome> {
   const report = await checkCapabilities();
   return classifyBoot(report, loadEffectRegistry);
 }
+
+/**
+ * How deep a cause chain is followed before it is called a cycle.
+ *
+ * Nothing in this application wraps an error more than three deep. The bound is
+ * here because `Error.cause` can be made to point at an ancestor, and a startup
+ * failure screen that hangs the browser is not an improvement on one that says
+ * the wrong thing.
+ */
+const MAX_CAUSE_DEPTH = 8;
+
+export interface StartupErrorDescription {
+  /** The outermost failure, as one line. Never empty. */
+  readonly message: string;
+  /** Everything it was wrapped around, outermost first. */
+  readonly causes: readonly string[];
+}
+
+/**
+ * Flatten a thrown value into what the startup failure screen shows.
+ *
+ * `Error.cause` is the only place the specific fault survives once a layer has
+ * wrapped it — the render service reports "the render worker failed to start"
+ * and hangs the browser's own event on the cause — so a report that reads only
+ * `error.message` is a report that dropped the answer. This walks the chain.
+ *
+ * A non-`Error` throw is stringified rather than skipped, because "the thing
+ * that was thrown was not an Error" is itself worth seeing on screen.
+ */
+export function describeStartupError(error: unknown): StartupErrorDescription {
+  const line = (value: unknown): string => {
+    if (value instanceof Error) {
+      return value.message === "" ? value.name : `${value.name}: ${value.message}`;
+    }
+    const rendered = String(value);
+    return rendered === "" ? "a failure with no message" : rendered;
+  };
+
+  const causes: string[] = [];
+  const seen = new Set<unknown>();
+  seen.add(error);
+  let current: unknown = error instanceof Error ? error.cause : undefined;
+  while (current !== undefined && current !== null && causes.length < MAX_CAUSE_DEPTH) {
+    if (seen.has(current)) {
+      causes.push("(the cause chain refers back to itself and was not followed further)");
+      break;
+    }
+    seen.add(current);
+    causes.push(line(current));
+    current = current instanceof Error ? current.cause : undefined;
+  }
+
+  return { message: line(error), causes };
+}

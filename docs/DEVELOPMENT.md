@@ -173,7 +173,7 @@ Docker bind mount reliably on macOS and Windows hosts.
 
 ## Tests
 
-Three suites. Two of them — Rust and web — run inside the container that owns
+Four suites. Two of them — Rust and web — run inside the container that owns
 their toolchain and need no browser: the Rust core has no web dependencies, and
 everything the web suite covers — the node registry, content hashing, the node
 cache, the document store and history, the image intake, the pure halves of the
@@ -192,6 +192,11 @@ The third is the **GPU golden set**, and it needs a browser because a WGSL
 compute pass has nowhere else to run. It is documented under "GPU golden images"
 below, kept out of the two suites above on purpose: nothing in `vitest` should
 start depending on a browser being installed.
+
+The fourth is the **production boot check**, and it exists because none of the
+other three loads `web/dist`. See "Does the built app start?" below. If you
+change how anything is bundled — the worker entry, the WASM package, the
+`base`, `_headers` — that check is the one that will tell you.
 
 ```bash
 # web — one shot, the form CI runs
@@ -563,6 +568,74 @@ actually make; measured, they move 2.8%, 76% and 25% of the frame at deltas of
   but a hue control wired to nothing would pass every check in the repository.
   The fix is a `cyclic` flag on `ParamDescriptor` so a caller can pick a half
   turn instead of a whole one; it is not written.
+
+## Does the built app start?
+
+`web/test/boot/run.mjs`. Serve the real `web/dist`, open it in the pinned
+browser, and require that the application reaches a running editor session.
+
+```bash
+# 1. build the production bundle
+docker compose exec -T web sh -c 'npm run build'
+
+# 2. the browser image — the GPU goldens', there is only one pinned Chrome here
+docker build -t dither-ork-gpu-golden web/test/gpu-golden
+
+# 3. check that what was built actually boots
+docker run --rm -v "$PWD/web:/app/web" dither-ork-gpu-golden node test/boot/run.mjs
+
+# the same assertion against a deployed origin — this is how a deploy is verified
+docker run --rm -e DITHER_ORK_BOOT_URL=https://dither.orkcom-tech.cc \
+  dither-ork-gpu-golden node test/boot/run.mjs
+```
+
+### Why it exists
+
+Every other suite runs against the *source tree*. `npm test` resolves modules
+through Vite, the GPU goldens build a harness bundle of their own, and `cargo
+test` never sees the web. **None of them loads the built application**, so the
+entire class of defect that only appears after bundling was invisible to all of
+them — and one shipped.
+
+The one that shipped: `worker/client.ts` used to construct the render worker
+from a `new URL(...)` expression held in a local variable. Vite recognises a
+worker only from the exact inline `new Worker(new URL("...", import.meta.url))`
+shape; lifted into a local, the expression falls through to plain asset handling
+and the **raw TypeScript file** is copied into `dist/assets/` untouched. The
+build succeeds, the typecheck succeeds, all 1845 unit tests pass, and the
+deployed application asks the browser to execute `.ts` as a module. It cannot,
+so it fires a bare `error` event carrying no message at all, and the app dies at
+startup. `client.ts` now imports `./render.worker.ts?worker&url`, which asks for
+the same thing in a form that cannot be silently downgraded — and this check is
+what proves it, per build.
+
+### What it asserts
+
+1. **No startup screen.** Both `StartupFailureScreen` and `UnsupportedScreen`
+   render an `h1.screen__title`; its presence is the failure and its text is
+   quoted into the report.
+2. **`.shell` rendered** — `App`'s root. A page that renders nothing at all
+   would otherwise pass a "no failure screen" check.
+3. **`editor session ready` was logged.** The shell mounts before the render
+   worker is up. That line is emitted only after the worker started, its device
+   came up and the core reported its version, so it is the statement that a
+   render path exists.
+4. **Nothing failed on the wire and nothing was uncaught** — a 404 on a chunk, a
+   COEP refusal, a top-level throw. `/favicon.ico` and `/cdn-cgi/` are ignored:
+   the browser and the host ask for those, the build does not.
+
+The cross-origin isolation headers it serves are read out of `dist/_headers`
+rather than hard-coded, so the file production is configured by is the file the
+check is run under. Without them `SharedArrayBuffer` is absent, the capability
+gate fails, and you would be chasing a different bug — which is also why a plain
+static server is not a substitute for this.
+
+### What it does *not* cover
+
+It boots the application; it does not use it. Opening an image, adding an
+effect, exporting a file — still a person with a browser, as above. The check
+answers exactly one question, which is the one nothing else was answering: does
+the thing that was built start.
 
 ### Adding a dependency to a running stack
 

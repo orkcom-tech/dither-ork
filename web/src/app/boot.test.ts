@@ -6,7 +6,7 @@ import {
   loadEffectRegistry,
   type EffectRegistry,
 } from "../registry";
-import { classifyBoot } from "./boot";
+import { classifyBoot, describeStartupError } from "./boot";
 
 function capability(id: string, fatal: boolean, ok: boolean): Capability {
   return {
@@ -103,5 +103,46 @@ describe("classifyBoot — the registry gate", () => {
     expect(outcome.kind).toBe("ready");
     if (outcome.kind !== "ready") throw new Error("unreachable");
     expect(outcome.registry.size).toBeGreaterThan(0);
+  });
+});
+
+describe("describeStartupError — what the screen is given", () => {
+  it("keeps the whole chain, because the outermost line is the least specific", () => {
+    // This is the real shape of the failure that shipped: the session layer
+    // wraps what the render service threw, and the render service hangs the
+    // browser's own event on the cause. Reading only `error.message` there is
+    // what left the screen with nothing to say.
+    const browser = new Error("the worker script at /assets/render.worker-x.js never ran");
+    const service = new Error("render worker error", { cause: browser });
+    const described = describeStartupError(service);
+    expect(described.message).toContain("render worker error");
+    expect(described.causes).toEqual(["Error: the worker script at /assets/render.worker-x.js never ran"]);
+  });
+
+  it("follows more than one level", () => {
+    const root = new Error("HTTP 404");
+    const middle = new Error("the worker script never ran", { cause: root });
+    const outer = new Error("the render service could not start", { cause: middle });
+    expect(describeStartupError(outer).causes).toEqual([
+      "Error: the worker script never ran",
+      "Error: HTTP 404",
+    ]);
+  });
+
+  it("reports a throw that was not an Error rather than dropping it", () => {
+    expect(describeStartupError("device lost").message).toBe("device lost");
+  });
+
+  it("names an Error with no message instead of producing an empty line", () => {
+    expect(describeStartupError(new RangeError()).message).toBe("RangeError");
+  });
+
+  it("does not follow a cause chain round in a circle", () => {
+    const a = new Error("a");
+    const b = new Error("b", { cause: a });
+    (a as { cause?: unknown }).cause = b;
+    const described = describeStartupError(a);
+    expect(described.causes.length).toBeLessThan(4);
+    expect(described.causes.at(-1)).toContain("refers back to itself");
   });
 });

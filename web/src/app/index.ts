@@ -42,9 +42,19 @@
  */
 
 export { App, type AppProps } from "./App";
-export { boot, classifyBoot, type BootOutcome } from "./boot";
+export {
+  boot,
+  classifyBoot,
+  describeStartupError,
+  type BootOutcome,
+  type StartupErrorDescription,
+} from "./boot";
 export { Splitter, type SplitterProps } from "./Splitter";
-export { StartupFailureScreen } from "./StartupFailureScreen";
+export {
+  StartupFailureScreen,
+  type StartupFailure,
+  type StartupFailureScreenProps,
+} from "./StartupFailureScreen";
 export { UnsupportedScreen } from "./UnsupportedScreen";
 export { ViewportContext, ViewportHost, useViewport } from "./ViewportHost";
 export {
