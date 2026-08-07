@@ -34,25 +34,38 @@
  * decision and neither goes stale when a default moves — it fails the comparison,
  * which is the moment to look at the picture and re-bless.
  *
+ * ## Scheduling goes through `prepareNodePasses`, not through this file
+ *
+ * Uniforms, per-pass extents and per-node bulk data are resolved by the same
+ * call `state/render/gpu-backend.ts` makes. That is not tidiness: a harness that
+ * assembled its own `ScheduleUnit` could only render passes that write what they
+ * read and bind nothing per node, which silently excluded F-PP-01, F-PP-05,
+ * F-PP-07 and F-SP-14 — four effects whose references did not exist and whose
+ * absence looked like an unrelated failure.
+ *
+ * A render therefore has its **own** extent. Two of the effects resample, so
+ * `run.mjs` is told the width and height of each frame rather than assuming the
+ * fixture's.
+ *
  * ## What is pinned
  *
- * The fixture, the palette, the seed, and normalized time. Nothing reads a clock
- * (F-AN-05) and nothing draws from an unseeded source, so two runs of this file
- * on one machine produce byte-identical frames — which is the property the whole
- * reference set rests on.
+ * The fixture, the palette, the seed, the uploaded tile, and normalized time.
+ * Nothing reads a clock (F-AN-05) and nothing draws from an unseeded source, so
+ * two runs of this file on one machine produce byte-identical frames — which is
+ * the property the whole reference set rests on.
  */
 
 import {
   GpuLayer,
   linearToSrgb,
-  packUniforms,
   planExecution,
+  prepareNodePasses,
   readColorSurface,
   SurfaceChain,
   thresholdMatrix,
   uploadPalette,
   writeColorSurface,
-  type ScheduleUnit,
+  type NodeRenderState,
 } from "../../src/gpu";
 import { checkCapabilities } from "../../src/lib/capabilities";
 import {
@@ -62,8 +75,13 @@ import {
   type EffectRegistry,
   type GpuEffectResolver,
 } from "../../src/registry";
-import type { Palette, ParameterValue } from "../../src/types/document";
-import type { GpuEffect } from "../../src/types/gpu";
+import { CURVE_ARCHETYPES } from "../../src/surprise";
+import {
+  encodeThresholdMap,
+  THRESHOLD_MAP_SLOT,
+} from "../../src/effects/threshold-map.effect";
+import type { CurvePoint, Palette, ParameterValue } from "../../src/types/document";
+import type { Extent, GpuEffect } from "../../src/types/gpu";
 import type { EffectDescriptor, ParamDescriptor } from "../../src/types/registry";
 import { NO_GPU_BUILD_DATA } from "../../src/types/registry";
 import {
@@ -130,6 +148,54 @@ const TILE_SOURCE: Readonly<Record<string, "bayer" | "blue-noise">> = {
  */
 const UPSTREAM_QUANTIZER = "bayer-4";
 
+/**
+ * Size of the tile handed to a binding that requires uploaded bytes.
+ *
+ * 32 rather than the fixture's own shape: the threshold map is a *matrix*, it
+ * tiles, and a tile the size of the frame would make every texel's threshold a
+ * function of its own position only — which is a picture that cannot tell a
+ * correct wrap from a broken one.
+ */
+const SUPPLIED_TILE_SIZE = 32;
+
+/** Seed for the tile above. Fixed, for the reason {@link NODE_SEED} is. */
+const SUPPLIED_TILE_SEED = 0x7a1e_0d17n;
+
+/**
+ * Bytes for an instance-data slot that declares `supplied: "required"`.
+ *
+ * F-PP-07 is the only such binding in the catalogue: its matrix is an image the
+ * user uploaded, so there is nothing in the descriptor for the harness to derive
+ * it from and `resolvePassInstances` — correctly — refuses to substitute
+ * anything. This table is what the harness uploads, and it is keyed by **slot**
+ * rather than by effect id, because the slot is what the binding names.
+ *
+ * The same argument as {@link TILE_SOURCE}: a table rather than a branch, so an
+ * effect that grows a required slot which is not in it fails the whole run
+ * instead of quietly rendering without one.
+ *
+ * The bytes are a real void-and-cluster tile from the core, encoded through the
+ * effect's own {@link encodeThresholdMap} — the one call the app's image loader
+ * makes — so the reference records the shader's header parsing and unpacking
+ * rather than a layout this file invented.
+ */
+const SUPPLIED_SOURCE: Readonly<Record<string, () => Uint8Array>> = {
+  [THRESHOLD_MAP_SLOT]: () => {
+    const size = SUPPLIED_TILE_SIZE;
+    const ranks = core.blueNoiseRanks(size, SUPPLIED_TILE_SEED);
+    const last = size * size - 1;
+    const rgba = new Uint8Array(size * size * 4);
+    for (let i = 0; i < size * size; i += 1) {
+      const grey = Math.round(((ranks[i] ?? 0) * 255) / last);
+      rgba[i * 4] = grey;
+      rgba[i * 4 + 1] = grey;
+      rgba[i * 4 + 2] = grey;
+      rgba[i * 4 + 3] = 255;
+    }
+    return encodeThresholdMap(size, size, rgba);
+  },
+};
+
 export type VariantId = "defaults" | "surprise";
 
 const VARIANTS: readonly VariantId[] = ["defaults", "surprise"];
@@ -166,7 +232,18 @@ export interface HarnessInfo {
 }
 
 export type RenderOutcome =
-  | { readonly ok: true; readonly rgba: string }
+  | {
+      readonly ok: true;
+      readonly rgba: string;
+      /**
+       * The shape this render produced, which is not always the fixture's.
+       * F-PP-01 and F-SP-14 resample, so the reference set stores a picture per
+       * render at whatever extent that render wrote — and the Node side reads
+       * the numbers from here rather than assuming.
+       */
+      readonly width: number;
+      readonly height: number;
+    }
   | { readonly ok: false; readonly error: string };
 
 interface Prepared {
@@ -187,15 +264,47 @@ function paramTypesOf(descriptor: EffectDescriptor): ReadonlyMap<string, ParamDe
 }
 
 /**
+ * Bytes for every slot this effect's passes declare as `supplied: "required"`.
+ *
+ * Enumerated from the bindings, so an effect that grows one is covered without
+ * this file being edited — and an effect whose slot has no entry in
+ * {@link SUPPLIED_SOURCE} fails here, naming the slot, rather than reaching the
+ * scheduler as "carries no bytes for it".
+ */
+function suppliedFor(effect: GpuEffect): ReadonlyMap<string, Uint8Array> {
+  const bytes = new Map<string, Uint8Array>();
+  for (const pass of effect.passes) {
+    for (const binding of pass.bindings) {
+      if (binding.role !== "instance-data") continue;
+      if (binding.supplied !== "required" || bytes.has(binding.slot)) continue;
+      const source = SUPPLIED_SOURCE[binding.slot];
+      if (source === undefined) {
+        throw new Error(
+          `"${effect.effect}" binds instance-data slot "${binding.slot}" as supplied ` +
+            `"required", and nothing states what to upload for it. Add it to SUPPLIED_SOURCE ` +
+            `in web/test/gpu-golden/harness.ts.`,
+        );
+      }
+      bytes.set(binding.slot, source());
+    }
+  }
+  return bytes;
+}
+
+/**
  * Every parameter pushed to the end of its surprise range furthest from its
  * default.
  *
  * Read out of the descriptor rather than chosen per effect, so the value is one
  * the Surprise generator can really produce and the picture is one the app can
  * really make. `seed` is left at its default because moving it would change the
- * frame without exercising anything the shader does differently; `color` and
- * `curve` have no uniform-field representation yet and nothing is invented for
- * them.
+ * frame without exercising anything the shader does differently; `color` has no
+ * uniform-field representation yet and nothing is invented for it.
+ *
+ * `curve` declares archetypes rather than a range, so "furthest from the
+ * default" is measured the only way a transfer curve can be: total vertical
+ * distance from the diagonal, which is what the default *is*. Un-jittered, since
+ * jitter is the sampler's randomness and every value here is pinned.
  */
 function surpriseParams(descriptor: EffectDescriptor): Record<string, ParameterValue> {
   const params: Record<string, ParameterValue> = { ...defaultParams(descriptor) };
@@ -216,9 +325,22 @@ function surpriseParams(descriptor: EffectDescriptor): Record<string, ParameterV
         if (other !== undefined) params[param.key] = other.value;
         break;
       }
+      case "curve": {
+        let furthest: readonly CurvePoint[] | undefined;
+        let widest = -1;
+        for (const option of param.surprise.archetypes) {
+          const points = CURVE_ARCHETYPES[option.value];
+          const spread = points.reduce((total, p) => total + Math.abs(p.y - p.x), 0);
+          if (spread > widest) {
+            widest = spread;
+            furthest = points;
+          }
+        }
+        if (furthest !== undefined) params[param.key] = furthest.map((p) => ({ ...p }));
+        break;
+      }
       case "seed":
       case "color":
-      case "curve":
         break;
     }
   }
@@ -438,32 +560,35 @@ async function initialise(): Promise<HarnessInfo> {
   };
 }
 
-function scheduleUnit(
+/**
+ * One node's state, as `prepareNodePasses` takes it.
+ *
+ * The harness used to pack uniforms and assemble a `ScheduleUnit` by hand, which
+ * worked for exactly as long as every pass wrote what it read and carried no
+ * bulk data. It cost the catalogue four effects: F-PP-01 and F-SP-14 resample,
+ * so their passes reach the executor with no resolved output extent, and F-PP-05
+ * and F-PP-07 bind a per-node buffer nobody built. Going through the same call
+ * `state/render/gpu-backend.ts` makes is what stops the harness from being a
+ * second, weaker renderer that agrees with the product only where the product is
+ * simple.
+ */
+function renderState(
   nodeId: string,
   descriptor: EffectDescriptor,
   gpu: GpuEffect,
   values: Readonly<Record<string, ParameterValue>>,
   paletteSize: number,
-): ScheduleUnit {
+): NodeRenderState {
+  const supplied = suppliedFor(gpu);
   return {
     nodeId,
-    execution: "gpu",
-    passes: gpu.passes.map((pass) => ({
-      nodeId,
-      pass,
-      uniforms: packUniforms(`${nodeId}/${pass.id}`, pass.uniforms, {
-        params: values,
-        paramTypes: paramTypesOf(descriptor),
-        width: FIXTURE_WIDTH,
-        height: FIXTURE_HEIGHT,
-        // Still frame at the start of the loop. Nothing here animates.
-        normalizedTime: 0,
-        seed: NODE_SEED,
-        paletteSize,
-      }),
-      width: FIXTURE_WIDTH,
-      height: FIXTURE_HEIGHT,
-    })),
+    params: values,
+    paramTypes: paramTypesOf(descriptor),
+    seed: NODE_SEED,
+    // Still frame at the start of the loop. Nothing here animates.
+    normalizedTime: 0,
+    paletteSize,
+    ...(supplied.size === 0 ? {} : { supplied }),
   };
 }
 
@@ -510,35 +635,58 @@ async function renderOne(index: number): Promise<RenderOutcome> {
   );
 
   try {
+    const fixtureExtent: Extent = { width: FIXTURE_WIDTH, height: FIXTURE_HEIGHT };
+    // The extent the effect under test reads. Not the fixture's the moment
+    // anything upstream resamples — which nothing upstream here does, since the
+    // quantizer is pointwise, but taking it from the prepared node rather than
+    // assuming is what keeps that a fact instead of a coincidence.
+    let reads = fixtureExtent;
+
     if (descriptor.requiresIndexMap) {
-      const unit = scheduleUnit(
-        `${nodeId}/upstream`,
-        upstream.descriptor,
+      const upstreamNode = prepareNodePasses(
         upstream.gpu,
-        defaultParams(upstream.descriptor),
-        gpuPalette.count,
+        renderState(
+          `${nodeId}/upstream`,
+          upstream.descriptor,
+          upstream.gpu,
+          defaultParams(upstream.descriptor),
+          gpuPalette.count,
+        ),
+        fixtureExtent,
       );
-      for (const batch of planExecution([unit]).batches) {
+      for (const batch of planExecution([upstreamNode.unit]).batches) {
         gpuLayer.executor.run(batch, { color, index: index_, palette: gpuPalette });
       }
+      reads = upstreamNode.output;
     }
 
-    const unit = scheduleUnit(nodeId, descriptor, gpu, values, gpuPalette.count);
-    for (const batch of planExecution([unit]).batches) {
+    const node = prepareNodePasses(
+      gpu,
+      renderState(nodeId, descriptor, gpu, values, gpuPalette.count),
+      reads,
+    );
+    for (const batch of planExecution([node.unit]).batches) {
       gpuLayer.executor.run(batch, { color, index: index_, palette: gpuPalette });
     }
 
+    // What the chain actually holds, not what the plan predicted. The two agree
+    // — `resolveScheduledOutput` refuses a pass where they do not — and reading
+    // the chain means a readback can never be asked for a shape the texture is
+    // not.
+    const wrote = color.extent;
     const readback = await readColorSurface(
       gpuLayer.context,
       gpuLayer.staging,
       color.current,
-      FIXTURE_WIDTH,
-      FIXTURE_HEIGHT,
+      wrote.width,
+      wrote.height,
       nodeId,
     );
     return {
       ok: true,
-      rgba: toBase64(encodeSrgb(readback.surface, FIXTURE_WIDTH, FIXTURE_HEIGHT)),
+      rgba: toBase64(encodeSrgb(readback.surface, wrote.width, wrote.height)),
+      width: wrote.width,
+      height: wrote.height,
     };
   } catch (error) {
     // Collected rather than thrown past the driver: one effect that cannot run
