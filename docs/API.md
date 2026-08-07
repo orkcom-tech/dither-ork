@@ -843,19 +843,90 @@ Two refusals a caller must expect, both stated rather than worked around:
   dither the document never asked for. The panel knows this before the button is
   pressed, from the census, and says so there.
 
-## 9. Worker RPC — **planned**
+## 9. The render worker
 
-Comlink interfaces. The main thread holds UI state only; it never renders.
+`web/src/worker/`. The main thread holds UI state only; it never renders. **This
+is the interface everything that wants a picture uses** — animation, Surprise Me,
+batch and animated export all build on it.
+
+Not Comlink, though the stack table named it: three properties this seam needs
+are ones a call proxy cannot express — abandoning a call that is already
+running, transferring an object produced inside a call out of it, and a lane
+discipline between preview and export over one device. `worker/protocol.ts`
+carries the full argument. The shape below is what a proxy would have generated,
+written out, plus those three.
 
 ```ts
-interface RenderWorker {
-  init(canvas: OffscreenCanvas): Promise<void>;
-  setDocument(doc: DitherDocument): Promise<void>;
-  /** Patch one parameter; invalidates that node and everything downstream. */
-  setParam(nodeId: string, key: string, value: ParameterValue): Promise<void>;
-  renderFrame(frame: number, quality: "preview" | "full"): Promise<RenderStats>;
-  play(fps: number): Promise<void>;
-  stop(): Promise<void>;
+class RenderService {
+  static create(options: { report: CapabilityReport }): Promise<RenderService>;
+
+  /** The worker's device and core, once they are up. */
+  readonly info: {
+    readonly coreVersion: string;
+    readonly kernels: readonly { id: string; name: string }[];
+    /** The main thread sizes its image limits (F-IN-05) from this. */
+    readonly maxTextureDimension2D: number;
+    readonly adapter: {
+      vendor: string; architecture: string; device: string; description: string;
+    };
+    readonly ms: number;
+  };
+
+  /**
+   * Point the worker at an image, or at nothing.
+   *
+   * The pixel planes are copied, not transferred: the main thread keeps its own
+   * decoded surface for the before/after reference (F-UI-04) and palette
+   * extraction (F-CO-02). Once per image open, never per frame; the byte count
+   * and the duration are logged on both sides.
+   */
+  setSource(image: SourceImage | null): Promise<void>;
+
+  render(params: RenderParams): Promise<RenderResult>;
+  /** Same, with the call id first, so `cancel(id)` can stop it mid-render. */
+  renderCancellable(params: RenderParams): { id: number; frame: Promise<RenderResult> };
+  cancel(id: number): void;
+
+  /** F-EX-08. One synchronous WASM call, on the worker's thread rather than this one. */
+  trace(params: {
+    indices: Uint16Array; width: number; height: number;
+    paletteRgb: Uint8Array; settings: VectorTraceSettings;
+  }): Promise<{ svg: string; report: VectorTraceReport; ms: number }>;
+
+  dispose(): Promise<void>;
+}
+
+interface RenderParams {
+  readonly document: DitherDocument;
+  /** Render up to and including this node (F-ST-02). */
+  readonly solo: string | null;
+  readonly quality: "preview" | "full";
+  /** Fraction of document resolution to render at, in (0, 1] — F-UI-03. */
+  readonly factor: number;
+  readonly lane: "preview" | "export";
+  readonly present: "bitmap" | "bytes";
+}
+
+interface RenderResult {
+  /** `bitmap` is transferred and has exactly one owner; `bytes` are the samples. */
+  readonly image:
+    | { readonly kind: "bitmap"; readonly bitmap: ImageBitmap }
+    | { readonly kind: "bytes"; readonly data: Uint8ClampedArray };
+  /** The extent the graph ran at. Below the document's when degraded. */
+  readonly width: number;
+  readonly height: number;
+  readonly documentWidth: number;
+  readonly documentHeight: number;
+  readonly quality: "preview" | "full";
+  readonly correlationId: string;
+  /** Absent when the stack was empty and the source itself is the picture. */
+  readonly stats: RenderStats | null;
+  readonly diagnostics: RenderDiagnostics | null;
+  readonly totalMs: number;
+  /** Of which, presenting: readback, sRGB encode, bitmap. */
+  readonly presentMs: number;
+  /** Bytes the reply carries across the worker boundary. */
+  readonly transferBytes: number;
 }
 
 interface RenderStats {
@@ -866,24 +937,38 @@ interface RenderStats {
   /** Bytes moved across the GPU/CPU boundary — the known perf ceiling. */
   readonly boundaryBytes: number;
 }
-
-interface ExportWorker {
-  exportStill(doc: DitherDocument, format: StillFormat, scale: number): Promise<Blob>;
-  exportAnimation(
-    doc: DitherDocument,
-    format: AnimatedFormat,
-    scale: number,
-    onProgress: (frame: number, total: number) => void,
-  ): Promise<Blob>;
-  exportVector(doc: DitherDocument, options: VectorOptions): Promise<Blob>;
-  cancel(): Promise<void>;
-}
 ```
 
-`cancel()` actually stops the worker; it does not merely stop reporting.
+**Two rules a caller has to know.**
 
-Animated export re-evaluates only **bound** nodes per frame. Unbound nodes
-render once and are reused across all frames.
+1. **An abandoned render is not an error.** `render()` rejects with
+   `RenderAbandoned` (test it with `isAbandoned`) when a newer preview replaced
+   this one or somebody cancelled it. That is an ordinary outcome of an
+   interactive editor and must not reach the UI as a failure. Everything else
+   that rejects is real: a document the renderer refuses, a lost device, an
+   effect the catalogue does not have.
+2. **A transferred `ImageBitmap` has exactly one owner.** Hand it to the
+   viewport, which closes it when it is replaced (`viewport/frame.ts`,
+   "Ownership"), or close it yourself. Dropping one leaks GPU memory that
+   nothing in the JS heap accounts for.
+
+**The lanes** (`worker/queue.ts`, and unit-tested there without a device):
+
+| | preview | export |
+| --- | --- | --- |
+| A newer preview arrives | aborted and rejected `superseded`; at most one waits | unaffected |
+| An export arrives | aborted and **re-queued** — it still resolves with a frame, after the export | queued in arrival order |
+| `cancel(id)` | rejected `cancelled` | rejected `cancelled` |
+
+That is both halves of "preview must not block export" and "export must not
+degrade preview". `cancel()` actually stops the worker; it does not merely stop
+reporting — `graph/render.ts` checks the abort signal before every plan step,
+which is every cancellation point a graph execution has.
+
+**Not yet on this interface:** `play(fps)`, animated export and batch. Animated
+export will re-evaluate only **bound** nodes per frame — unbound nodes render
+once and are reused across all frames, which is what `RetainPolicy` in
+`graph/render.ts` already exists for.
 
 ---
 

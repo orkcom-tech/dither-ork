@@ -1,6 +1,11 @@
 /**
  * The render path: document -> graph -> frame.
  *
+ * **Everything here runs in the render worker.** `web/src/worker/render.worker.ts`
+ * is the only importer of this barrel; nothing on the main thread constructs a
+ * device, a core or a renderer, which is why `state/index.ts` does not re-export
+ * any of it.
+ *
  * - `graph.ts`        a document compiled to a `RenderGraph`. Pure.
  * - `effects.ts`      an effect id to compiled compute passes, cached per session.
  * - `gpu-backend.ts`  `GpuBackend` against the real device.

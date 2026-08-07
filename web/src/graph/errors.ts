@@ -57,6 +57,12 @@ export type GraphErrorCode =
    * pixel grids (F-ST-03).
    */
   | "unsupported-composite"
+  /**
+   * The render was abandoned through its `AbortSignal` and the signal carried no
+   * reason of its own. A newer render superseding this one is the ordinary
+   * cause, and it is not a failure — see `RenderDeps.signal`.
+   */
+  | "aborted"
   /** An internal invariant the graph maintains itself was violated. */
   | "invariant";
 

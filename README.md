@@ -24,13 +24,17 @@ finish something in:
   that carries the whole recipe in the URL fragment and no image at all;
 - the document autosaves and comes back on reload.
 
+The render loop and the SVG tracer run in a **web worker** that owns the GPU
+device and the Rust core, so the window stays live while a big picture renders:
+dragging a slider on a 2400x1800 image through a stack of blur →
+Floyd-Steinberg → halftone issues a render per pointer move and never blocks the
+main thread for more than about 17 ms. While you drag, the preview renders at
+reduced resolution and says so in a badge; it goes back to full when you let go.
+
 What is **not** built, and is left out rather than stubbed: **animation** — no
 timeline, no modulators, no playback, and therefore none of the animated export
 formats (GIF, APNG, MP4/WebM, sprite sheet, PNG sequence). Nor is there Surprise
-Me, batch, or hue-targeted recolour. The render loop runs on the **main thread**
-rather than in a worker, which a long stack at a large size will show you; an
-SVG trace of a large image blocks it for the length of the trace for the same
-reason.
+Me, batch, or hue-targeted recolour.
 
 Everything below under "What it will do" that is not in the list above is still
 a plan.

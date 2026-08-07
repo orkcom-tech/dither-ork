@@ -4,11 +4,13 @@ import { createRoot, type Root } from "react-dom/client";
 import { hasPresetStorage, opfsPresetStorage } from "../io/document";
 import { correlationId, logger } from "../lib/log";
 import { createEditorSession, type EditorSession } from "../state";
+import { registerBatchControls } from "../ui/batch";
 import { registerDocumentsToolbar } from "../ui/documents";
 import { registerExportControls } from "../ui/export";
 import { paletteStore } from "../ui/palette";
 import { registerStackPanel } from "../ui/stack";
 import { registerPropertiesPanel } from "../ui/properties";
+import { registerSurpriseControls } from "../ui/surprise";
 import type { Viewport } from "../viewport";
 import { App } from "./App";
 import { StartupFailureScreen } from "./StartupFailureScreen";
@@ -130,6 +132,22 @@ async function start(): Promise<void> {
     hash: window.location.hash,
   });
   registerExportControls(session);
+  // Batch after export: you make one picture right and then apply it to the
+  // folder, which is the order the two are reached in.
+  registerBatchControls({
+    session,
+    registry: outcome.registry,
+    report: outcome.report,
+    palette: paletteStore,
+  });
+  // Surprise Me last of the start group. It is the only one of the six that can
+  // rewrite the whole document, so it sits at the far end rather than next to
+  // the actions that only read it.
+  registerSurpriseControls({
+    session,
+    registry: outcome.registry,
+    palette: paletteStore,
+  });
   installHistoryShortcuts(session);
 
   // Autosave is debounced, so a tab closing mid-debounce would lose the last

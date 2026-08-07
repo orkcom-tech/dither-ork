@@ -79,22 +79,12 @@ export {
 
 export { createEditorSession, type EditorSession, type EditorSessionOptions } from "./session";
 
-export {
-  BLUE_NOISE_SEED,
-  DocumentRenderer,
-  GpuEffectCache,
-  GpuRenderBackend,
-  RenderSurfaces,
-  WasmRenderBackend,
-  buildRenderGraph,
-  cacheBudgetFor,
-  loadDitherCore,
-  packPalette,
-  type BuildGraphOptions,
-  type DiffusionPort,
-  type DiffusionRequest,
-  type DiffusionResult,
-  type DitherCore,
-  type RenderedFrame,
-  type ThresholdRankSource,
-} from "./render";
+// `render/` is deliberately **not** re-exported here.
+//
+// Every module in it — the device, the core, the backends, the renderer —
+// belongs to the render worker, and re-exporting them from the barrel the shell
+// imports would pull the whole render path, its shaders and the WASM glue into
+// the main-thread bundle for the sake of a type. The worker imports
+// `state/render` directly; `session.ts` holds a `RenderService` and nothing
+// else. `buildRenderGraph` is pure and is imported from `state/render/graph` by
+// the two tests that cover it.

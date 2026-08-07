@@ -1,0 +1,299 @@
+/*
+ * The batch dialog.
+ *
+ * Every colour is a token from src/ui/theme.css — the shell's rule, and what
+ * makes both themes work (F-UI-09). Nothing here is a literal, including the
+ * four queue-state colours, which are the same `--ok` / `--warn` / `--fail`
+ * verdict trio the rest of the application uses.
+ *
+ * The dialog is wider than the export one and its body scrolls: a queue is the
+ * point of this surface, and a list of two hundred rows has to be scrollable
+ * without the settings above it scrolling away.
+ */
+
+.bx-dialog {
+  width: min(680px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--fg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+/*
+ * `display` is set on the *open* dialog only, and that is not a nicety.
+ *
+ * The user-agent stylesheet hides a closed `<dialog>` with
+ * `dialog:not([open]) { display: none }`, and any author rule setting `display`
+ * on the element beats it — so a bare `.bx-dialog { display: flex }` leaves the
+ * whole dialog laid out in the toolbar with the page still interactive around
+ * it. It looks exactly like a panel somebody meant to build and did not.
+ */
+.bx-dialog[open] {
+  /* The head is fixed and the panel below it scrolls. */
+  display: flex;
+  flex-direction: column;
+}
+
+.bx-dialog::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.bx-dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  height: var(--panel-header-h);
+  padding: 0 var(--gap);
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-sunken);
+  flex: 0 0 auto;
+}
+
+.bx-dialog__title {
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+
+.bx {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--gap);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* A drag anywhere over the dialog is a drop target — the queue is the point. */
+.bx--dragging {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+}
+
+.bx__row-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  flex-wrap: wrap;
+}
+
+.bx__row-controls .ui-label {
+  flex: 0 0 56px;
+}
+
+.bx__group {
+  display: flex;
+  gap: 4px;
+}
+
+.bx__slider {
+  flex: 1 1 120px;
+  min-width: 100px;
+}
+
+.bx__text {
+  flex: 1 1 200px;
+  min-width: 140px;
+  padding: 3px 6px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.bx__text:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.bx__value {
+  min-width: 34px;
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--fg);
+}
+
+.bx__note {
+  font-size: var(--text-xs);
+  color: var(--fg-dim);
+}
+
+.bx__preview {
+  padding-left: 64px;
+}
+
+.bx__detail {
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--fg-dim);
+  margin: 0;
+}
+
+.bx__detail code {
+  font-family: var(--font-mono);
+  color: var(--fg);
+}
+
+.bx__notice {
+  margin: 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--rule-strong);
+  background: var(--bg-sunken);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.bx__notice--error {
+  border-left-color: var(--fail);
+  color: var(--fail);
+}
+
+.bx__notice--warn {
+  border-left-color: var(--warn);
+  color: var(--warn);
+}
+
+.bx__notice--ok {
+  border-left-color: var(--ok);
+  color: var(--fg);
+}
+
+.bx__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.bx__progress progress {
+  flex: 1 1 auto;
+  height: 6px;
+}
+
+.bx__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding-top: 2px;
+  border-top: 1px solid var(--rule);
+}
+
+.bx__spacer {
+  flex: 1 1 auto;
+}
+
+/* --- the queue (F-BA-06) ----------------------------------------------- */
+
+.bx__queue {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bg-sunken);
+  /* Its own scroller: the settings above must not scroll away under a long queue. */
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.bx__row {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1.4fr) 90px minmax(0, 1.2fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--text-xs);
+}
+
+.bx__row:last-child {
+  border-bottom: none;
+}
+
+/*
+ * The state marker.
+ *
+ * A colour *and* the word in `.bx__row-status`, never colour alone — a queue
+ * whose only signal of failure is a red dot is a queue that says nothing to
+ * anyone who cannot see red.
+ */
+.bx__row-mark {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+}
+
+.bx__row[data-state="running"] .bx__row-mark {
+  background: var(--accent);
+}
+
+.bx__row[data-state="done"] .bx__row-mark {
+  background: var(--ok);
+}
+
+.bx__row[data-state="failed"] .bx__row-mark {
+  background: var(--fail);
+}
+
+.bx__row[data-state="cancelled"] .bx__row-mark {
+  background: var(--warn);
+}
+
+.bx__row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}
+
+.bx__row-folder {
+  color: var(--fg-faint);
+}
+
+.bx__row-status {
+  color: var(--fg-dim);
+}
+
+.bx__row[data-state="failed"] .bx__row-status {
+  color: var(--fail);
+}
+
+.bx__row[data-state="done"] .bx__row-status {
+  color: var(--ok);
+}
+
+.bx__row-out {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-dim);
+}
+
+.bx__row-drop {
+  padding: 0 6px;
+}
+
+/*
+ * The per-item error spans the whole row and wraps.
+ *
+ * Not truncated: it is the one piece of text on this surface a person has to be
+ * able to act on, and an ellipsis in the middle of "this picture has more than
+ * 256 distinct colours" is a message that has been thrown away.
+ */
+.bx__row-error {
+  grid-column: 2 / -1;
+  margin: 2px 0 0;
+  color: var(--fail);
+  line-height: 1.5;
+  white-space: normal;
+}

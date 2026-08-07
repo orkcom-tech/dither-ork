@@ -58,10 +58,12 @@ export interface DitherCore extends ThresholdRankSource, DiffusionPort {
    * Trace an index map to SVG (F-EX-08, F-EX-09, F-EX-10).
    *
    * Synchronous, and deliberately: it is one call over a buffer that is already
-   * in memory, and making it a promise would suggest a cancellation point that
-   * does not exist inside it. It blocks the main thread for as long as the
-   * trace takes, which is the same statement `renderer.ts` already makes about
-   * the render loop.
+   * in memory, and making it a promise here would suggest a cancellation point
+   * that does not exist inside it. It occupies its thread for as long as the
+   * trace takes — but that thread is the render worker, not the one drawing the
+   * interface. `worker/render.worker.ts` is the only caller, and
+   * `ui/export/session.ts` is what turns the worker's answer back into
+   * `export/trace.ts`'s `VectorTracer`.
    */
   traceSvg(
     indices: Uint16Array,

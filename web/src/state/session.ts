@@ -15,10 +15,11 @@
  *
  * The order is not arbitrary and each step is a reason:
  *
- * 1. **GPU device and the Rust core**, because the renderer cannot exist
- *    without either and both are asynchronous. A failure here is fatal and is
- *    thrown — the capability screen has already passed, so a device that will
- *    not come up now is a real error and not a supported state.
+ * 1. **The render worker**, because nothing can draw without it and it is
+ *    asynchronous. It brings up the GPU device and the Rust core on its own
+ *    thread; a failure here is fatal and is thrown — the capability screen has
+ *    already passed, so a device that will not come up now is a real error and
+ *    not a supported state.
  * 2. **Autosave restore** (F-DO-07), *before* the store exists, because a
  *    restored document is the store's initial state rather than something
  *    pushed into it afterwards — pushing it in would put "restored the
@@ -31,33 +32,40 @@
  * 6. **The render subscription**, which is the only thing that reacts to the
  *    store by drawing.
  *
- * ## The viewport arrives late, and can leave
+ * ## Nothing here renders
  *
- * The session does not take a viewport. It is created before React renders, so
- * that the panels can be registered into the shell's slots exactly once — and
- * the viewport does not exist until the shell has mounted its host element.
- * `attachViewport` is therefore a setter, and `null` is a legal argument: React
- * mounts, unmounts and remounts the host in development to prove the effect is
- * clean, and a session that treated the first viewport as its only one would
- * draw into a canvas that had been thrown away.
+ * The device, the core, the node cache and the `DocumentRenderer` are all in
+ * `web/src/worker/`. This file holds a `RenderService` and posts to it. That is
+ * the change docs/ARCHITECTURE.md always described and the application did not
+ * have; the consequence a user can see is that a long stack at a large
+ * resolution no longer freezes the window while it runs.
  *
- * ## Renders are coalesced, not queued
+ * ## Renders are superseded, not queued
  *
  * A drag emits a mutation per pointer move and each one invalidates the node it
- * touched. Rendering every one would queue frames the user will never see and
- * would hold the main thread through all of them. So: one render in flight, one
- * *latest* render pending, and anything that arrives while a render is running
- * replaces the pending one. The cache is what makes the skipped frames free —
- * the intermediate documents were never rendered, so nothing was computed for
- * them.
+ * touched. Every one is sent to the worker immediately — *not* held back behind
+ * the render in flight, which is what used to put the user one frame behind
+ * their own input. The worker's queue keeps at most one preview waiting, aborts
+ * the running one when a newer arrives, and rejects the loser with
+ * `RenderAbandoned`. Reaching the abort is what makes the skipped frames free:
+ * the abandoned render stops at its next node instead of finishing a picture
+ * nobody will see.
+ *
+ * ## Adaptive preview resolution (F-UI-03) is wired here
+ *
+ * The viewport declares what it wants on its `request` event — a quality and a
+ * fraction of document resolution — and this subscribes to it and carries both
+ * into every render. The worker resamples the source to that extent and runs the
+ * whole graph there, so the frame that comes back really is smaller and the
+ * viewport's degraded badge describes something that happened. Before this the
+ * event had no subscriber and the renderer hard-coded full quality, so the badge
+ * was a control that could never be true.
  */
 
 import type { CapabilityReport } from "../lib/capabilities";
 import { correlationId, logger } from "../lib/log";
 import type { EffectRegistry } from "../registry";
-import { loadGpuEffects } from "../registry";
-import { GpuLayer } from "../gpu";
-import type { Viewport } from "../viewport";
+import type { FrameQuality, Viewport } from "../viewport";
 import {
   ImageLoadError,
   installClipboardPaste,
@@ -69,6 +77,7 @@ import {
   type SourceImage,
   type SourceLimits,
 } from "../io";
+import { RenderService, isAbandoned } from "../worker";
 // Type-only, and deliberately: `state/` must not import `ui/`. The palette
 // store is a value the application hands in, so the layer that owns the
 // document depends on the palette editor's *shape* and not on its module.
@@ -81,9 +90,7 @@ import {
   opfsAutosaveStorage,
   type AutosaveStorage,
 } from "./autosave";
-import { DocumentStore, restoreNotice, type RestoreNotice } from "./store";
-import { loadDitherCore, type DitherCore } from "./render/core";
-import { DocumentRenderer } from "./render/renderer";
+import { DocumentStore, restoreNotice, type DocumentSnapshot, type RestoreNotice } from "./store";
 
 const log = logger("app");
 
@@ -98,9 +105,14 @@ export interface EditorSessionOptions {
 
 export interface EditorSession {
   readonly store: DocumentStore;
-  readonly renderer: DocumentRenderer;
-  readonly core: DitherCore;
-  readonly layer: GpuLayer;
+  /**
+   * The render worker.
+   *
+   * The one way to ask for a picture. Export goes through it, and so will
+   * animation, Surprise Me, batch and animated export — see
+   * `worker/client.ts`.
+   */
+  readonly render: RenderService;
   readonly limits: SourceLimits;
   /** Point the session at the shell's viewport, or at nothing. */
   attachViewport(viewport: Viewport | null): void;
@@ -127,18 +139,11 @@ export async function createEditorSession(
 ): Promise<EditorSession> {
   const cid = correlationId();
   const palette = options.palette;
-  const layer = await GpuLayer.create({
-    report: options.report,
-    label: "dither-ork",
-    onDeviceLost: (info) => {
-      // Not recoverable and not silent: every subsequent render throws from
-      // `assertUsable`, and this is the line that says why.
-      log.error("the GPU device was lost", { reason: info.reason, message: info.message });
-    },
-  });
-  const core = await loadDitherCore();
-  const resolver = loadGpuEffects();
-  const limits = sourceLimits(layer.context.limits.maxTextureDimension2D);
+
+  // --- the render worker -------------------------------------------------
+
+  const render = await RenderService.create({ report: options.report });
+  const limits = sourceLimits(render.info.maxTextureDimension2D);
 
   // --- autosave, before the store ---------------------------------------
 
@@ -178,14 +183,9 @@ export async function createEditorSession(
     ...(restoredDocument === undefined ? {} : { document: restoredDocument }),
   });
 
-  const renderer = new DocumentRenderer({
-    registry: options.registry,
-    resolver,
-    layer,
-    core,
-  });
-
   let viewport: Viewport | null = null;
+  const viewportOff: (() => void)[] = [];
+  let disposed = false;
 
   // --- error reporting ---------------------------------------------------
 
@@ -263,29 +263,127 @@ export async function createEditorSession(
   // being unreadable is not a reason the application cannot run.
   void palette.loadLibrary();
 
-  // --- image intake (F-IN-01) -------------------------------------------
+  // --- rendering ---------------------------------------------------------
 
-  const intake: ImageIntake = {
-    onImage: (image: SourceImage) => {
-      renderer.setSource(image);
-      store.openSource(image);
-      // Extraction (F-CO-02) needs the decoded image, and this is the only
-      // place one arrives.
-      palette.setSource({
-        name: image.name,
-        width: image.width,
-        height: image.height,
-        surface: image.surface,
+  /**
+   * What the viewport last asked for (F-UI-03).
+   *
+   * Full quality until something says otherwise, which is what an idle editor
+   * is. Both fields move together and both go into {@link renderKey}, so
+   * releasing a slider re-renders at full resolution rather than leaving a
+   * reduced frame on screen with the badge still up.
+   */
+  let quality: FrameQuality = "full";
+  let factor = 1;
+
+  /**
+   * What is on screen, or being rendered for it.
+   *
+   * A render is skipped when its key matches the last one *sent*, which is what
+   * stops a store notification that changed nothing — a palette bridge write, a
+   * selection change — from re-rendering. It is cleared on failure so the same
+   * document can be retried, and on attach so a new viewport is given a frame.
+   */
+  let sentKey: string | null = null;
+
+  /** Increments per render started, so a late reply cannot overwrite a newer frame. */
+  let generation = 0;
+
+  const renderKey = (snapshot: DocumentSnapshot): string =>
+    `${snapshot.revision}|${quality}|${factor.toFixed(4)}`;
+
+  const renderNow = async (snapshot: DocumentSnapshot, reason: string): Promise<void> => {
+    const mine = generation + 1;
+    generation = mine;
+
+    const result = await render.render({
+      document: snapshot.document,
+      solo: snapshot.soloNodeId,
+      quality,
+      factor,
+      lane: "preview",
+      // The frame is composited in the worker and transferred; the viewport
+      // draws it with one `drawImage` and never touches a pixel.
+      present: "bitmap",
+    });
+
+    const image = result.image;
+    if (image.kind !== "bitmap") {
+      throw new Error("a preview render came back as raw bytes; the viewport is given bitmaps");
+    }
+
+    // The three ways a finished frame can have nowhere to go: something newer
+    // is already on screen, the session is being torn down, or React unmounted
+    // the viewport host while this was in flight (which it does on every
+    // development mount). In all three the bitmap was transferred here and
+    // nobody took ownership of it, so it is closed rather than leaked — an
+    // `ImageBitmap` holds GPU memory the JS heap does not account for.
+    const target = viewport;
+    if (mine !== generation || disposed || target === null) {
+      image.bitmap.close();
+      log.debug("frame discarded", {
+        cid: result.correlationId,
+        why: target === null ? "no viewport" : disposed ? "disposed" : "superseded on arrival",
       });
-      setReference(image);
-    },
-    onError: (error: ImageLoadError) => {
-      report(error);
-    },
-    onNotice: (message: string) => {
-      log.info("intake notice", { message });
-    },
+      return;
+    }
+
+    target.setFrame({
+      image: image.bitmap,
+      documentWidth: result.documentWidth,
+      documentHeight: result.documentHeight,
+      quality: result.quality,
+      correlationId: result.correlationId,
+    });
+    log.debug("frame presented", {
+      reason,
+      cid: result.correlationId,
+      width: result.width,
+      height: result.height,
+      quality: result.quality,
+    });
+    // A frame arrived, so whatever the last failure was, it is over.
+    report(null);
   };
+
+  const request = (reason: string): void => {
+    if (disposed) return;
+    const snapshot = store.getSnapshot();
+    if (snapshot.source === null) {
+      viewport?.setFrame(null);
+      viewport?.setReference(null);
+      sentKey = null;
+      return;
+    }
+    const key = renderKey(snapshot);
+    if (key === sentKey) return;
+    sentKey = key;
+
+    void renderNow(snapshot, reason).catch((error: unknown) => {
+      // Teardown rejects everything in flight. That is not a failure the user
+      // needs told about; the session is going away.
+      if (disposed) return;
+      if (isAbandoned(error)) {
+        // Ordinary: a newer render replaced this one, or an export took the
+        // device and this was re-queued and then replaced. Nothing to show.
+        log.debug("render abandoned", { reason, why: error.message });
+        return;
+      }
+      // Every failure reaches the UI. A render that throws leaves the previous
+      // frame on screen, which is the honest thing to show: the document is one
+      // the renderer cannot honour, and the last one it could is what is there.
+      const wrapped = error instanceof Error ? error : new Error(String(error));
+      log.error("render failed", { reason, error: wrapped.message });
+      // Cleared so the same document can be asked for again — otherwise a
+      // transient failure would wedge the preview until the next edit.
+      sentKey = null;
+      report(wrapped);
+    });
+  };
+
+  const unsubscribe = store.subscribe(() => request("document"));
+
+  // --- image intake (F-IN-01) -------------------------------------------
 
   /**
    * The reference for the before/after compare (F-UI-04) is the source itself,
@@ -305,75 +403,48 @@ export async function createEditorSession(
     });
   };
 
+  const intake: ImageIntake = {
+    onImage: (image: SourceImage) => {
+      // The worker is given the pixels *before* the store is told, because the
+      // store's notification is what triggers a render and a render before the
+      // worker has a source is a render that throws.
+      void render
+        .setSource(image)
+        .then(() => {
+          store.openSource(image);
+          // Extraction (F-CO-02) needs the decoded image, and this is the only
+          // place one arrives.
+          palette.setSource({
+            name: image.name,
+            width: image.width,
+            height: image.height,
+            surface: image.surface,
+          });
+          setReference(image);
+        })
+        .catch((error: unknown) => {
+          const wrapped = error instanceof Error ? error : new Error(String(error));
+          log.error("the render worker would not take the image", { error: wrapped.message });
+          report(wrapped);
+        });
+    },
+    onError: (error: ImageLoadError) => {
+      report(error);
+    },
+    onNotice: (message: string) => {
+      log.info("intake notice", { message });
+    },
+  };
+
   const uninstall = [
     installImageDrop(window, { intake, limits }),
     installClipboardPaste(window, { intake, limits }),
   ];
 
-  // --- rendering ---------------------------------------------------------
-
-  let inFlight: Promise<void> | null = null;
-  let pendingRevision: number | null = null;
-  let lastRendered = -1;
-
-  const renderNow = async (): Promise<void> => {
-    const snapshot = store.getSnapshot();
-    if (snapshot.source === null) {
-      viewport?.setFrame(null);
-      viewport?.setReference(null);
-      return;
-    }
-    lastRendered = snapshot.revision;
-    const frame = await renderer.render(snapshot.document, {
-      solo: snapshot.soloNodeId,
-    });
-    viewport?.setFrame({
-      image: frame.image,
-      documentWidth: frame.width,
-      documentHeight: frame.height,
-      quality: frame.quality,
-      correlationId: frame.correlationId,
-    });
-    // A frame arrived, so whatever the last failure was, it is over.
-    report(null);
-  };
-
-  const pump = (): void => {
-    if (inFlight !== null) return;
-    const revision = pendingRevision;
-    if (revision === null) return;
-    pendingRevision = null;
-
-    inFlight = renderNow()
-      .catch((error: unknown) => {
-        // Every failure reaches the UI. A render that throws leaves the previous
-        // frame on screen, which is the honest thing to show: the document is
-        // one the renderer cannot honour, and the last one it could is what is
-        // there.
-        const wrapped = error instanceof Error ? error : new Error(String(error));
-        log.error("render failed", { revision, error: wrapped.message });
-        report(wrapped);
-      })
-      .finally(() => {
-        inFlight = null;
-        // Anything that arrived during the render is rendered now, once.
-        if (pendingRevision !== null) pump();
-      });
-  };
-
-  const request = (): void => {
-    const snapshot = store.getSnapshot();
-    if (snapshot.revision === lastRendered && inFlight === null) return;
-    pendingRevision = snapshot.revision;
-    pump();
-  };
-
-  const unsubscribe = store.subscribe(request);
-
   log.info("editor session ready", {
     cid,
     effects: options.registry.size,
-    core: core.version,
+    core: render.info.coreVersion,
     autosave: storage !== null,
     restored: restored !== null,
     maxSource: limits.maxDimension,
@@ -381,21 +452,44 @@ export async function createEditorSession(
 
   return {
     store,
-    renderer,
-    core,
-    layer,
+    render,
     limits,
 
     attachViewport(next: Viewport | null): void {
+      for (const off of viewportOff) off();
+      viewportOff.length = 0;
       viewport = next;
       log.info("viewport " + (next === null ? "detached" : "attached"));
       if (next === null) return;
+
+      // F-UI-03. The viewport raises this at the start of an interaction and
+      // again when it goes idle, so the factor is constant for the duration of
+      // a drag and the worker resamples the source once rather than per frame.
+      viewportOff.push(
+        next.on("request", (wanted) => {
+          const moved =
+            wanted.quality !== quality || Math.abs(wanted.factor - factor) > 1e-6;
+          quality = wanted.quality;
+          factor = wanted.factor;
+          if (!moved) return;
+          log.info("preview resolution changed", {
+            quality,
+            factor: Math.round(factor * 1000) / 1000,
+            reason: wanted.reason,
+            zoom: Math.round(wanted.zoom * 1000) / 1000,
+          });
+          // The key it would produce is different now, so this is a real
+          // request rather than a repeat.
+          request(`quality:${wanted.reason}`);
+        }),
+      );
+
       // A viewport that arrives after an image is already open has to be given
       // both surfaces; a fresh one has nothing to draw and this does nothing.
       const source = store.getSnapshot().source;
       if (source !== null) setReference(source);
-      lastRendered = -1;
-      request();
+      sentKey = null;
+      request("attach");
     },
 
     openFile: (file: File) => receiveImage(file, file.name, { intake, limits }),
@@ -408,13 +502,15 @@ export async function createEditorSession(
     },
 
     async dispose(): Promise<void> {
+      disposed = true;
       unsubscribe();
       paletteToDocument();
       documentToPalette();
+      for (const off of viewportOff) off();
+      viewportOff.length = 0;
       for (const off of uninstall) off();
       await store.flushAutosave();
-      renderer.dispose();
-      layer.destroy();
+      await render.dispose();
       log.info("editor session disposed");
     },
   };

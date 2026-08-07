@@ -1,10 +1,10 @@
 /**
  * The adapter: an `EditorSession` seen as an {@link ExportImageSource}.
  *
- * `web/src/export/` is not allowed to know that a document store, a renderer or
- * a session exist — it takes an interface (`export/source.ts`) written in its
- * own vocabulary. This is the one file that speaks both, and it is the whole of
- * the coupling between export and `state/`.
+ * `web/src/export/` is not allowed to know that a document store, a render
+ * service or a session exist — it takes an interface (`export/source.ts`)
+ * written in its own vocabulary. This is the one file that speaks both, and it
+ * is the whole of the coupling between export and `state/`.
  *
  * ## What it assumes about `state/`, all of it public API
  *
@@ -12,47 +12,78 @@
  *   `source`, `soloNodeId` and a `revision` that increments on every change.
  * - `store.registry` resolves an effect id to its descriptor, so the solo point
  *   can be named rather than shown as a node id.
- * - `renderer.render(document, { solo })` returns a `RenderedFrame` whose
- *   `image` is the document-resolution, sRGB-encoded `ImageData` the viewport
- *   is given.
+ * - `session.render` is the render worker, and a render on its `export` lane
+ *   comes back at document resolution with the frame's own samples.
  *
- * ## Renders are serialised
+ * ## Renders are no longer chained here
  *
- * `DocumentRenderer` holds one node cache, one surface pool and one GPU
- * backend, and nothing in it is re-entrant. The session's own render pump keeps
- * one render in flight at a time; this adds a second caller, so export's
- * renders are chained behind each other here. That closes the case this file
- * can close — two export renders — and leaves the case it cannot: an export
- * render starting while the session's pump has one in flight. In practice the
- * export panel opens on a settled preview, and the chain below plus the panel's
- * own debounce keep them apart. The complete fix belongs in `state/`, as a
- * single render queue both callers go through, and is reported rather than
- * worked around here.
+ * This file used to hold a promise chain, because `DocumentRenderer` is not
+ * re-entrant and export was its second caller; the comment that chain carried
+ * said the real fix was a single queue both callers went through, in `state/`.
+ * That queue now exists, in the render worker (`worker/queue.ts`), and it does
+ * two things the chain could not:
+ *
+ * - **An export preempts the preview.** The preview render in flight is
+ *   aborted and re-queued, so an export never waits behind a frame that will be
+ *   superseded 16 ms later, and the preview it displaced is re-run rather than
+ *   dropped.
+ * - **An export is never superseded.** Preview renders are thrown away when a
+ *   newer one arrives; an export is a file somebody asked for and runs to
+ *   completion or is cancelled explicitly.
+ *
+ * So there is nothing to serialise here, and the chain is gone rather than
+ * kept as a second, weaker copy of the same policy.
+ *
+ * ## Cancel stops the worker
+ *
+ * F-EX-13 asks for a cancel that stops the worker rather than one that stops
+ * reporting. The panel's `AbortSignal` is wired to the worker call's id, so
+ * pressing cancel mid-render abandons the render itself.
  */
 
 import type {
   ExportFrame,
   ExportImageSource,
   ExportSubject,
+  TracedDocument,
   VectorTracer,
 } from "../../export";
 import { logger } from "../../lib/log";
 import type { DocumentSnapshot, EditorSession } from "../../state";
+import { isAbandoned, type RenderResult } from "../../worker";
 
 const log = logger("export");
 
 /**
- * The session's core, seen as export's {@link VectorTracer}.
+ * Whether the caller has cancelled.
+ *
+ * A function rather than `signal?.aborted === true` at each site: an abort flag
+ * flips *during* the await between the two checks below, and TypeScript's
+ * control-flow analysis would narrow the second one away on the strength of the
+ * first — silently turning a cancellation into a reported failure.
+ */
+function aborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
+}
+
+/**
+ * The render worker, seen as export's {@link VectorTracer}.
  *
  * The whole of the coupling, again: `export/trace.ts` names what it needs and
- * `state/render/core.ts` is the only file that may hold the WASM handle the
- * answer arrives in. This is the line that joins them.
+ * the worker is the only place a `wasm-bindgen` handle may be held. This is the
+ * line that joins them — and it is the line that moved the trace off the main
+ * thread, which on a large image was seconds of frozen window.
  */
 export function vectorTracerFor(session: EditorSession): VectorTracer {
   return {
-    trace(indices, width, height, paletteRgb, settings) {
-      const started = performance.now();
-      const traced = session.core.traceSvg(indices, width, height, paletteRgb, settings);
+    async trace(indices, width, height, paletteRgb, settings): Promise<TracedDocument> {
+      const traced = await session.render.trace({
+        indices,
+        width,
+        height,
+        paletteRgb,
+        settings,
+      });
       log.info("index map traced", {
         width,
         height,
@@ -61,9 +92,9 @@ export function vectorTracerFor(session: EditorSession): VectorTracer {
         layers: traced.report.layers,
         points: traced.report.points,
         chars: traced.svg.length,
-        ms: Math.round(performance.now() - started),
+        workerMs: traced.ms,
       });
-      return traced;
+      return { svg: traced.svg, report: traced.report };
     },
   };
 }
@@ -97,8 +128,6 @@ export function exportSourceFor(session: EditorSession): ExportImageSource {
     };
   };
 
-  let chain: Promise<unknown> = Promise.resolve();
-
   return {
     subject(): ExportSubject | null {
       const snapshot = session.store.getSnapshot();
@@ -109,41 +138,64 @@ export function exportSourceFor(session: EditorSession): ExportImageSource {
       return lastSubject;
     },
 
-    renderFrame(signal?: AbortSignal): Promise<ExportFrame> {
-      const run = async (): Promise<ExportFrame> => {
-        const snapshot = session.store.getSnapshot();
-        if (snapshot.source === null) {
-          throw new Error("there is no image open to export");
-        }
-        if (signal?.aborted === true) {
-          throw new DOMException("the export render was superseded", "AbortError");
-        }
+    async renderFrame(signal?: AbortSignal): Promise<ExportFrame> {
+      const snapshot = session.store.getSnapshot();
+      if (snapshot.source === null) {
+        throw new Error("there is no image open to export");
+      }
+      if (aborted(signal)) {
+        throw new DOMException("the export render was superseded", "AbortError");
+      }
 
-        const frame = await session.renderer.render(snapshot.document, {
-          solo: snapshot.soloNodeId,
-        });
-        log.info("frame rendered for export", {
-          width: frame.width,
-          height: frame.height,
-          cid: frame.correlationId,
-          ms: frame.totalMs,
-        });
-        return {
-          width: frame.width,
-          height: frame.height,
-          data: frame.image.data,
-        };
-      };
-
-      // Chained, not raced: see the note at the top of the file. The `catch`
-      // keeps one failed render from poisoning the chain for the next one, and
-      // logs rather than discarding, because the caller already sees the
-      // rejection it is about to be handed.
-      const next = chain.then(run, run);
-      chain = next.catch((error: unknown) => {
-        log.debug("export render finished with an error", { error: String(error) });
+      const { id, frame } = session.render.renderCancellable({
+        document: snapshot.document,
+        solo: snapshot.soloNodeId,
+        // Always the document's own resolution. F-UI-03's reduction is a
+        // property of the preview, and a file rendered at 40% would be a
+        // different picture — a dither is a function of the pixel grid it ran
+        // on.
+        quality: "full",
+        factor: 1,
+        lane: "export",
+        // Export needs the samples themselves; a bitmap would have to be
+        // decoded back on this thread to encode it.
+        present: "bytes",
       });
-      return next;
+
+      const stop = (): void => session.render.cancel(id);
+      signal?.addEventListener("abort", stop, { once: true });
+      try {
+        let result: RenderResult;
+        try {
+          result = await frame;
+        } catch (error) {
+          // The worker says "abandoned"; export's vocabulary for the same event
+          // is an `AbortError`, which `isCancellation` recognises and the panel
+          // therefore does not show as a failure. Translated rather than left
+          // alone, because a cancel that surfaces as "the frame could not be
+          // produced" tells the user something went wrong when they are the one
+          // who stopped it. Anything that is not our own cancellation is
+          // rethrown untouched.
+          if (isAbandoned(error) && aborted(signal)) {
+            throw new DOMException("the export render was cancelled", "AbortError");
+          }
+          throw error;
+        }
+        const image = result.image;
+        if (image.kind !== "bytes") {
+          throw new Error("an export render came back as a bitmap; export encodes samples");
+        }
+        log.info("frame rendered for export", {
+          width: result.width,
+          height: result.height,
+          cid: result.correlationId,
+          workerMs: result.totalMs,
+          bytes: result.transferBytes,
+        });
+        return { width: result.width, height: result.height, data: image.data };
+      } finally {
+        signal?.removeEventListener("abort", stop);
+      }
     },
 
     subscribe(listener: () => void): () => void {

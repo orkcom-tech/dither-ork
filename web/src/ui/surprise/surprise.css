@@ -1,0 +1,235 @@
+/*
+ * Surprise Me.
+ *
+ * Every colour is a token from src/ui/theme.css — the shell's rule, and what
+ * makes both themes work (F-UI-09). Nothing here is a literal.
+ */
+
+.sm__go {
+  font-weight: 600;
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.sm__go:disabled {
+  color: var(--fg-faint);
+  border-color: var(--rule);
+}
+
+.sm-dialog {
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  padding: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+  color: var(--fg);
+  box-shadow: var(--shadow);
+}
+
+.sm-dialog::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.sm-dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  height: var(--panel-header-h);
+  padding: 0 var(--gap);
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-sunken);
+}
+
+.sm-dialog__title {
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+
+.sm-dialog__actions {
+  display: flex;
+  gap: 4px;
+}
+
+.sm-dialog__blocked {
+  margin: 0;
+  padding: var(--gap);
+  font-size: var(--text-sm);
+  color: var(--warn);
+  border-bottom: 1px solid var(--rule);
+}
+
+.sm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  padding: var(--gap);
+  overflow-y: auto;
+}
+
+.sm__section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sm__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+}
+
+.sm__value {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--fg-dim);
+}
+
+.sm__seed {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  letter-spacing: 0.08em;
+  color: var(--fg);
+  /* Selectable, so the seed is copyable even where the clipboard API is
+     refused by a permissions policy. */
+  user-select: text;
+}
+
+.sm__note {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  color: var(--fg-dim);
+}
+
+/* A message quoted verbatim from somewhere else in the application — set apart
+   so it reads as the renderer's sentence rather than as the panel's. */
+.sm__quote {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  color: var(--fg-dim);
+  background: var(--bg-sunken);
+  border-left: 2px solid var(--rule-strong);
+  border-radius: var(--radius);
+}
+
+.sm__problem {
+  display: block;
+  width: 100%;
+  padding: 6px var(--gap);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  color: var(--fail);
+  background: var(--bg-inset);
+  border: 1px solid var(--fail);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.sm__slider {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.sm__locks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sm__nodes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sm__node {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding: 2px 0 2px 4px;
+  border-left: 2px solid var(--rule-strong);
+}
+
+.sm__node-name {
+  font-size: var(--text-sm);
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sm__dice {
+  flex: 0 0 auto;
+}
+
+.sm__history {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sm__entry {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  background: var(--bg-inset);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.sm__entry:hover {
+  border-color: var(--accent-dim);
+}
+
+.sm__entry[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+
+.sm__entry-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  /* The picture is a dither; smoothing it would show something the render is
+     not. Same rule the viewport follows above 100%. */
+  image-rendering: pixelated;
+}
+
+.sm__entry-blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  font-size: var(--text-xs);
+  color: var(--fg-faint);
+  background: var(--bg-sunken);
+}
+
+.sm__entry-seed {
+  padding: 2px 4px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-dim);
+  border-top: 1px solid var(--rule);
+}

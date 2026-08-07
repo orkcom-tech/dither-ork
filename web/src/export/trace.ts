@@ -60,9 +60,19 @@ export interface TracedDocument {
 /**
  * What export asks of the core to produce a vector file.
  *
- * Synchronous, because the core's tracer is: it is a single WASM call over a
- * buffer that is already in memory. The stage is reported around it rather than
- * inside it, which is the same position `encodeWithCanvas` is in.
+ * **May answer asynchronously, and the real one does.** The core's tracer is a
+ * single synchronous WASM call with no cancellation point inside it, and on a
+ * large image that is seconds; it therefore runs in the render worker
+ * (`worker/render.worker.ts`) and the answer comes back over a message. What
+ * the union buys is that a test double can still be written as a plain function
+ * returning a document — `traceIndexedImage` awaits either — so the tests that
+ * pin the *arguments* the core is handed do not have to become asynchronous to
+ * describe a synchronous fact.
+ *
+ * It does not promise cancellation. Nothing inside `trace.rs` can be
+ * interrupted, so a `Promise` here would be claiming an abort point that does
+ * not exist. The stage is reported around the call rather than inside it, which
+ * is the same position `encodeWithCanvas` is in.
  */
 export interface VectorTracer {
   trace(
@@ -71,7 +81,7 @@ export interface VectorTracer {
     height: number,
     paletteRgb: Uint8Array,
     settings: VectorTraceSettings,
-  ): TracedDocument;
+  ): TracedDocument | Promise<TracedDocument>;
 }
 
 export const TRACE_MODES: readonly TraceMode[] = ["pixel-perfect", "simplified"];
@@ -185,7 +195,7 @@ export async function traceIndexedImage(
   settings: VectorTraceSettings,
 ): Promise<{ readonly traced: TracedDocument; readonly flattened: boolean }> {
   const { rgb, flattened } = await paletteAsRgb(image.palette);
-  const traced = tracer.trace(
+  const traced = await tracer.trace(
     widenIndices(image.indices),
     image.width,
     image.height,

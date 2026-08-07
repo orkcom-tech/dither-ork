@@ -54,7 +54,7 @@ rather than one more shader.
 | Core algorithms | Rust → WebAssembly (`wasm-bindgen`), SIMD128 + threads via `wasm-bindgen-rayon` | Diffusion kernels, quantizers and the tracer are the hot path; hand-written TS is 5–10× slower and decides whether preview feels live. The core has zero web dependencies, so a native or CLI build later is packaging, not a rewrite. |
 | Parallel effects | WebGPU compute passes, WGSL | Compute gives workgroup control and storage buffers that fragment shaders do not. Required for pixel sort, block shuffle, histograms and every index-map operation. |
 | App | TypeScript + Vite + React | The stack editor, timeline and palette editor are DOM-heavy UI. The viewport is not React — it owns its canvas. |
-| Threading | Web Workers + `OffscreenCanvas`, Comlink RPC | The render loop never runs on the main thread. |
+| Threading | Web Workers + `OffscreenCanvas`, typed `postMessage` RPC | The render loop never runs on the main thread. Comlink was named here and is not used; see "The render worker" for the three properties this seam needs that a call proxy cannot express. |
 | Storage | OPFS for documents, autosave and libraries; IndexedDB for small key-value | OPFS gives synchronous access handles inside workers and handles large batch intermediates. |
 | File I/O | File System Access API where available | Batch reads a folder and writes results back; elsewhere it degrades to multi-select in and ZIP out, stated in the UI. |
 | Encoders | Rust GIF/APNG/ZIP in core; WebCodecs `VideoEncoder` for MP4/WebM | No ffmpeg anywhere. Animated output is encode-only. |
@@ -303,6 +303,11 @@ web/
                           export/'s two interfaces from the editor session
   src/ui/documents/       save/open/presets/share, as a toolbar item and a dialog
   src/viewport/           the canvas. Not React; owns its own canvas and overlay
+  src/worker/             the render worker: the wire format both sides import,
+                          the preview/export queue and its cancellation policy,
+                          the fractional preview resampler F-UI-03 needed, the
+                          worker itself, and `RenderService` — the main thread's
+                          one way to ask for a picture
   src/main.ts             the proof page's module — reached at /proof.html in
                           dev, not an entry point of the production build
   index.html              the application
@@ -315,8 +320,10 @@ docs/                     this file, API.md, DEVELOPMENT.md
 ```
 
 Directories the build order will add and that do not exist yet: `core/gen`
-(surprise generator), `core/encode` (the animated formats), and
-`web/src/worker`. The tracer landed as `dither-core/src/trace.rs` rather than as
+(surprise generator) and `core/encode` (the animated formats).
+`web/src/worker` now exists and holds the render worker, its wire format, the
+preview/export queue and the preview resampler. The tracer landed as
+`dither-core/src/trace.rs` rather than as
 a crate of its own, because it shares the palette and colour types with
 everything else in that crate and a second crate would have been a re-export
 with a `Cargo.toml`. The starter presets ship as code (`io/document/starter.ts`)
@@ -338,9 +345,10 @@ of the five can end the run with a screen of their own:
 2. **The capability gate** (F-UI-12). WebGPU and `SharedArrayBuffer` are fatal.
 3. **Registry validation**, which is terminal — a build whose catalogue is wrong
    renders wrong documents convincingly, so it stops and lists every issue.
-4. **The editor session** — `state/session.ts`, which acquires the GPU device
-   and the Rust core, restores the autosave, builds the document store, bridges
-   the palette, installs the image intake and subscribes the renderer.
+4. **The editor session** — `state/session.ts`, which starts the render worker
+   (and so, indirectly, acquires the GPU device and the Rust core, on that
+   thread), restores the autosave, builds the document store, bridges the
+   palette, installs the image intake and subscribes the renderer.
 5. **Registration**, then React. Six registrations, in the order a person
    reaches them: the stack panel, the properties panel, the toolbar (open, undo,
    redo, fit, notices), the documents toolbar (save, open, presets, share), the
@@ -381,38 +389,92 @@ reads and a `.dork` writes, which has to be undoable with everything else.
 `session.ts` keeps the two in step in both directions, with a re-entrance guard,
 because each direction's write is the other's notification.
 
-### The render loop runs on the main thread
+### The render worker
 
-**This is a departure from the worker architecture described above**, and it is
-recorded rather than hidden. `state/render/renderer.ts` renders synchronously on
-the main thread: Comlink is not a dependency, the viewport owns a main-thread 2D
-canvas rather than a transferred `OffscreenCanvas`, and both the WASM and WebGPU
-acquisitions happen in the boot path on this side. Doing half of it — a worker
-that still renders here — would be a worker in name only. The consequence is
-real and visible: a long stack at a large resolution blocks the main thread for
-the duration of the render, and a diffusion node blocks it for its whole serial
-pass.
+**The render loop does not run on the main thread.** `web/src/worker/` owns the
+WebGPU device, the WASM core, the effect registry, the node cache, the
+`DocumentRenderer` and the SVG tracer. `session.ts` holds a `RenderService` and
+posts to it; the main thread keeps the UI, the input, the panel state and the
+undo stack.
 
-Two smaller consequences of the same shape: the preview always pays one GPU
-readback to present, because a 2D canvas cannot draw a WebGPU texture; and
-adaptive preview resolution (F-UI-03) is declared by the viewport but not
-honoured by the renderer, which always renders at document resolution. The
-viewport's badge reports what it is given, so it never claims a reduction that
-did not happen — it simply never appears.
+Measured on this machine, on a 2400x1800 image with a stack of blur →
+Floyd-Steinberg → halftone: 124 parameter changes over a two-second drag, with a
+render issued for every one of them, and the longest main-thread block was
+**16.98 ms**, with **zero** `longtask` entries over 7.4 seconds.
 
-**What honouring F-UI-03 would take**, written down because the shape of the
-work is the reason it has not been done rather than an oversight. The viewport
-already computes the factor (`viewport/quality.ts`, `previewScaleFactor`) and
-already emits it on its `request` event; `session.ts` does not subscribe to that
-event, and `renderer.ts` hard-codes `quality: "full"`. Wiring those two together
-is the small half. The large half is that a reduced-resolution render needs a
-**source buffer at the reduced extent**, and the factor is fractional — it comes
-from the zoom and a pixel budget — so it is not expressible as the integer
-`PassExtent` the two resampling nodes use. It needs a fractional source
-resampler: one more compute program in `web/src/gpu`, plus the CPU-side
-equivalent for a stack that opens with a diffusion kernel. The graph itself
-needs nothing: `graph.width`/`graph.height` are already in every content hash, so
-preview and full renders key to different cache entries by construction.
+**Comlink is named in the stack table and is not used.** Three properties this
+seam needs are ones a call proxy cannot express, and all three are load-bearing:
+abandoning a call that is already running (a drag issues renders faster than
+they complete); transferring an object produced *inside* a call out of it (the
+finished frame, so it moves rather than being copied, and so the move can be
+measured); and a lane discipline between preview and export over one device,
+which is worker-side state rather than a remote object graph. The shape of the
+RPC is otherwise what docs/API.md section 9 describes, written out.
+`worker/protocol.ts` carries the full argument.
+
+**What crosses, and in which direction.**
+
+- **In, once per image open:** the decoded source, **copied**. It is the one
+  large copy in the design — 69 MB for a 2400x1800 image, measured and logged on
+  both sides — and it is a copy rather than a transfer because the main thread
+  needs the same pixels for the before/after reference (F-UI-04) and for palette
+  extraction (F-CO-02). The decode staying on the main thread is what forces it;
+  moving extraction into the worker would let the surface be transferred, and
+  that is the next thing to do here, not something to pretend is already done.
+- **In, per render:** the document. Kilobytes.
+- **Out, per preview frame:** an `ImageBitmap`, **transferred**. The worker
+  encodes the frame to sRGB and paints it into an `OffscreenCanvas`; the
+  viewport draws the result with one `drawImage` and never touches a pixel.
+  Before this the main thread paid a full-frame `putImageData` per frame.
+- **Out, per export frame:** the samples themselves, transferred, because an
+  encoder needs them.
+
+**Two things stay on the main thread deliberately.** The viewport's canvas is
+not transferred: it is not a render target but a compositor for a frame, a
+checkerboard, a reference image and a split divider, driven directly by pointer
+events, and moving it would put every pan and zoom through a message queue to
+remove a `drawImage` that costs nothing. `OffscreenCanvas` earns its place at
+the frame boundary instead, where it removes real per-frame work. The image
+decode stays for the reason above.
+
+**The GPU readback to present is still paid** when the frame is GPU-resident — a
+2D context cannot draw a WebGPU texture — but it is paid in the worker.
+
+### Cancellation, and one queue for two callers
+
+`DocumentRenderer` holds one node cache, one surface pool and one GPU backend,
+and none of it is re-entrant; it had two callers, and they were kept apart by a
+promise chain in the export adapter that could only serialise export against
+itself. `worker/queue.ts` is now the one queue both go through, and the renderer
+throws on re-entry rather than documenting the rule in a comment.
+
+- A **preview** is superseded by a newer preview: at most one waits, and one
+  already running is *aborted* — `graph/render.ts` checks the signal before each
+  plan step, which is every cancellation point a graph execution has, since a
+  compute submission and a diffusion kernel are each one indivisible call.
+- An **export** preempts a running preview and is never superseded. The
+  preempted preview is **re-queued**, not failed, so its caller still gets a
+  frame and the screen ends up where the viewport asked for it to be. That is
+  both halves of "preview must not block export" and "export must not degrade
+  preview".
+- Export's cancel reaches the worker by call id, so F-EX-13's "a cancel that
+  stops the worker" is now literally that.
+
+### Adaptive preview resolution (F-UI-03) is honoured
+
+The viewport computes a factor (`viewport/quality.ts`, `previewScaleFactor`) and
+emits it on its `request` event; `session.ts` subscribes and carries the quality
+and the factor into every render. Below 1 the worker resamples the **source** to
+the reduced extent (`worker/resample.ts`, an area-average box filter in linear
+light — point sampling would alias a dither into a pattern that is not in the
+picture) and the whole graph runs there. The graph needed nothing:
+`graph.width`/`graph.height` are already in every content hash, so a preview and
+a full render key to different cache entries by construction.
+
+The badge therefore describes something that happens. Measured: at 100% zoom on
+a 2400x1800 document the drag frames are 1633x1225 and the badge reads
+`PREVIEW 68%` — the 2-megapixel budget, which is the ceiling that bites on a
+large image — and the idle frame is 2400x1800 with the badge gone.
 
 ## Export
 
@@ -673,10 +735,21 @@ rather than what it was.
   px² is 6.0 kB) and the simplified mode (2.5 kB at a 2 px tolerance), both of
   which report what they cost — how many regions were removed and what
   percentage of the picture they left bare.
-- **A large SVG trace blocks the main thread**, for the same reason the render
-  loop does. The tracer is one synchronous WASM call with no cancellation point
-  inside it; the export job's cancel stops on either side of it and no file is
-  written, but the trace itself runs to completion.
+- **A large SVG trace cannot be interrupted.** The tracer is one synchronous
+  WASM call with no cancellation point inside it, so once it starts it runs to
+  completion; the export job's cancel stops on either side of it and no file is
+  written. It no longer blocks the *main* thread — it runs in the render worker
+  — but it does occupy that worker, so a render cannot start while one is in
+  flight. Measured on a 2400x1800 four-colour index map: 397 ms of tracer, and
+  the main thread served 217,247 tasks during it with a longest block of 9.2 ms.
+  The same call made on the main thread served **zero**.
+- **The preview resample is a JS loop.** Reducing a 2400x1800 source to 68% of
+  itself costs about 190 ms in the worker, paid once per interaction rather than
+  once per frame (the result is cached against the extent, and the viewport
+  raises a factor at the start of a drag and again when it ends). It delays the
+  *first* degraded frame of an interaction and nothing else. A compute program
+  would remove it; it is a JS loop today because that is the version whose
+  correctness is provable in a unit test with no device.
 - **WebGPU implementation variance** across browsers and drivers produces small
   visual differences; goldens run on a pinned environment.
 - **No fallback means the unsupported screen is a real user-facing surface** —

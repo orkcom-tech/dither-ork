@@ -68,8 +68,39 @@ export interface RenderDeps {
    * the catalogue can express today.
    */
   readonly assets?: NodeAssets;
+  /**
+   * Abandon the render.
+   *
+   * Checked between plan steps, which is every cancellation point a graph
+   * execution has: a compute submission and a serial diffusion kernel are each
+   * one indivisible call, so the honest granularity is a node and this says so
+   * rather than implying finer. What it buys is the case that matters — a
+   * parameter drag issues renders faster than they complete, and a superseded
+   * one abandons the *rest* of its stack instead of running it for a picture
+   * nobody will see.
+   *
+   * Abandoning is a normal outcome, not a failure: the abort reason is thrown
+   * unchanged so the caller can tell "superseded" from "this stack cannot be
+   * rendered". The `finally` below unpins the cache and releases every transfer
+   * copy on this path exactly as it does on the error path.
+   */
+  readonly signal?: AbortSignal;
   /** Ties this render's log lines together; carried on every error too. */
   readonly correlationId: string;
+}
+
+/**
+ * Stop if the render has been abandoned.
+ *
+ * Throws the abort *reason* rather than a `DOMException` of its own, because
+ * the reason is what tells a supersession from a cancellation, and inventing a
+ * new error here would throw that away.
+ */
+function throwIfAbandoned(signal: AbortSignal | undefined, at: string): void {
+  if (signal === undefined || !signal.aborted) return;
+  const reason: unknown = signal.reason;
+  if (reason instanceof Error) throw reason;
+  throw new GraphError("aborted", `the render was abandoned at ${at}`, { at });
 }
 
 export interface PreparedRenderRequest {
@@ -158,6 +189,9 @@ export async function renderPrepared(
   }
 
   const startedAt = performance.now();
+  // Before anything is pinned or allocated. A render superseded while it waited
+  // its turn in the queue costs nothing at all.
+  throwIfAbandoned(deps.signal, "start");
   const plan = planRender(prepared, (hash) => deps.cache.has(hash));
 
   log.info("plan", {
@@ -468,6 +502,11 @@ export async function renderPrepared(
     }
 
     for (const [index, step] of plan.steps.entries()) {
+      // The cancellation point. Checked before the step rather than after, so a
+      // superseded render never starts work it is about to throw away, and the
+      // node it does not run is the expensive one — a diffusion kernel or a
+      // compute submission — rather than the bookkeeping around it.
+      throwIfAbandoned(deps.signal, `step ${index}`);
       const charge = new Map<string, number>();
       if (step.kind === "gpu-batch") await runGpuBatch(step, charge);
       else await runWasmNode(step.node, charge);
