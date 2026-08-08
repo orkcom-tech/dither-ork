@@ -156,5 +156,5 @@ runtime.
 
 ## License
 
-Copyright (C) 2026 Eduard Lugovtsov. GNU Affero General Public License v3.0 or
+Copyright (C) 2026 ORKCOM. GNU Affero General Public License v3.0 or
 later — see [LICENSE](LICENSE). No warranty.
