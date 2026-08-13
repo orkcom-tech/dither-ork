@@ -16,12 +16,19 @@ import { describe, expect, it } from "vitest";
 
 import type { DitherDocument, Palette } from "../types/document";
 import { DOCUMENT_SCHEMA_VERSION } from "../types/document";
+import { planAnimation } from "../animation";
 import { discoverEffects } from "../registry/discovery";
 import { createEffectRegistry, type EffectRegistry } from "../registry/registry";
 import { validateParams } from "../registry/params";
 import { validateStack } from "../registry/stack";
 import { DEFAULT_CLOCK, DEFAULT_PALETTE } from "../state/document";
-import { NO_LOCKS, SurpriseError, generateSurprise, rerollNodeParams } from "./generate";
+import {
+  NO_EXCLUDES,
+  NO_LOCKS,
+  SurpriseError,
+  generateSurprise,
+  rerollNodeParams,
+} from "./generate";
 import { synthesizePalette } from "./palette";
 import { seededPcg32 } from "./rng";
 import { formatSeed, parseSeed } from "./seed";
@@ -45,6 +52,7 @@ function surprise(seed: bigint, chaos = 0.5, overrides: Partial<Parameters<typeo
     registry,
     chaos,
     locks: NO_LOCKS,
+    excludes: NO_EXCLUDES,
     base: BASE,
     palette: PALETTE,
     animate: false,
@@ -52,7 +60,7 @@ function surprise(seed: bigint, chaos = 0.5, overrides: Partial<Parameters<typeo
   });
 }
 
-/** Both checks the application runs before it will draw a document. */
+/** Every check the application runs before it will draw a document. */
 function assertRenderable(document: DitherDocument, label: string): void {
   const stack = validateStack(registry, document.stack);
   expect(stack.issues.map((issue) => issue.message), label).toEqual([]);
@@ -64,6 +72,12 @@ function assertRenderable(document: DitherDocument, label: string): void {
       label,
     ).toEqual([]);
   }
+  // The bindings, through the real animated path rather than a paraphrase of it.
+  // A document that carries one nothing can resolve is not drawn by anybody: the
+  // timeline drops the track and stops being the pump, and `state/session.ts`
+  // leaves the preview to the timeline for as long as any binding exists, so the
+  // previous picture stays on screen while the panel shows the new document.
+  expect(() => planAnimation(document, registry), `${label}: bindings resolve`).not.toThrow();
 }
 
 describe("generateSurprise", () => {
@@ -160,6 +174,7 @@ describe("locks (F-SM-06)", () => {
         registry,
         chaos: 0.8,
         locks: { ...NO_LOCKS, palette: true },
+        excludes: NO_EXCLUDES,
         base,
         palette: synthesizePalette(seededPcg32(BigInt(i)), "mono", "srgb"),
         animate: false,
@@ -177,6 +192,7 @@ describe("locks (F-SM-06)", () => {
       registry,
       chaos: 0.9,
       locks: { ...NO_LOCKS, stack: true },
+      excludes: NO_EXCLUDES,
       base: seeded,
       palette: PALETTE,
       animate: false,
@@ -199,6 +215,7 @@ describe("locks (F-SM-06)", () => {
       registry,
       chaos: 0.9,
       locks: { ...NO_LOCKS, stack: true, params: true },
+      excludes: NO_EXCLUDES,
       base: seeded,
       palette: PALETTE,
       animate: false,
@@ -218,6 +235,7 @@ describe("locks (F-SM-06)", () => {
       registry,
       chaos: 0.9,
       locks: { ...NO_LOCKS, params: true },
+      excludes: NO_EXCLUDES,
       base: BASE,
       palette: PALETTE,
       animate: false,
@@ -233,12 +251,83 @@ describe("locks (F-SM-06)", () => {
     assertRenderable(result.document, "params locked, stack fresh");
   });
 
+  /**
+   * The reported bug: "with a lock set and a new generation the picture is still
+   * the old one."
+   *
+   * Press surprise, lock animation, press surprise again. The second document
+   * keeps the first one's bindings, and a reroll re-uses the node ids `n1..nN`
+   * rather than minting new ones — so a binding kept on its id alone lands on
+   * whatever effect the grammar put at that position, naming a parameter that
+   * effect does not declare. Nothing then draws the document: `planAnimation`
+   * refuses it, the timeline drops the track and hands the viewport back, and the
+   * session leaves the preview to the timeline for as long as any binding
+   * remains. The panel showed the new stack over the old picture.
+   *
+   * Fifty seed pairs rather than one, and the loop asserts it was not vacuous:
+   * whether a reroll happens to re-use an id is a property of the grammar, and a
+   * test that silently stopped exercising it would go on passing forever.
+   */
+  it("keeps the animation lock's bindings resolvable across a stack reroll", () => {
+    let carried = 0;
+    let rerolls = 0;
+
+    for (let i = 0; i < 50; i += 1) {
+      const first = generateSurprise({
+        seed: BigInt(i) * 7919n + 5n,
+        registry,
+        chaos: 1,
+        locks: NO_LOCKS,
+        excludes: NO_EXCLUDES,
+        base: BASE,
+        palette: PALETTE,
+        animate: true,
+      });
+      if (first.document.bindings.length === 0) continue;
+
+      const second = generateSurprise({
+        seed: BigInt(i) * 104_729n + 11n,
+        registry,
+        chaos: 1,
+        locks: { ...NO_LOCKS, animation: true },
+        excludes: NO_EXCLUDES,
+        base: first.document,
+        palette: PALETTE,
+        animate: true,
+      });
+      rerolls += 1;
+      carried += second.document.bindings.length;
+
+      // Stated on the document itself as well as through the planner, so a
+      // failure names the binding that cannot be honoured rather than only the
+      // exception it caused.
+      for (const binding of second.document.bindings) {
+        const node = second.document.stack.find((entry) => entry.id === binding.nodeId);
+        expect(node, `${binding.nodeId}.${binding.param} names a node that is in the stack`)
+          .toBeDefined();
+        const param = registry
+          .require(node?.effect ?? "")
+          .params.find((candidate) => candidate.key === binding.param);
+        expect(
+          param?.animatable,
+          `${node?.effect ?? "?"}.${binding.param} is a parameter the registry will animate`,
+        ).toBe(true);
+      }
+
+      assertRenderable(second.document, `seed pair ${i}, animation locked`);
+    }
+
+    expect(rerolls, "the loop found no surprise with a binding to carry").toBeGreaterThan(0);
+    expect(carried, "no binding survived any reroll, so nothing was exercised").toBeGreaterThan(0);
+  });
+
   it("all four locks together leave the document alone but for its recorded seed", () => {
     const result = generateSurprise({
       seed: 31337n,
       registry,
       chaos: 0.5,
       locks: { palette: true, stack: true, params: true, animation: true },
+      excludes: NO_EXCLUDES,
       base: seeded,
       palette: PALETTE,
       animate: false,
@@ -247,6 +336,141 @@ describe("locks (F-SM-06)", () => {
       ...seeded,
       surpriseSeed: undefined,
     });
+  });
+});
+
+/**
+ * The off-switch.
+ *
+ * The reported complaint was that animation could not be turned off: the only
+ * animation control in the panel was the lock, and a lock pins it **on**. An
+ * exclude is the other question — do not make this at all — and for animation it
+ * has to reach all the way to `bindings: []`, because that empty array is what
+ * every downstream consumer reads as "nothing moves": `planAnimation` has nothing
+ * to resolve, `ui/timeline/model.ts` adopts no tracks and stops a transport that
+ * was running, and `state/session.ts` draws the still frame itself rather than
+ * waiting on a timeline that is not pumping.
+ */
+describe("excludes", () => {
+  const animated = generateSurprise({
+    seed: 0x0bad_c0ff_ee0d_df00n,
+    registry,
+    chaos: 1,
+    locks: NO_LOCKS,
+    excludes: NO_EXCLUDES,
+    base: BASE,
+    palette: PALETTE,
+    animate: true,
+  }).document;
+
+  it("draws bindings when nothing is excluded, so the rest of this block is not vacuous", () => {
+    expect(animated.bindings.length).toBeGreaterThan(0);
+  });
+
+  it("yields zero bindings on a build that can animate", () => {
+    for (let i = 0; i < 60; i += 1) {
+      const result = generateSurprise({
+        seed: BigInt(i) * 0x9e37_79b9_7f4a_7c15n + 3n,
+        registry,
+        chaos: 1,
+        locks: NO_LOCKS,
+        excludes: { animation: true },
+        base: BASE,
+        palette: PALETTE,
+        // The build can animate. That is exactly the case that matters: with
+        // `animate: false` the document has no bindings for a reason that has
+        // nothing to do with what the user asked for.
+        animate: true,
+      });
+      expect(result.document.bindings, `seed ${result.summary.seed}`).toEqual([]);
+      expect(result.summary.bindings).toBe(0);
+      assertRenderable(result.document, `animation excluded, seed ${result.summary.seed}`);
+    }
+  });
+
+  /**
+   * The base document's bindings are not a special case: an exclude means the
+   * document comes back without them, whatever it started with. This is the
+   * reroll a person actually does — press surprise, get something moving, decide
+   * they want it still.
+   */
+  it("drops the bindings the base document arrived with", () => {
+    expect(animated.bindings.length).toBeGreaterThan(0);
+    const result = generateSurprise({
+      seed: 0x5555_aaaa_5555_aaaan,
+      registry,
+      chaos: 1,
+      locks: { ...NO_LOCKS, stack: true, params: true, palette: true },
+      excludes: { animation: true },
+      base: animated,
+      palette: PALETTE,
+      animate: true,
+    });
+    expect(result.document.bindings).toEqual([]);
+    // Everything else was kept, so the exclude is the only thing that acted.
+    expect(result.document.stack).toEqual(animated.stack);
+    expect(result.document.palette).toEqual(animated.palette);
+  });
+
+  /**
+   * An exclude is a subtraction rather than a different draw.
+   *
+   * `sampleBindings` takes its numbers from streams named per node and per
+   * parameter (`surprise/bind/<node>/<key>`) rather than from the sequence the
+   * stack and the parameters are drawn from, so removing it cannot shift what
+   * anything else got. Stated as a test because it is the property that makes
+   * "off" mean what the panel says it means: the same seed gives the same
+   * picture, standing still.
+   */
+  it("changes nothing but the bindings, for the same seed", () => {
+    for (const seed of [1n, 0xfeed_face_dead_beefn, 0x7f3a_1c92_b04e_5d68n]) {
+      const on = generateSurprise({
+        seed,
+        registry,
+        chaos: 1,
+        locks: NO_LOCKS,
+        excludes: NO_EXCLUDES,
+        base: BASE,
+        palette: PALETTE,
+        animate: true,
+      }).document;
+      const off = generateSurprise({
+        seed,
+        registry,
+        chaos: 1,
+        locks: NO_LOCKS,
+        excludes: { animation: true },
+        base: BASE,
+        palette: PALETTE,
+        animate: true,
+      }).document;
+
+      expect(off.bindings).toEqual([]);
+      expect(JSON.stringify({ ...off, bindings: [] })).toBe(
+        JSON.stringify({ ...on, bindings: [] }),
+      );
+    }
+  });
+
+  /**
+   * "Keep this" and "do not make this at all" are not a precedence puzzle, and
+   * picking a winner would leave the panel and the document disagreeing about
+   * what was asked for. The UI cannot produce this — one aspect carries one mode
+   * — but this module is pure and public, so it checks rather than trusts.
+   */
+  it("refuses an aspect that is both locked and excluded", () => {
+    expect(() =>
+      generateSurprise({
+        seed: 1n,
+        registry,
+        chaos: 0.5,
+        locks: { ...NO_LOCKS, animation: true },
+        excludes: { animation: true },
+        base: animated,
+        palette: PALETTE,
+        animate: true,
+      }),
+    ).toThrow(SurpriseError);
   });
 });
 
@@ -272,6 +496,7 @@ describe("what it refuses", () => {
         registry,
         chaos: 0.5,
         locks: { ...NO_LOCKS, stack: true },
+        excludes: NO_EXCLUDES,
         base: foreign,
         palette: PALETTE,
         animate: false,
@@ -305,6 +530,7 @@ describe("what it refuses", () => {
         registry,
         chaos: 0.5,
         locks: { ...NO_LOCKS, stack: true },
+        excludes: NO_EXCLUDES,
         base: illegal,
         palette: PALETTE,
         animate: false,

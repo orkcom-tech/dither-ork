@@ -291,9 +291,36 @@ export class TimelineStore {
     }
   }
 
+  /**
+   * Make the modulator tracks be exactly the document's bindings.
+   *
+   * **Including when there are none.** An empty binding list used to return here
+   * without dispatching, on the reading that "a document with no bindings is one
+   * whose tracks and bindings already agree" — which is true only if the tracks
+   * were empty too. They are not, in the case that matters: turn animation off in
+   * the Surprise panel and the next document arrives with `bindings: []` while
+   * this store is still holding the modulator tracks of the one before it.
+   *
+   * Pruning did not catch it either. `survivingTrackIds` asks whether the track's
+   * node and parameter still exist, and a reroll re-uses the node ids `n1..nN`,
+   * so a track on `n1.amount` survives onto whatever effect now holds `n1` if
+   * that effect happens to declare `amount`. The tracks then went on modulating a
+   * document that says it is still: the panel and the file said nothing moves and
+   * the picture moved anyway — the exact complaint the off-switch exists to
+   * answer.
+   *
+   * So an empty list is adopted like any other, which drops every modulator track
+   * (`reduce` keeps the hand-made keyframe ones) and stops a transport that has
+   * nothing left to play. The early return is kept only for the case it was
+   * really about — nothing to adopt *and* nothing to drop — so a document without
+   * animation does not announce that at startup and on every unrelated edit.
+   */
   #adopt(bindings: readonly Binding[], reason: string): boolean {
     this.#adopted = bindings;
-    if (bindings.length === 0) {
+    const modulators = this.#state.tracks.filter(
+      (track) => track.spec.kind === "modulator",
+    ).length;
+    if (bindings.length === 0 && modulators === 0) {
       // Still recorded: an empty document is one whose tracks and bindings
       // agree, and the next dispatch should publish because it changed
       // something, not because this never caught up.
@@ -304,8 +331,12 @@ export class TimelineStore {
     const next = reduce(this.#state, { kind: "adopt-bindings", bindings }, frames);
     this.#publishedTracks = next.tracks;
     if (next === this.#state) return false;
-    log.info("timeline adopted the document's bindings as tracks", {
+    log.info("timeline tracks follow the document's bindings", {
       bindings: bindings.length,
+      // Both counts, because the interesting direction is now downward: "was 3,
+      // now 0" is what animation being turned off looks like from here.
+      was: this.#state.tracks.length,
+      now: next.tracks.length,
       reason,
     });
     this.#state = next;

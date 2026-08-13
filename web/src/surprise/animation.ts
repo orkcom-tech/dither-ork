@@ -41,17 +41,18 @@
  *   fields, and F-AN-04 (temporal variation) is the mechanism for animating
  *   seeded noise.
  *
- * # Nothing here runs unless the renderer accepts bindings
+ * # Nothing here runs unless the whole animated path works
  *
- * `state/render/graph.ts` currently **refuses** a document that carries
- * bindings, because resolving one needs a modulator and there is none. A
- * surprise that produced bindings today would produce a document that cannot be
- * rendered — a control that lies, which is the one outcome this project treats
- * as worse than a missing feature. So the caller passes `animate: false` until a
- * probe of the real `buildRenderGraph` says otherwise, and the UI does not offer
- * the animation lock while that is the case. See `ui/surprise/capability.ts`.
- * This module is complete and tested regardless, so the day the refusal goes the
- * feature is one probe result away.
+ * `state/render/graph.ts` **refuses** a document that carries bindings, and
+ * always will: a binding is not a value it can compile, and rendering the
+ * document with its unbound defaults would draw a picture that is not the
+ * document. What makes a bound document drawable is the modulator in front of
+ * it — `planAnimation` resolves every binding to a number and `documentAtFrame`
+ * hands over a document carrying none. `ui/surprise/capability.ts` probes that
+ * whole path once and the caller passes the answer as `animate`, so a build
+ * without a modulator produces no bindings rather than a document it cannot
+ * draw. **In this build the probe passes**, so what this file draws reaches the
+ * screen and the animation lock is offered.
  */
 
 import { logger } from "../lib/log";
@@ -203,27 +204,90 @@ export function sampleBindings(request: BindingRequest): readonly Binding[] {
 }
 
 /**
- * Keep only the bindings whose node is still in the stack.
+ * Keep only the bindings the new stack can actually carry.
  *
- * Used when the animation lock (F-SM-06) holds bindings across a stack reroll:
- * the parameters were bound to nodes that a new composition does not contain,
- * and `setBindings` throws on a binding that names a node the stack does not
- * have. Dropping them is the only coherent answer — a binding is a reference to
- * a node, not a value that can survive without one — and it is logged, because
- * "I locked animation and half of it went away" needs a reason a person can
- * find.
+ * Used when the animation lock (F-SM-06) holds bindings across a stack reroll.
+ * Dropping the rest is the only coherent answer — a binding is a reference to a
+ * parameter of a node, not a value that can survive without one — and it is
+ * logged, because "I locked animation and half of it went away" needs a reason a
+ * person can find.
+ *
+ * # Why the node id is not the question
+ *
+ * A reroll does not give the new nodes new ids: `generate.ts` numbers them
+ * `n1..nN` from the top, exactly as the stack editor does, so a two-node reroll
+ * always produces `n1` and `n2` whatever effects it chose. **An id therefore
+ * survives a reroll almost always, and survives it as a different effect.** A
+ * binding kept on id alone then names a parameter its node has never heard of,
+ * and every consumer of the document refuses it in a different place:
+ * `animation/binding.ts` throws when it cannot find the parameter on the
+ * descriptor, so `planAnimation` cannot build; the timeline drops the track
+ * (`survivingTrackIds` asks this same question) and stops being the pump, while
+ * `state/session.ts` leaves the preview to the timeline for as long as the
+ * document carries *any* binding. Nobody draws, and the previous picture stays
+ * on screen under a panel that has already moved on to the new seed, the new
+ * stack and the new palette. That is what a reroll under the animation lock did,
+ * and it was reported twice as "the picture is still the old one".
+ *
+ * So the question is the one the timeline asks: does the node that now holds
+ * this id declare this parameter, and will the registry animate it. Asking the
+ * same question in both places is what keeps the document and the timeline's
+ * tracks from disagreeing about what is animated.
  */
 export function retainBindings(
   bindings: readonly Binding[],
   stack: readonly StackNode[],
+  registry: EffectRegistry,
 ): readonly Binding[] {
-  const ids = new Set(stack.map((node) => node.id));
-  const kept = bindings.filter((binding) => ids.has(binding.nodeId));
+  const nodes = new Map(stack.map((node) => [node.id, node]));
+  let gone = 0;
+  let mismatched = 0;
+
+  const kept = bindings.filter((binding) => {
+    const node = nodes.get(binding.nodeId);
+    if (node === undefined) {
+      gone += 1;
+      return false;
+    }
+    if (!carriesParam(registry, node, binding.param)) {
+      mismatched += 1;
+      return false;
+    }
+    return true;
+  });
+
   if (kept.length !== bindings.length) {
-    log.info("locked bindings dropped: their nodes are not in the new stack", {
+    log.info("locked bindings dropped: the new stack cannot carry them", {
       was: bindings.length,
       kept: kept.length,
+      // Split, because the two mean different things to whoever reads this:
+      // `gone` is a node that is not there, `mismatched` is an id the reroll
+      // handed to a different effect.
+      gone,
+      mismatched,
     });
   }
   return kept;
+}
+
+/** Whether this node's effect declares `param` as one a modulator may drive. */
+function carriesParam(
+  registry: EffectRegistry,
+  node: StackNode,
+  param: string,
+): boolean {
+  const descriptor = registry.get(node.effect);
+  if (descriptor === undefined) {
+    // A stack naming an effect this build does not have. Said out loud for the
+    // same reason `sampleBindings` says it: the document came from elsewhere and
+    // the caller is about to try to render it.
+    log.warn("a locked binding was dropped: its node names an unknown effect", {
+      nodeId: node.id,
+      effect: node.effect,
+      param,
+    });
+    return false;
+  }
+  const target = descriptor.params.find((candidate) => candidate.key === param);
+  return target !== undefined && isBindable(target);
 }

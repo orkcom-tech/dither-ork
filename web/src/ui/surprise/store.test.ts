@@ -25,12 +25,14 @@ import { createEffectRegistry, type EffectRegistry } from "../../registry/regist
 import { DocumentStore } from "../../state/store";
 import { createPaletteStore } from "../palette/store";
 import {
+  NO_EXCLUDES,
   NO_LOCKS,
   generateSurprise,
   mintSeed,
   rerollNodeParams,
   synthesizePalette,
   seededPcg32,
+  type SurpriseExcludes,
   type SurpriseLocks,
 } from "../../surprise";
 import type { StackEntry, SurpriseEngine, SurpriseRun } from "./engine";
@@ -42,6 +44,11 @@ const registry: EffectRegistry = createEffectRegistry(discoverEffects());
 interface Harness {
   readonly store: SurpriseStore;
   readonly documents: DocumentStore;
+  /** What the engine was last asked for, so the store's wiring is observable. */
+  readonly lastRequest: () => {
+    readonly locks: SurpriseLocks;
+    readonly excludes: SurpriseExcludes;
+  } | null;
   /** Flip to make `ready()` refuse, as an unopened image would. */
   setReady(reason: string | null): void;
   /** Flip to make generation throw, as an unrenderable locked stack would. */
@@ -60,11 +67,15 @@ function harness(): Harness {
   let failure: string | null = null;
   let runsPerCall = 1;
   let thumbnails = 0;
+  let lastRequest: { locks: SurpriseLocks; excludes: SurpriseExcludes } | null = null;
   const pending: Promise<void>[] = [];
 
   const engine: SurpriseEngine = {
     registry,
-    modulators: { renderable: false, reason: "no modulator in this build" },
+    // The real probe passes in this build, so the panel offers animation and the
+    // store has an exclude to carry. Saying `false` here would leave the store's
+    // animation wiring untested behind a capability the application does have.
+    modulators: { renderable: true, reason: "" },
 
     ready: () => (refusal === null ? { ready: true } : { ready: false, reason: refusal }),
 
@@ -80,13 +91,16 @@ function harness(): Harness {
     async surprise({
       chaos,
       locks,
+      excludes,
       onApplied,
     }: {
       chaos: number;
       locks: SurpriseLocks;
+      excludes: SurpriseExcludes;
       onApplied: (run: SurpriseRun) => void;
     }): Promise<void> {
       if (failure !== null) throw new Error(failure);
+      lastRequest = { locks, excludes };
       // Two runs per call, which is what the real engine does when presses
       // arrive while one is in flight. It is here so the store's "record each
       // one as it lands" path is the path under test.
@@ -97,9 +111,11 @@ function harness(): Harness {
           registry,
           chaos,
           locks,
+          excludes,
           base: documents.document,
           palette: synthesizePalette(seededPcg32(seed), "triad", "oklab"),
-          animate: false,
+          // The real engine passes its probe's answer, which is `true` here.
+          animate: true,
         });
         documents.loadDocument(result.document, "Surprise");
         onApplied({
@@ -144,6 +160,7 @@ function harness(): Harness {
   return {
     store,
     documents,
+    lastRequest: () => lastRequest,
     setReady: (reason) => {
       refusal = reason;
     },
@@ -348,7 +365,7 @@ describe("restore (F-SM-10)", () => {
   });
 });
 
-describe("chaos and locks", () => {
+describe("chaos and the aspect modes", () => {
   it("snaps the chaos slider and notifies", () => {
     const h = harness();
     let notifications = 0;
@@ -365,28 +382,102 @@ describe("chaos and locks", () => {
     expect(notifications).toBe(1);
   });
 
-  it("starts at the default and toggles locks independently", () => {
+  it("starts at the default with everything rerolling", () => {
     const h = harness();
     expect(h.store.getSnapshot().chaos).toBe(DEFAULT_CHAOS);
     expect(h.store.getSnapshot().locks).toEqual(NO_LOCKS);
+    expect(h.store.getSnapshot().excludes).toEqual(NO_EXCLUDES);
 
-    h.store.toggle("palette");
+    h.store.setMode("palette", "keep");
     expect(h.store.getSnapshot().locks.palette).toBe(true);
     expect(h.store.getSnapshot().locks.stack).toBe(false);
   });
 
-  it("keeps a locked palette across rerolls", async () => {
+  it("keeps a kept palette across rerolls", async () => {
     const h = harness();
     h.store.surprise();
     await h.settle();
     const palette = h.documents.document.palette;
 
-    h.store.toggle("palette");
+    h.store.setMode("palette", "keep");
     for (let i = 0; i < 5; i += 1) {
       h.store.surprise();
       await h.settle();
     }
     expect(h.documents.document.palette).toEqual(palette);
+  });
+
+  /**
+   * The off-switch, end to end through the store: set animation to off, press
+   * surprise, and the document on screen carries no bindings. This is the state
+   * `ui/timeline/store.ts` adopts, and at zero bindings it takes no tracks and
+   * stops the transport — so "nothing moves" is what the user actually gets.
+   */
+  it("puts a document with no bindings on screen when animation is off", async () => {
+    // The guard below is not vacuous — with animation rerolling this build does
+    // produce bindings, so a passing "no bindings" assertion cannot be an
+    // accident of a stack that had nothing to bind. It has to be reached from a
+    // KNOWN seed rather than a minted one: a surprise samples its bindings from
+    // whatever stack the grammar composed, some stacks legitimately offer
+    // nothing bindable, and asserting on a random draw makes the suite fail on
+    // an unlucky day for a reason that is not a defect. The project's own rule
+    // is that nothing stochastic runs unseeded; a test is not an exception.
+    const h = harness();
+    let seeded = false;
+    for (let attempt = 0; attempt < 24 && !seeded; attempt += 1) {
+      h.store.surprise();
+      await h.settle();
+      seeded = h.documents.document.bindings.length > 0;
+    }
+    expect(seeded).toBe(true);
+
+    h.store.setMode("animation", "off");
+    for (let i = 0; i < 5; i += 1) {
+      h.store.surprise();
+      await h.settle();
+      expect(h.documents.document.bindings).toEqual([]);
+    }
+    expect(h.lastRequest()?.excludes).toEqual({ animation: true });
+  });
+
+  /**
+   * The exclude survives a reroll and stays visible, exactly as a lock does:
+   * both live in this store because both are ways of *asking* for a surprise
+   * rather than parts of a document.
+   */
+  it("carries the mode across presses rather than resetting it", async () => {
+    const h = harness();
+    h.store.setMode("animation", "off");
+    h.store.setMode("stack", "keep");
+    for (let i = 0; i < 3; i += 1) {
+      h.store.surprise();
+      await h.settle();
+    }
+    expect(h.store.getSnapshot().excludes.animation).toBe(true);
+    expect(h.store.getSnapshot().locks.stack).toBe(true);
+    expect(h.lastRequest()).toEqual({
+      locks: { ...NO_LOCKS, stack: true },
+      excludes: { animation: true },
+    });
+  });
+
+  /**
+   * The generator refuses an aspect that is both kept and excluded. The store
+   * cannot ask for that — one aspect carries one mode — and this is the proof,
+   * because the alternative is discovering it as a refusal banner over a picture.
+   */
+  it("never asks for an aspect that is both kept and off", async () => {
+    const h = harness();
+    for (const mode of ["keep", "off", "keep", "reroll", "off"] as const) {
+      h.store.setMode("animation", mode);
+      const snapshot = h.store.getSnapshot();
+      expect(snapshot.locks.animation && snapshot.excludes.animation).toBe(false);
+      h.store.surprise();
+      await h.settle();
+      // Generation would have thrown on a contradiction, and the store reports a
+      // failure rather than swallowing it.
+      expect(h.store.getSnapshot().problem).toBeNull();
+    }
   });
 });
 

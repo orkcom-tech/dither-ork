@@ -264,6 +264,39 @@ describe("following the document", () => {
     expect(state.playing).toBe(false);
   });
 
+  /**
+   * Why the store has to adopt an empty binding list rather than skip it.
+   *
+   * Turning animation off in the Surprise panel produces a document with
+   * `bindings: []`, and pruning is not what removes the modulator tracks it
+   * leaves behind — pruning asks whether the track's node and parameter still
+   * exist. A reroll re-uses the node ids `n1..nN`, so a track's target is very
+   * often still there, under a new effect or the same one, and the track
+   * survives the prune and goes on modulating a document that says nothing
+   * moves. Adoption is the only step that makes the tracks *be* the bindings, so
+   * an empty list has to go through it too; `ui/timeline/store.ts` says the same
+   * thing at the call site.
+   */
+  it("prunes nothing when the bindings go but the targets stay", () => {
+    const bound = apply(EMPTY_TIMELINE, bindGain);
+    expect(bound.tracks).toHaveLength(1);
+
+    // The document the reroll produced: no bindings at all, and a node still
+    // carrying the id and the parameter the track names.
+    const document = testDocument([plainNode("plain")]);
+    expect(document.bindings).toEqual([]);
+
+    const keep = survivingTrackIds(bound.tracks, document, testRegistry());
+    expect([...keep], "pruning keeps it, so pruning cannot be the off-switch").toEqual([
+      "plain::gain",
+    ]);
+    expect(reduce(bound, { kind: "prune", keep }, N).tracks).toHaveLength(1);
+
+    // Adoption is what removes it.
+    const adopted = reduce(bound, { kind: "adopt-bindings", bindings: document.bindings }, N);
+    expect(adopted.tracks).toHaveLength(0);
+  });
+
   it("keeps keyframe tracks the incoming bindings do not claim", () => {
     const withKeys = apply(EMPTY_TIMELINE, bindSpread);
     const state = reduce(

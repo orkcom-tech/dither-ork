@@ -5,20 +5,34 @@
  * as `ui/palette/store.ts` — a getter that rebuilt its object would re-render
  * forever, and a subscription per field would be four things to keep in step.
  *
- * It owns the four things that are ways of *asking* for a surprise rather than
- * part of a document: the chaos setting, the locks, the history and whichever
- * history entry is currently on screen. None of them belongs in the `.dork` —
- * the seed does, and the document carries it.
+ * It owns the things that are ways of *asking* for a surprise rather than part
+ * of a document: the chaos setting, the per-aspect modes (the locks and the
+ * excludes), the history and whichever history entry is currently on screen.
+ * None of them belongs in the `.dork` — the seed does, and the document carries
+ * it.
+ *
+ * That is the answer to "should an exclude be in the seed or the share link"
+ * (F-SM-02, F-DO-06), and it is the same answer the locks already have. A seed
+ * reproduces a document *given the same base document and the same request*;
+ * that has been true since the first lock, because a locked palette comes from
+ * the base rather than from the seed. What actually travels is the document
+ * itself — `io/document/share.ts` encodes the whole thing into the URL fragment
+ * — and an excluded aspect is visible there as the state it produced:
+ * `bindings: []`. So the picture at the far end is exact without the exclude
+ * being carried, and carrying it would put a control setting into a file format
+ * that describes pictures.
  */
 
 import { logger } from "../../lib/log";
 import type { DitherDocument } from "../../types/document";
 import type { DocumentStore } from "../../state";
 import {
+  NO_EXCLUDES,
   NO_LOCKS,
   describeEntry,
   pushSurprise,
   withThumbnail,
+  type SurpriseExcludes,
   type SurpriseHistoryEntry,
   type SurpriseLocks,
 } from "../../surprise";
@@ -27,8 +41,9 @@ import type { SurpriseEngine, StackEntry } from "./engine";
 import {
   DEFAULT_CHAOS,
   clampChaos,
-  toggleLock,
-  type LockKey,
+  withAspectMode,
+  type AspectKey,
+  type AspectMode,
   type Readiness,
 } from "./model";
 
@@ -37,7 +52,10 @@ const log = logger("app");
 export interface SurpriseSnapshot {
   /** Tame to wild (F-SM-07). */
   readonly chaos: number;
+  /** What the next press leaves alone (F-SM-06). */
   readonly locks: SurpriseLocks;
+  /** What the next press does not produce at all. Never true where a lock is. */
+  readonly excludes: SurpriseExcludes;
   /** Newest first (F-SM-10). */
   readonly history: readonly SurpriseHistoryEntry[];
   /**
@@ -58,7 +76,13 @@ export interface SurpriseStore {
   getSnapshot(): SurpriseSnapshot;
   subscribe(listener: () => void): () => void;
   setChaos(value: number): void;
-  toggle(key: LockKey): void;
+  /**
+   * Put one aspect into one mode: reroll, keep, or off.
+   *
+   * One call rather than a lock toggle and an exclude toggle, so "kept and
+   * excluded" has no sequence of calls that produces it.
+   */
+  setMode(key: AspectKey, mode: AspectMode): void;
   /** F-SM-01. Safe to call while one is running — the engine coalesces. */
   surprise(): void;
   /** F-SM-08. */
@@ -88,6 +112,7 @@ export function createSurpriseStore(options: SurpriseStoreOptions): SurpriseStor
 
   let chaos = DEFAULT_CHAOS;
   let locks: SurpriseLocks = NO_LOCKS;
+  let excludes: SurpriseExcludes = NO_EXCLUDES;
   let history: readonly SurpriseHistoryEntry[] = [];
   let current: string | null = null;
   let busy = false;
@@ -104,6 +129,7 @@ export function createSurpriseStore(options: SurpriseStoreOptions): SurpriseStor
     return {
       chaos,
       locks,
+      excludes,
       history,
       current,
       busy,
@@ -173,9 +199,11 @@ export function createSurpriseStore(options: SurpriseStoreOptions): SurpriseStor
       publish();
     },
 
-    toggle(key: LockKey): void {
-      locks = toggleLock(locks, key);
-      log.info("surprise lock toggled", { lock: key, locked: locks[key] });
+    setMode(key: AspectKey, mode: AspectMode): void {
+      const next = withAspectMode({ locks, excludes }, key, mode);
+      locks = next.locks;
+      excludes = next.excludes;
+      log.info("surprise aspect set", { aspect: key, mode });
       publish();
     },
 
@@ -193,6 +221,7 @@ export function createSurpriseStore(options: SurpriseStoreOptions): SurpriseStor
         .surprise({
           chaos,
           locks,
+          excludes,
           // Once per surprise that reached the screen, which is not always once
           // per press: the engine coalesces a hammered shortcut into fewer runs.
           // Recording each as it lands is what keeps the history a record of

@@ -139,10 +139,45 @@
   accent-color: var(--accent);
 }
 
-.sm__locks {
+/* One row per aspect: its name, and a segmented control of the modes it has.
+   The row is a grid rather than a flex with `justify-content: space-between` so
+   every segmented control starts at the same x, which is what lets the column of
+   them be read down rather than aspect by aspect. */
+.sm__aspects {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sm__aspect {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.sm__aspect-name {
+  font-size: var(--text-sm);
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sm__modes {
+  display: flex;
+  gap: 2px;
+}
+
+/* The chosen mode, not merely a hover state: the row has to be readable at a
+   glance from across the panel, because "which of these is off" is the question
+   somebody opens this section to answer. */
+.sm__mode[aria-checked="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .sm__nodes {

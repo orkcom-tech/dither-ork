@@ -32,6 +32,7 @@ import {
   paletteFromExtraction,
   rerollNodeParams,
   type PaletteDecision,
+  type SurpriseExcludes,
   type SurpriseLocks,
   type SurpriseResult,
 } from "../../surprise";
@@ -83,6 +84,7 @@ export interface SurpriseEngine {
   surprise(options: {
     readonly chaos: number;
     readonly locks: SurpriseLocks;
+    readonly excludes: SurpriseExcludes;
     readonly onApplied: (run: SurpriseRun) => void;
   }): Promise<void>;
   /** Re-roll one node's parameters and seed (F-SM-08). One undo step. */
@@ -145,7 +147,11 @@ export function createSurpriseEngine(options: SurpriseEngineOptions): SurpriseEn
   let running: Promise<void> | null = null;
   let coalesced = 0;
 
-  const runOnce = async (chaos: number, locks: SurpriseLocks): Promise<SurpriseRun> => {
+  const runOnce = async (
+    chaos: number,
+    locks: SurpriseLocks,
+    excludes: SurpriseExcludes,
+  ): Promise<SurpriseRun> => {
     const verdict = ready();
     if (!verdict.ready) throw new Error(verdict.reason);
 
@@ -158,8 +164,11 @@ export function createSurpriseEngine(options: SurpriseEngineOptions): SurpriseEn
       registry,
       chaos,
       locks,
+      excludes,
       base: store.document,
       palette: resolved,
+      // What the build can do; `excludes.animation` is what the user asked for.
+      // Two different facts, and the panel says two different things about them.
       animate: modulators.renderable,
     });
 
@@ -199,7 +208,7 @@ export function createSurpriseEngine(options: SurpriseEngineOptions): SurpriseEn
       }));
     },
 
-    async surprise({ chaos, locks, onApplied }): Promise<void> {
+    async surprise({ chaos, locks, excludes, onApplied }): Promise<void> {
       if (running !== null) {
         coalesced += 1;
         log.debug("surprise coalesced into the one already running", { waiting: coalesced });
@@ -207,7 +216,7 @@ export function createSurpriseEngine(options: SurpriseEngineOptions): SurpriseEn
       }
 
       const attempt = (async (): Promise<void> => {
-        onApplied(await runOnce(chaos, locks));
+        onApplied(await runOnce(chaos, locks, excludes));
         // Drain the presses that arrived while that was running — one more run
         // rather than one per press. The point is a steady stream of surprises,
         // not a backlog of palette extractions against a two-megapixel image.
@@ -217,7 +226,7 @@ export function createSurpriseEngine(options: SurpriseEngineOptions): SurpriseEn
           const waiting = coalesced;
           coalesced = 0;
           log.debug("running one more surprise for the presses that arrived", { waiting });
-          onApplied(await runOnce(chaos, locks));
+          onApplied(await runOnce(chaos, locks, excludes));
         }
       })();
 

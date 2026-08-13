@@ -57,6 +57,8 @@ export const UI_CONCEPT_IDS = [
   "keyframe-track",
   "preview-quality",
   "surprise-seed",
+  "surprise-keep",
+  "surprise-off",
 ] as const;
 
 export type UiConceptId = (typeof UI_CONCEPT_IDS)[number];
@@ -175,7 +177,21 @@ export const UI_CONCEPTS: Readonly<Record<UiConceptId, UiConcept>> = {
     title: "Surprise seed",
     summary: "The one number an entire random document is derived from.",
     description:
-      "Surprise Me generates the palette, the stack, every parameter and the animation from a single 64-bit seed, and that seed is shown, copyable, and carried in a share link. The same seed on the same build reproduces the same document exactly, so a good accident is never lost to a reroll. Locks decide what a reroll is allowed to touch and chaos decides how far from the defaults it is allowed to wander; the seed decides everything else.",
+      "Surprise Me generates the palette, the stack, every parameter and the animation from a single 64-bit seed, and that seed is shown, copyable, and carried in a share link. The same seed on the same build reproduces the same document exactly, so a good accident is never lost to a reroll. Keeping an aspect decides what the next press may not touch, turning one off decides what it does not make at all, and chaos decides how far from the defaults it is allowed to wander; the seed decides everything else.",
+  },
+  "surprise-keep": {
+    id: "surprise-keep",
+    title: "Keep",
+    summary: "An aspect set to keep comes through the next Surprise unchanged.",
+    description:
+      "A surprise decides four things: the palette, which effects are in the stack and in what order, every parameter, and what moves. Each one is set to reroll, keep, or off, and reroll is the default. Keep means the next press leaves that one exactly as it is and rerolls the rest — which is how a palette you like survives fifty stack rerolls. Keeping the stack still rerolls its parameters unless those are kept too, and a kept set of parameters has nothing to give a stack that has just been recomposed, so effects that were not there before arrive at their defaults. Kept movement is carried binding by binding: one whose node has gone, or whose parameter the effect that replaced it does not have, is dropped rather than left pointing at nothing.",
+  },
+  "surprise-off": {
+    id: "surprise-off",
+    title: "Off",
+    summary: "An aspect set to off is left out of the document entirely.",
+    description:
+      "Off is the opposite of keep, not a stronger version of it: keep says make no new one, off says make none at all. Animation is the aspect it applies to, because a document with no bindings is a complete ordinary document — it renders as a still picture and the timeline has no tracks to play. With animation off, a press gives the same palette, the same stack and the same parameters that seed would have given anyway, minus the movement. The other three have no off: a document cannot be without a palette, a stack with no dither in it is not a surprise, and every node must carry parameters — so there would be nothing for the word to mean.",
   },
 };
 

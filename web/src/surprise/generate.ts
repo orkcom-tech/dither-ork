@@ -27,6 +27,15 @@
  * that survive by id *and* effect keep their values and their seeds. The UI says
  * this in one line rather than leaving it to be discovered.
  *
+ * # Excludes, which are not locks
+ *
+ * A lock says **keep this**; an exclude says **do not make this at all**. They
+ * are answers to different questions about the same aspect, and asking both at
+ * once is a contradiction rather than a precedence puzzle — so
+ * {@link generateSurprise} refuses it rather than deciding which wins. See
+ * {@link SurpriseExcludes} for why exactly one aspect has an exclude and the
+ * other three do not.
+ *
  * # What a surprise does not touch
  *
  * - **The source.** F-SM-01 is explicit: the document is generated *against* the
@@ -85,6 +94,62 @@ export const NO_LOCKS: SurpriseLocks = {
   animation: false,
 };
 
+/**
+ * What a surprise does not produce at all.
+ *
+ * A lock keeps the aspect it names; an exclude means the document comes back
+ * without it. For animation that is the difference between "the movement I have
+ * survives the next press" and "nothing moves", and only the second is an
+ * off-switch — which is the thing this feature was missing. Locking animation
+ * pins it **on**, which is the opposite of what somebody reaching for the only
+ * animation control in the panel wants.
+ *
+ * # Why this has one field and `SurpriseLocks` has four
+ *
+ * An exclude is only offerable where **the absence is a state a document can
+ * hold**. That is a fact about `DitherDocument`, not a matter of taste, and it
+ * is true of exactly one of the four aspects:
+ *
+ * - **animation** — `bindings: []` is an ordinary, complete document. It renders
+ *   as a still picture, the timeline adopts no tracks from it, and it is what
+ *   every document that was never animated already looks like. So "leave it out"
+ *   is expressible, renderable and useful. This is the exclude.
+ * - **palette** — a document has no state without one. `state/mutations.ts` and
+ *   `state/serialize.ts` both refuse a palette with no colours, and
+ *   `gpu/resources.ts` refuses to build a buffer from one. "No palette" would
+ *   have to mean "the palette that is already there", which is the lock spelled
+ *   twice.
+ * - **stack** — an empty stack passes `validateStack`, and it is the source
+ *   image with nothing done to it: no dither, so the palette means nothing, the
+ *   parameters do not exist and there is nothing to bind. That is not one aspect
+ *   left out, it is Surprise Me turned into a button that does nothing, and the
+ *   way to not have a surprise is to not press surprise.
+ * - **parameters** — every node must carry values `validateParams` accepts, so
+ *   there is no absence to express. The nearest thing is "all defaults", which is
+ *   a *different draw* rather than a missing one, and it is already what a locked
+ *   parameter set gives a freshly composed stack. Calling that an exclude would
+ *   make the same word mean two different things in two rows of the same panel.
+ *
+ * A control that produces nonsense is worse than a control that is not there, so
+ * the other three are not offered. `ui/surprise/model.ts` is where that shows up
+ * on screen, and it reads this shape rather than carrying its own list.
+ */
+export interface SurpriseExcludes {
+  /**
+   * No modulator bindings at all — not the base document's, not a fresh draw.
+   *
+   * The document comes back with `bindings: []`, so `planAnimation` has nothing
+   * to resolve, `ui/timeline/model.ts` adopts no tracks (and stops the transport
+   * when it had some), and `state/session.ts` renders the still frame itself
+   * rather than leaving the viewport to a timeline that is not pumping.
+   */
+  readonly animation: boolean;
+}
+
+export const NO_EXCLUDES: SurpriseExcludes = {
+  animation: false,
+};
+
 export interface SurpriseRequest {
   /** The 64-bit seed the whole document derives from (F-SM-02). */
   readonly seed: bigint;
@@ -92,6 +157,13 @@ export interface SurpriseRequest {
   /** Tame to wild, `[0, 1]` (F-SM-07). */
   readonly chaos: number;
   readonly locks: SurpriseLocks;
+  /**
+   * What this surprise must not produce at all (see {@link SurpriseExcludes}).
+   *
+   * An aspect that is both locked and excluded is refused rather than resolved —
+   * "keep it" and "do not make it" are not a precedence question.
+   */
+  readonly excludes: SurpriseExcludes;
   /**
    * The document being rerolled — the source of everything that is locked, and
    * of the source reference and clock, which a surprise never touches.
@@ -104,12 +176,20 @@ export interface SurpriseRequest {
    */
   readonly palette: Palette;
   /**
-   * Whether modulator bindings may be produced at all (F-SM-09).
+   * Whether this **build** can produce modulator bindings at all (F-SM-09).
    *
-   * False in this build: `state/render/graph.ts` refuses a document that carries
-   * bindings, so producing them would produce a document that cannot render. The
-   * caller probes the real graph builder rather than reading a constant — see
-   * `ui/surprise/capability.ts`.
+   * Not a setting and not a constant: the caller probes the real animated path
+   * once — `planAnimation` -> `documentAtFrame` -> `buildRenderGraph` — and
+   * passes what it found, so a build that cannot resolve a binding produces
+   * none rather than producing a document it cannot draw. In this build the
+   * probe passes and this arrives `true`; `ui/surprise/capability.ts` is where
+   * the question is asked and `ui/surprise/engine.ts` is what passes the answer.
+   *
+   * **This is not the user's off-switch** and the two are kept apart on purpose:
+   * `excludes.animation` is what a person asked for, this is what the build can
+   * do. Collapsing them would make "you turned animation off" and "this build has
+   * no modulator" the same fact, and the panel says two different things about
+   * them — the second comes with the failing step's own words for why.
    */
   readonly animate: boolean;
 }
@@ -178,16 +258,29 @@ function compositionFor(request: SurpriseRequest): Composition {
  * Generate a document.
  *
  * @throws SurpriseError when the base document names an effect this build does
- * not have, or when a locked stack is one the grammar rejects. Both are stated
- * rather than worked around: the first means the document came from a different
- * build, and the second means the user locked a stack that cannot render, which
- * they need told about rather than silently un-locked.
+ * not have, when a locked stack is one the grammar rejects, or when an aspect is
+ * both locked and excluded. All three are stated rather than worked around: the
+ * first means the document came from a different build, the second means the
+ * user locked a stack that cannot render, which they need told about rather than
+ * silently un-locked, and the third is a caller that asked for two opposite
+ * things — picking a winner would make the panel's state and the document's
+ * disagree in a way nobody could see.
  */
 export function generateSurprise(request: SurpriseRequest): SurpriseResult {
-  const { seed, registry, chaos, locks, base } = request;
+  const { seed, registry, chaos, locks, excludes, base } = request;
 
   if (!Number.isFinite(chaos) || chaos < 0 || chaos > 1) {
     throw new SurpriseError(`chaos ${chaos} is outside 0..1`);
+  }
+
+  // The UI makes this unrepresentable — one aspect carries one mode, so setting
+  // "off" clears "keep" in the same write. It is checked here anyway because
+  // this module is pure and public, and an invariant that only holds because one
+  // caller is careful is an invariant that holds until the second caller.
+  if (locks.animation && excludes.animation) {
+    throw new SurpriseError(
+      "animation is both locked and excluded; \"keep this\" and \"do not make this at all\" cannot both be asked of one aspect",
+    );
   }
 
   const composition = compositionFor(request);
@@ -279,6 +372,11 @@ export function generateSurprise(request: SurpriseRequest): SurpriseResult {
     lockedStack: locks.stack,
     lockedParams: locks.params,
     lockedAnimation: locks.animation,
+    // Zero bindings has three different causes — nothing was drawn, the build
+    // has no modulator, the user turned it off — and only this line separates
+    // them for whoever reads the log after "why is nothing moving".
+    excludedAnimation: excludes.animation,
+    buildAnimates: request.animate,
   });
 
   return { document, seed, summary };
@@ -288,7 +386,20 @@ function bindingsFor(
   request: SurpriseRequest,
   stack: readonly StackNode[],
 ): readonly Binding[] {
-  if (request.locks.animation) return retainBindings(request.base.bindings, stack);
+  // The exclude first, because it outranks every other reason a binding might
+  // exist — including one the base document arrived with. This is the whole
+  // off-switch: `bindings: []` is what makes `planAnimation` resolve nothing,
+  // `ui/timeline/model.ts` adopt no tracks (and stop a transport that was
+  // running), and the session draw the still frame itself.
+  if (request.excludes.animation) return [];
+
+  // The registry, because a reroll re-uses the node ids `n1..nN` rather than
+  // minting new ones: a binding whose id survived onto a different effect names
+  // a parameter that effect does not have, and a document carrying one is a
+  // document nothing will draw. `retainBindings` says what that costs.
+  if (request.locks.animation) {
+    return retainBindings(request.base.bindings, stack, request.registry);
+  }
   if (!request.animate) return [];
   return sampleBindings({
     seed: request.seed,

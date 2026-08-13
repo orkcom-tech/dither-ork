@@ -1,13 +1,13 @@
 /**
  * Random animation (F-SM-09).
  *
- * The modulator core is not in this build and `state/render/graph.ts` refuses a
- * document that carries bindings, so nothing in the application calls
- * {@link sampleBindings} yet — the caller passes `animate: false` after probing
- * the real graph builder. This file is what makes that a switch to flip rather
- * than a feature to write: the generator is complete and the properties the spec
- * fixes are pinned, above all the one that decides whether an exported loop
- * closes.
+ * Two switches sit in front of this generator and they mean different things.
+ * `animate` is the **build's** answer, probed once through the real animated path
+ * (`ui/surprise/capability.ts`); in this build it passes, so a surprise really
+ * does produce bindings. `excludes.animation` is the **user's** answer, and it is
+ * the off-switch — see `generate.test.ts`. This file pins the properties the spec
+ * fixes about what is drawn when both say yes, above all the one that decides
+ * whether an exported loop closes.
  */
 
 import { describe, expect, it } from "vitest";
@@ -19,7 +19,7 @@ import { createEffectRegistry, type EffectRegistry } from "../registry/registry"
 import { setBindings } from "../state/mutations";
 import { DEFAULT_CLOCK, DEFAULT_PALETTE } from "../state/document";
 import { MAX_BINDINGS, isBindable, retainBindings, sampleBindings } from "./animation";
-import { NO_LOCKS, generateSurprise } from "./generate";
+import { NO_EXCLUDES, NO_LOCKS, generateSurprise } from "./generate";
 import { synthesizePalette } from "./palette";
 import { seededPcg32 } from "./rng";
 
@@ -41,6 +41,7 @@ function stackFor(seed: bigint, chaos = 0.8): readonly StackNode[] {
     registry,
     chaos,
     locks: NO_LOCKS,
+    excludes: NO_EXCLUDES,
     base: BASE,
     palette: PALETTE,
     animate: false,
@@ -165,23 +166,29 @@ describe("sampleBindings", () => {
 });
 
 describe("retainBindings", () => {
-  const stack: readonly StackNode[] = [
-    { id: "n1", effect: "invert", enabled: true, opacity: 1, blend: "normal", params: {}, seed: 1 },
-  ];
+  const node = (id: string, effect: string): StackNode => ({
+    id,
+    effect,
+    enabled: true,
+    opacity: 1,
+    blend: "normal",
+    params: {},
+    seed: 1,
+  });
+  const stack: readonly StackNode[] = [node("n1", "invert")];
+  const bindingOn = (nodeId: string, param: string) => ({
+    nodeId,
+    param,
+    shape: "sine" as const,
+    amount: 0.2,
+    cyclesPerLoop: 1,
+    phase: 0,
+    bipolar: true,
+  });
 
   it("keeps a binding whose node is still there", () => {
-    const bindings = [
-      {
-        nodeId: "n1",
-        param: "amount",
-        shape: "sine" as const,
-        amount: 0.2,
-        cyclesPerLoop: 1,
-        phase: 0,
-        bipolar: true,
-      },
-    ];
-    expect(retainBindings(bindings, stack)).toEqual(bindings);
+    const bindings = [bindingOn("n1", "amount")];
+    expect(retainBindings(bindings, stack, registry)).toEqual(bindings);
   });
 
   /**
@@ -190,27 +197,51 @@ describe("retainBindings", () => {
    * throws on it rather than ignoring it.
    */
   it("drops a binding whose node the new stack does not contain", () => {
-    const bindings = [
-      {
-        nodeId: "n9",
-        param: "amount",
-        shape: "sine" as const,
-        amount: 0.2,
-        cyclesPerLoop: 1,
-        phase: 0,
-        bipolar: true,
-      },
-    ];
-    expect(retainBindings(bindings, stack)).toEqual([]);
+    expect(retainBindings([bindingOn("n9", "amount")], stack, registry)).toEqual([]);
+  });
+
+  /**
+   * The reported bug, at the smallest scale it can be stated.
+   *
+   * A reroll numbers its nodes `n1..nN`, so the ids do not change — they are
+   * handed to whatever effects the grammar picked. Keeping a binding because its
+   * id is still in the stack therefore keeps it pointed at a parameter the new
+   * effect has never declared, and a document carrying one is a document nobody
+   * draws: `planAnimation` cannot resolve it, so the timeline drops the track and
+   * stops pumping, while the session leaves the preview to the timeline for as
+   * long as any binding exists. The picture then stays on the previous surprise.
+   */
+  it("drops a binding whose id survived onto an effect without that parameter", () => {
+    // `invert` declares `amount`; `posterize` does not. Same id, different node.
+    expect(registry.require("invert").params.some((param) => param.key === "amount")).toBe(true);
+    expect(registry.require("posterize").params.some((param) => param.key === "amount")).toBe(
+      false,
+    );
+
+    const rerolled: readonly StackNode[] = [node("n1", "posterize")];
+    expect(retainBindings([bindingOn("n1", "amount")], rerolled, registry)).toEqual([]);
+  });
+
+  /**
+   * `isBindable` is the registry's own declaration of what a modulator may
+   * drive, and it is the same question `ui/timeline/model.ts` asks of a track.
+   * A binding on a parameter that exists but is not animatable resolves nowhere
+   * either — `animation/binding.ts` throws on it by name.
+   */
+  it("drops a binding on a parameter the registry will not animate", () => {
+    const mode = registry.require("invert").params.find((param) => param.key === "mode");
+    expect(mode?.animatable).toBe(false);
+    expect(retainBindings([bindingOn("n1", "mode")], stack, registry)).toEqual([]);
   });
 });
 
 describe("the generator's animate switch", () => {
   /**
-   * The whole reason `animate` exists. `state/render/graph.ts` refuses a
-   * document carrying bindings, so a surprise must not produce any until the
-   * modulator core lands — a control that produces an unrenderable document is
-   * worse than a missing one.
+   * The whole reason `animate` exists, and it is a statement about the *build*
+   * rather than about what anybody asked for: a build whose modulator path does
+   * not resolve must produce no bindings, because a document carrying one that
+   * nothing can resolve is a document nothing draws. The user-facing off-switch
+   * is `excludes.animation` and is tested in `generate.test.ts`.
    */
   it("produces no bindings at all while animate is false", () => {
     for (let i = 0; i < 200; i += 1) {
@@ -219,6 +250,7 @@ describe("the generator's animate switch", () => {
         registry,
         chaos: 1,
         locks: NO_LOCKS,
+        excludes: NO_EXCLUDES,
         base: BASE,
         palette: PALETTE,
         animate: false,
@@ -236,6 +268,7 @@ describe("the generator's animate switch", () => {
         registry,
         chaos: 1,
         locks: NO_LOCKS,
+        excludes: NO_EXCLUDES,
         base: BASE,
         palette: PALETTE,
         animate: true,
@@ -250,6 +283,7 @@ describe("the generator's animate switch", () => {
       registry,
       chaos: 0.9,
       locks: NO_LOCKS,
+      excludes: NO_EXCLUDES,
       base: BASE,
       palette: PALETTE,
       animate: true,
@@ -260,6 +294,7 @@ describe("the generator's animate switch", () => {
       registry,
       chaos: 0.9,
       locks: { ...NO_LOCKS, animation: true },
+      excludes: NO_EXCLUDES,
       base: seeded,
       palette: PALETTE,
       animate: true,

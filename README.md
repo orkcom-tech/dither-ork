@@ -38,8 +38,9 @@ loop, or a vector file. Nothing is uploaded: there is no server.
   and SVG traced into one layer per colour for a cutter or an embroidery
   machine. Animated: GIF, APNG, animated WebP, WebM/MP4, PNG sequence, sprite
   sheet. Size is estimated before you commit and cancel actually stops the work.
-- **Surprise Me** — a seeded random document with locks, a chaos slider and a
-  history strip. The same seed gives the same document.
+- **Surprise Me** — a seeded random document with a chaos slider, a history
+  strip, and a mode per aspect: reroll it, keep it as it is, or — for animation
+  — leave it out so nothing moves. The same seed gives the same document.
 - **Batch** — one recipe over many images, to a ZIP or a directory. One
   unreadable file fails alone; the run continues.
 - **Documents** — `.dork` files with or without the image inside, a preset
@@ -122,7 +123,7 @@ build ships a `_headers` file; CI fails if either goes missing.
 ## Tests
 
 ```bash
-docker compose exec -T web sh -c 'npm test -- --run'                                # 1826 tests, 118 files
+docker compose exec -T web sh -c 'npm test -- --run'                                # 1872 tests, 119 files
 docker compose run --rm --entrypoint bash wasm -c 'cd /app/core && cargo test --all' # 157 tests
 ```
 
@@ -139,6 +140,7 @@ build on SwiftShader.
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Running it locally |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | The `core/` boundary rule, and adding an effect |
 | [SECURITY.md](SECURITY.md) | What the attack surface is, and is not |
+| [CHANGELOG.md](CHANGELOG.md) | What changed, and when it reached production |
 
 ## Prior art
 

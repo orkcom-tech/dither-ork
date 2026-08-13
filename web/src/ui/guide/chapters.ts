@@ -119,6 +119,7 @@ const START: GuideChapter = {
   paragraphs: [
     "Nothing you do is destructive and nothing is committed. Every change is one undo step, the picture is rebuilt from the original every time, and the recipe can be saved on its own as a .dork file or a preset that carries no image at all.",
     "If you would rather start from an accident than from a blank stack, press Surprise Me. It builds a whole document — palette, effects, order, parameters, animation — from a single seed that is shown in the interface, so a result you like can be reproduced exactly and a result you nearly like can be rerolled a piece at a time.",
+    "Each part of a surprise has a mode. Reroll is the default: press Surprise and it changes. Lock keeps that part exactly as it is while everything else moves, which is how you hold a palette you like through fifty rerolls of the stack. Animation has a third mode, exclude, which leaves it out altogether — the document comes back with nothing bound and nothing moving. Locking animation is the opposite: it pins the movement you already have, so if you want the picture to sit still, exclude it rather than lock it.",
   ],
 };
 

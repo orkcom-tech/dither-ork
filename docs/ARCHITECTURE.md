@@ -311,7 +311,8 @@ web/
   src/ui/export/          the export dialog, and the adapter that satisfies
                           export/'s two interfaces from the editor session
   src/ui/batch/           the batch queue over many images
-  src/ui/surprise/        Surprise Me: seed, chaos, locks, history
+  src/ui/surprise/        Surprise Me: seed, chaos, the per-aspect modes
+                          (reroll/keep/off), history
   src/ui/documents/       save/open/presets/share, as a toolbar item and a dialog
   src/ui/help/            contextual help (F-UI-13): the `data-help` token, the
                           dwell machine, the placement solver, the article

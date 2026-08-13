@@ -13,9 +13,33 @@
  * two different palettes depending on whether the hardware library had finished
  * loading. Refusing until all three are available is what keeps F-SM-02's "the
  * same seed always reproduces the same result" true.
+ *
+ * # One control per aspect, with three states
+ *
+ * The panel used to show four on/off locks and nothing else, and two things were
+ * wrong with that. It was not clear what a lock *meant* — the padlock says "this
+ * one is special" and leaves which way round to be guessed — and there was no way
+ * to say **do not make this**, so somebody who wanted the picture to stop moving
+ * reached for the animation lock and pinned animation on.
+ *
+ * So an aspect now carries exactly one {@link AspectMode}: `reroll`, `keep`, or
+ * `off`. Three named states in one control rather than two independent toggles,
+ * for the reason `ui/timeline/model.ts` derives a track id from its target:
+ * **the illegal combination should be unrepresentable rather than prevented**.
+ * "Keep this" and "do not make this at all" cannot both be true of one aspect,
+ * and with two rows of toggles that is a rule somebody has to remember to
+ * enforce in the store, in the panel, and in whatever calls them next. With one
+ * mode per aspect there is no rule — there is nowhere to write the contradiction
+ * down. The generator still checks it, because it is public and pure.
+ *
+ * `off` is only offered where the absence is a state a document can actually
+ * hold, which is animation and nothing else; `SurpriseExcludes` in
+ * `surprise/generate.ts` is where that argument is written out in full, and this
+ * file reads {@link EXCLUDABLE_KEYS} rather than restating it.
  */
 
-import type { SurpriseLocks } from "../../surprise";
+import type { SurpriseExcludes, SurpriseLocks } from "../../surprise";
+import type { UiConceptId } from "../help";
 
 /** Where the chaos slider starts (F-SM-07). */
 export const DEFAULT_CHAOS = 0.35;
@@ -23,11 +47,48 @@ export const DEFAULT_CHAOS = 0.35;
 /** The slider's quantum. Coarse enough that the number reads as a setting. */
 export const CHAOS_STEP = 0.05;
 
-/** The four things that lock independently (F-SM-06), in the order they are shown. */
-export const LOCK_KEYS = ["palette", "stack", "params", "animation"] as const;
-export type LockKey = (typeof LOCK_KEYS)[number];
+/**
+ * The four things a surprise decides independently (F-SM-06), in panel order.
+ *
+ * The same four keys `SurpriseLocks` carries, because an aspect *is* what a lock
+ * locks — naming them twice is how the two lists drift apart.
+ */
+export const ASPECT_KEYS = ["palette", "stack", "params", "animation"] as const;
+export type AspectKey = (typeof ASPECT_KEYS)[number];
 
-export function lockLabel(key: LockKey): string {
+/**
+ * What a surprise does with one aspect.
+ *
+ * - `reroll` — make a new one on every press. The default, and what the feature
+ *   is for.
+ * - `keep` — the lock (F-SM-06): the next press leaves this one alone.
+ * - `off` — the exclude: do not produce it at all.
+ */
+export type AspectMode = "reroll" | "keep" | "off";
+
+/**
+ * The aspects that have an `off`.
+ *
+ * One, and `surprise/generate.ts`'s {@link SurpriseExcludes} is where the reason
+ * lives: an exclude is only offerable where the absence is a state a document
+ * can hold, and `bindings: []` is the only one of the four that is. A palette
+ * with no colours is refused by the loader and by the GPU; an empty stack is
+ * Surprise Me doing nothing; a node with no parameters does not exist. Offering
+ * an `off` there would be three controls that either lie or do nothing.
+ */
+export const EXCLUDABLE_KEYS = ["animation"] as const;
+export type ExcludeKey = (typeof EXCLUDABLE_KEYS)[number];
+
+export function isExcludable(key: AspectKey): key is ExcludeKey {
+  return (EXCLUDABLE_KEYS as readonly AspectKey[]).includes(key);
+}
+
+/** The modes this aspect offers, in the order the panel shows them. */
+export function modesFor(key: AspectKey): readonly AspectMode[] {
+  return isExcludable(key) ? ["reroll", "keep", "off"] : ["reroll", "keep"];
+}
+
+export function aspectLabel(key: AspectKey): string {
   switch (key) {
     case "palette":
       return "palette";
@@ -40,25 +101,137 @@ export function lockLabel(key: LockKey): string {
   }
 }
 
-export function lockHint(key: LockKey): string {
-  switch (key) {
-    case "palette":
-      return "Keep this palette. A liked palette survives fifty stack rerolls.";
-    case "stack":
-      return "Keep these effects and their order. Parameters still reroll unless they are locked too.";
-    case "params":
-      return "Keep every parameter. With the stack unlocked, new effects arrive at their defaults — there is nothing of theirs to keep.";
-    case "animation":
-      return "Keep the modulator bindings. Bindings whose node the new stack does not contain are dropped.";
+export function modeLabel(mode: AspectMode): string {
+  switch (mode) {
+    case "reroll":
+      return "reroll";
+    case "keep":
+      return "keep";
+    case "off":
+      return "off";
   }
 }
 
-export function toggleLock(locks: SurpriseLocks, key: LockKey): SurpriseLocks {
-  return { ...locks, [key]: !locks[key] };
+/**
+ * One line saying what this button will do, in the words a person would use.
+ *
+ * Shown on the control itself, so the answer to "what does this mean" is where
+ * the question is asked. The longer form — what keeping and leaving out are, in
+ * general — is contextual help (F-UI-13) and lives in `ui/help/concepts.ts`, so
+ * there is one copy of each and this file does not restate it.
+ */
+export function modeHint(key: AspectKey, mode: AspectMode): string {
+  // `off` is answered first and for the one aspect that has it, rather than
+  // falling through a ternary that would quietly hand back the `reroll` line for
+  // a state that does not exist. A wrong sentence on a control is worse than a
+  // stack trace nobody can reach.
+  if (mode === "off") {
+    if (!isExcludable(key)) throw noOffError(key);
+    return "Leave animation out entirely. Nothing moves, and the timeline has no tracks.";
+  }
+  switch (key) {
+    case "palette":
+      return mode === "keep"
+        ? "Keep this palette. A liked palette survives fifty stack rerolls."
+        : "Make a new palette every time you press Surprise.";
+    case "stack":
+      return mode === "keep"
+        ? "Keep these effects and their order. Parameters still reroll unless they are kept too."
+        : "Pick new effects, and a new order for them, every time you press Surprise.";
+    case "params":
+      return mode === "keep"
+        ? "Keep every parameter. With the stack rerolling, new effects arrive at their defaults — there is nothing of theirs to keep."
+        : "Draw new values for every parameter every time you press Surprise.";
+    case "animation":
+      return mode === "keep"
+        ? // A reroll re-uses the node ids, so "the node is gone" is not the whole
+          // rule and saying it would be a promise the generator does not keep: a
+          // binding is also dropped when the effect that inherited its id has no
+          // such parameter. `surprise/animation.ts` explains why.
+          "Keep the movement you have. A binding the new stack cannot carry — its node is gone, or the effect that took its place has no such parameter — is dropped."
+        : "Set a few parameters moving every time you press Surprise.";
+  }
 }
 
-export function lockedCount(locks: SurpriseLocks): number {
-  return LOCK_KEYS.filter((key) => locks[key]).length;
+/**
+ * The contextual-help article each mode points at (F-UI-13).
+ *
+ * Here rather than spelled out at the call site, so the mode list and the
+ * articles are checked against each other by the type system and by one test —
+ * a `data-help` naming a concept nobody wrote is a control that opens nothing,
+ * and `parseHelpToken` would only find out at hover time.
+ *
+ * `reroll` reaches the seed article on purpose: rerolling is what the seed
+ * decides, and that article is where the three modes are already named.
+ */
+export function modeConcept(mode: AspectMode): UiConceptId {
+  switch (mode) {
+    case "reroll":
+      return "surprise-seed";
+    case "keep":
+      return "surprise-keep";
+    case "off":
+      return "surprise-off";
+  }
+}
+
+/**
+ * The one refusal both {@link modeHint} and {@link withAspectMode} need.
+ *
+ * Written once so the reason a person reads in a stack trace is the reason this
+ * file actually holds, rather than two paraphrases of it.
+ */
+function noOffError(key: AspectKey): Error {
+  return new Error(
+    `"${key}" cannot be turned off: a document has no state in which it is absent, so there would be nothing to generate instead`,
+  );
+}
+
+/** The locks and the excludes together — one mode per aspect, seen two ways. */
+export interface AspectState {
+  readonly locks: SurpriseLocks;
+  readonly excludes: SurpriseExcludes;
+}
+
+/** Which of the three states this aspect is in. */
+export function aspectMode(state: AspectState, key: AspectKey): AspectMode {
+  if (isExcludable(key) && state.excludes[key]) return "off";
+  return state.locks[key] ? "keep" : "reroll";
+}
+
+/**
+ * Put one aspect into one mode.
+ *
+ * Both fields are written together, which is what makes "kept and excluded"
+ * unrepresentable rather than merely forbidden: there is no sequence of calls
+ * that leaves an aspect in two states.
+ *
+ * @throws when asked for `off` on an aspect that has none. Unreachable through
+ * the panel — {@link modesFor} does not offer the button — so reaching it means
+ * a caller invented a mode the document could not hold, and that is a defect
+ * worth a stack trace rather than a silent no-op.
+ */
+export function withAspectMode(
+  state: AspectState,
+  key: AspectKey,
+  mode: AspectMode,
+): AspectState {
+  if (mode === "off") {
+    if (!isExcludable(key)) throw noOffError(key);
+    return {
+      locks: { ...state.locks, [key]: false },
+      excludes: { ...state.excludes, [key]: true },
+    };
+  }
+  return {
+    locks: { ...state.locks, [key]: mode === "keep" },
+    excludes: isExcludable(key) ? { ...state.excludes, [key]: false } : state.excludes,
+  };
+}
+
+/** How many aspects the next press will leave alone. */
+export function keptCount(locks: SurpriseLocks): number {
+  return ASPECT_KEYS.filter((key) => locks[key]).length;
 }
 
 /** Clamp and snap the chaos slider. Out-of-range input is a caller bug, not a value. */

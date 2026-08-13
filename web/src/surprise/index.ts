@@ -2,20 +2,20 @@
  * Surprise Me — F-SM-01 through F-SM-12.
  *
  * Generates a complete random document: palette, stack composition, node order,
- * every parameter, node seeds and (once the modulator core exists) animation
- * bindings. It is a first-class feature rather than a toy, and everything in
- * here is pure: it reads the node registry, draws from a seeded PCG32, and emits
- * a `.dork` document. It never touches a pixel, a device or the DOM.
+ * every parameter, node seeds and animation bindings. It is a first-class
+ * feature rather than a toy, and everything in here is pure: it reads the node
+ * registry, draws from a seeded PCG32, and emits a `.dork` document. It never
+ * touches a pixel, a device or the DOM.
  *
  * ```ts
- * import { decidePalette, generateSurprise, mintSeed, NO_LOCKS } from "../surprise";
+ * import { decidePalette, generateSurprise, mintSeed, NO_EXCLUDES, NO_LOCKS } from "../surprise";
  *
  * const seed = mintSeed();                       // the one unseeded draw
  * const decision = decidePalette(seed, { library });
  * const palette = await resolve(decision);       // extraction needs the image
  * const { document, summary } = generateSurprise({
- *   seed, registry, chaos: 0.35, locks: NO_LOCKS,
- *   base: store.document, palette, animate: false,
+ *   seed, registry, chaos: 0.35, locks: NO_LOCKS, excludes: NO_EXCLUDES,
+ *   base: store.document, palette, animate: true,
  * });
  * store.loadDocument(document, "Surprise Me");
  * ```
@@ -31,7 +31,8 @@
  * - `params.ts`     a node's parameters, one stream per key (F-SM-04).
  * - `palette.ts`    the three palette modes (F-SM-05).
  * - `animation.ts`  modulator bindings (F-SM-09), and what it assumes.
- * - `generate.ts`   the document, the locks (F-SM-06), per-node reroll (F-SM-08).
+ * - `generate.ts`   the document, the locks (F-SM-06), the excludes, per-node
+ *                   reroll (F-SM-08).
  * - `history.ts`    the last N surprises (F-SM-10).
  *
  * The UI half — the button, the panel, the shortcut, the thumbnails — is
@@ -48,10 +49,12 @@ export {
 } from "./animation";
 
 export {
+  NO_EXCLUDES,
   NO_LOCKS,
   SurpriseError,
   generateSurprise,
   rerollNodeParams,
+  type SurpriseExcludes,
   type SurpriseLocks,
   type SurpriseRequest,
   type SurpriseResult,
