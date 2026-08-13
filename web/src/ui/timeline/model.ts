@@ -302,7 +302,17 @@ export function reduce(
       // dropped rather than silently ignored downstream: one track per
       // parameter is the rule the id encodes.
       const kept = keyframeTracks.filter((track) => !taken.has(track.id));
-      return { ...state, tracks: [...adopted, ...kept], refusal: null };
+      const tracks = [...adopted, ...kept];
+      // Playing must imply there is something to play. Adopting a document with
+      // no bindings — Surprise Me with animation off is the usual way to get
+      // one — used to leave the transport running over an empty track list: the
+      // clock kept advancing and the render pump kept redrawing frame t, so a
+      // freshly generated document was overwritten a moment after it appeared
+      // and the whole generator looked broken. The pause control was no help
+      // because the panel renders its empty state at zero tracks, so there was
+      // nothing left to press.
+      const playing = tracks.length === 0 ? false : state.playing;
+      return { ...state, tracks, playing, refusal: null };
     }
 
     case "bind": {
@@ -513,6 +523,11 @@ export function reduce(
 
     case "set-playing":
       if (state.playing === action.playing) return state;
+      // The same invariant from the other side: nothing to play, nothing to
+      // start. Silent rather than a refusal — the transport is not reachable at
+      // zero tracks, so arriving here means a caller asked on the user's behalf,
+      // and telling them a control they never touched was rejected is noise.
+      if (action.playing && state.tracks.length === 0) return state;
       return { ...state, playing: action.playing };
 
     case "set-speed":

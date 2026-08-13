@@ -228,6 +228,42 @@ describe("following the document", () => {
     });
   });
 
+  it("stops the transport when a document brings no bindings", () => {
+    // The reported bug. Surprise Me with animation off emits a document with no
+    // bindings; adopting it left `playing` true over an empty track list, so the
+    // clock kept advancing and the render pump kept redrawing frame t — a newly
+    // generated document was overwritten a moment after it appeared, and the
+    // generator looked broken rather than the transport looking stuck. There was
+    // no pause button to press either: the panel renders its empty state at zero
+    // tracks.
+    const one: readonly Binding[] = [
+      {
+        nodeId: "plain",
+        param: "gain",
+        shape: "sine",
+        amount: 1,
+        cyclesPerLoop: 1,
+        phase: 0,
+        bipolar: true,
+      },
+    ];
+    const playing = reduce(
+      reduce(EMPTY_TIMELINE, { kind: "adopt-bindings", bindings: one }, N),
+      { kind: "set-playing", playing: true },
+      N,
+    );
+    expect(playing.playing).toBe(true);
+
+    const emptied = reduce(playing, { kind: "adopt-bindings", bindings: [] }, N);
+    expect(emptied.tracks).toHaveLength(0);
+    expect(emptied.playing).toBe(false);
+  });
+
+  it("refuses to start playing with nothing to play", () => {
+    const state = reduce(EMPTY_TIMELINE, { kind: "set-playing", playing: true }, N);
+    expect(state.playing).toBe(false);
+  });
+
   it("keeps keyframe tracks the incoming bindings do not claim", () => {
     const withKeys = apply(EMPTY_TIMELINE, bindSpread);
     const state = reduce(
