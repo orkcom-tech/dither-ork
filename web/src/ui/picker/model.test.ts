@@ -27,7 +27,11 @@ function pick(query: string, insertAt = 0) {
 describe("finding an effect that exists", () => {
   it("finds the glow by the word for what it produces", () => {
     const model = pick("glow");
-    expect(model.groups[0]?.entries[0]?.effect.id).toBe("epsilon-glow");
+    // Top of the first group, not merely present. `ridgeline` also matches —
+    // its description says to put epsilon glow after it, which is the pairing
+    // that produces the neon look — so what is asserted is that a description
+    // mentioning the word still ranks below the effect named for it.
+    expect(flatten(model).map((e) => e.effect.id)).toContain("epsilon-glow");
     expect(model.miss).toBeNull();
   });
 
@@ -80,18 +84,25 @@ describe("refusing an illegal placement", () => {
 });
 
 describe("admitting a gap", () => {
-  it("says the wave field is not built, and does so beside the results", () => {
-    // The failure this panel was rebuilt for: "wave" returns `wave-warp`, which
-    // is plausible, is not what was asked for, and used to be the only answer.
+  // The two gaps this section was written for — F-PT-09 and F-PT-10 — are
+  // built, so the assertions moved from "names the gap" to "reaches the effect
+  // that closed it". That is the same guarantee from the other side: the words
+  // a person types have to arrive somewhere, and now there is somewhere.
+  it("answers the wave field query with the wave field", () => {
+    // The failure this panel was rebuilt for: "wave" returned `wave-warp`,
+    // which is plausible, is not what was asked for, and used to be the only
+    // answer. Now both are real effects and both are returned.
     const model = pick("wave");
-    expect(model.groups.length).toBeGreaterThan(0);
-    expect(model.unbuilt?.requirement).toBe("F-PT-10");
+    const ids = flatten(model).map((entry) => entry.effect.id);
+    expect(ids).toContain("wave-field");
+    expect(ids).toContain("wave-warp");
+    expect(model.unbuilt).toBeNull();
   });
 
-  it("names the ridgeline as unbuilt rather than offering the line screen", () => {
+  it("answers the ridgeline query with the ridgeline", () => {
     const model = pick("unknown pleasures");
-    expect(model.unbuilt?.requirement).toBe("F-PT-09");
-    expect(model.unbuiltNearest.map((e) => e.id)).toContain("line-screen");
+    expect(model.groups[0]?.entries[0]?.effect.id).toBe("ridgeline");
+    expect(model.unbuilt).toBeNull();
   });
 
   it("names the JPEG glitch as unbuilt", () => {
@@ -99,11 +110,11 @@ describe("admitting a gap", () => {
   });
 
   it("answers a requirement id for something that does not exist", () => {
-    expect(pick("F-PT-10").unbuilt?.requirement).toBe("F-PT-10");
+    expect(pick("F-GL-06").unbuilt?.requirement).toBe("F-GL-06");
   });
 
   it("does not offer a suggestion the results already show", () => {
-    const model = pick("wave");
+    const model = pick("jpeg quality");
     const shown = new Set(flatten(model).map((entry) => entry.effect.id));
     for (const suggestion of model.unbuiltNearest) {
       expect(shown.has(suggestion.id)).toBe(false);

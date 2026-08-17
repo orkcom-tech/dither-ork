@@ -18,7 +18,7 @@
  * without it being edited, and an effect that stops being discovered takes the
  * count down, which `run.mjs` refuses.
  *
- * ## Two parameter sets per effect
+ * ## Two parameter sets per effect, and a third where two are not enough
  *
  * **Defaults** pin what the properties panel opens with. **Surprise** pins the
  * far end of each parameter's declared surprise range (F-SM-04). Both are needed
@@ -33,6 +33,13 @@
  * Both are derived mechanically from the descriptor, so neither needs a per-effect
  * decision and neither goes stale when a default moves — it fails the comparison,
  * which is the moment to look at the picture and re-bless.
+ *
+ * For the five effects in the first bullet that is still only *one* real
+ * reference each, so they get an **engaged** set as well: a written-down,
+ * validated parameter set at which the shader does something. See
+ * {@link ENGAGED_PARAMS} for why that one cannot be derived, and `vacuous()` in
+ * `run.mjs` for the check that keeps the list of five from going stale in either
+ * direction.
  *
  * ## Scheduling goes through `prepareNodePasses`, not through this file
  *
@@ -92,6 +99,7 @@ import {
   defaultParams,
   loadEffectRegistry,
   loadGpuEffects,
+  validateParams,
   type EffectRegistry,
   type GpuEffectResolver,
 } from "../../src/registry";
@@ -252,9 +260,121 @@ const SUPPLIED_SOURCE: Readonly<Record<string, () => Uint8Array>> = {
   },
 };
 
-export type VariantId = "defaults" | "surprise";
+/**
+ * A second non-default parameter set, for the effects whose defaults are the
+ * identity.
+ *
+ * ## The hole this closes
+ *
+ * Five effects in the catalogue open on the identity — `brightness-contrast`,
+ * `channel-swap`, `curves`, `hsl` and `levels` are corrections before they are
+ * looks, and a correction that altered the picture the moment it was added could
+ * not be added without committing to a change. That is the right default and it
+ * makes their `defaults` reference **byte-identical to the source fixture**: the
+ * stored image records the fixture, not the shader, and a rewritten shader that
+ * never runs would still match it forever.
+ *
+ * The {@link surpriseParams} variant caught this only in aggregate — `vacuous()`
+ * in `run.mjs` judged the two variants together, so an effect that did nothing at
+ * defaults passed on the strength of its surprise render. Half of the coverage of
+ * those five was decorative, and nothing said so.
+ *
+ * So each of them gets a **third** render at a set that does something, and
+ * `run.mjs` now judges each variant on its own: an effect that is the identity at
+ * defaults and has no entry here fails the run, and an entry here whose effect is
+ * *not* the identity at defaults fails it too. Both directions, because the
+ * failure this exists to prevent is a stale declaration nobody re-reads.
+ *
+ * The `defaults` reference stays. It is not worthless — it pins the claim that
+ * the opening state really is a no-op, so a default that drifts off the identity
+ * shows up as an image diff on the one render where that is the whole point.
+ *
+ * ## Why these are written down rather than derived
+ *
+ * {@link surpriseParams} is derived, and that is right for it: "the far end of
+ * every declared range" is a rule, and a rule needs no maintenance. There is no
+ * corresponding rule here. The interesting second setting for a channel swap is a
+ * *rotation*, which no arithmetic on an enum's declared options produces — taking
+ * the last non-default option of each gives red, green and blue all reading
+ * alpha, which on an opaque fixture is a white rectangle. Deriving it would
+ * produce a reference as empty as the one being replaced.
+ *
+ * What keeps these honest instead of merely asserted:
+ *
+ * - Every value is inside the parameter's **declared surprise range**, so each is
+ *   a picture the product can really make, and each is checked against the
+ *   descriptor with the application's own {@link validateParams} — a key that
+ *   stops existing, or a value that leaves the legal bounds, fails the run at
+ *   {@link prepare} instead of rendering something coerced.
+ * - Each moves the parameters the surprise variant leaves at, or pushes to the
+ *   opposite end of, its range. Between the two, both ends of every range are
+ *   visited.
+ * - `run.mjs` refuses an `engaged` render that does not move the frame, and one
+ *   that comes out identical to that effect's `surprise` render.
+ */
+const ENGAGED_PARAMS: Readonly<Record<string, Readonly<Record<string, ParameterValue>>>> = {
+  // Surprise pushes all three to the far end: -1.5 stops, contrast 2, -0.15
+  // brightness. This is the other side of each — a lift rather than a crush, and
+  // a gain *below* 1, which is the half of the contrast control the surprise
+  // render never reaches.
+  "brightness-contrast": { exposure: 0.75, contrast: 0.75, brightness: 0.075 },
 
-const VARIANTS: readonly VariantId[] = ["defaults", "surprise"];
+  // A true cyclic rotation, red<-blue<-green<-red, with alpha left on alpha as
+  // the descriptor recommends. Surprise picks the first non-default option of
+  // each selector, which is the non-bijective map (g, r, r) plus alpha read from
+  // red; this is the bijective one, and it is the case the effect is named for.
+  "channel-swap": { sourceR: "b", sourceG: "r", sourceB: "g", sourceA: "a" },
+
+  // `s-curve`, the archetype the generator weights highest, un-jittered.
+  // Surprise measures "furthest from the diagonal" and therefore always lands on
+  // `invert`, whose picture is F-SP-08's rather than this node's: it records the
+  // table upload and the sampling, but not a monotonic grade. Per-channel mode,
+  // because the shape is what this variant is for and the mode is what surprise
+  // varies.
+  curves: {
+    curve: [
+      { x: 0, y: 0 },
+      { x: 0.25, y: 0.14 },
+      { x: 0.5, y: 0.5 },
+      { x: 0.75, y: 0.86 },
+      { x: 1, y: 1 },
+    ],
+    mode: "per-channel",
+  },
+
+  // A third of a turn, and this is the only reference in the set that records
+  // the rotation at all: hue is declared over its whole legal range [0, 1], so
+  // "the end furthest from the default" is 1.0 — a *full* turn, which is the
+  // identity on a wrapping axis. The surprise render moves the frame through
+  // saturation and lightness while its hue rotation does nothing. Saturation
+  // goes down here where surprise pushes it up.
+  hsl: { hue: 0.335, saturation: 0.6, lightness: 0.075 },
+
+  // A straight contrast stretch with a *darkening* gamma, per channel. Surprise
+  // takes gamma to 2 and the output pair to a lifted, compressed 0.2..0.8 in luma
+  // mode; this is the opposite end of gamma with the output range left full, so
+  // the two between them cover both directions of the midtone bend and both
+  // modes.
+  levels: {
+    inputBlack: 0.1,
+    inputWhite: 0.9,
+    gamma: 0.5,
+    outputBlack: 0,
+    outputWhite: 1,
+    mode: "per-channel",
+  },
+};
+
+export type VariantId = "defaults" | "surprise" | "engaged";
+
+/**
+ * Order of the variants in the plan.
+ *
+ * `engaged` is planned only for the effects {@link ENGAGED_PARAMS} names; the
+ * other two are planned for everything. See {@link ENGAGED_PARAMS} for why that
+ * is not a rule the harness can derive.
+ */
+const VARIANTS: readonly VariantId[] = ["defaults", "surprise", "engaged"];
 
 export interface PlannedRender {
   readonly effect: string;
@@ -401,6 +521,43 @@ function surpriseParams(descriptor: EffectDescriptor): Record<string, ParameterV
     }
   }
   return params;
+}
+
+/**
+ * The parameter set for one planned variant, or `undefined` when this effect has
+ * no such variant.
+ *
+ * Only `engaged` can be absent, and only because {@link ENGAGED_PARAMS} is a
+ * statement about five specific effects. The set it produces is the effect's
+ * **full** defaults with the named keys overridden, so a parameter added to a
+ * descriptor later arrives at its default here rather than missing.
+ *
+ * Validated with the application's own {@link validateParams} rather than trusted.
+ * `coerceParams` would have been the wrong call: it repairs a bad set and reports
+ * what it changed, which is right for a document loaded off disk and wrong here,
+ * where a value that needs repairing means the table has gone stale and the
+ * reference about to be blessed is not the picture the comment describes.
+ */
+function variantParams(
+  descriptor: EffectDescriptor,
+  variant: VariantId,
+): Record<string, ParameterValue> | undefined {
+  if (variant === "defaults") return { ...defaultParams(descriptor) };
+  if (variant === "surprise") return surpriseParams(descriptor);
+
+  const overrides = ENGAGED_PARAMS[descriptor.id];
+  if (overrides === undefined) return undefined;
+
+  const values: Record<string, ParameterValue> = { ...defaultParams(descriptor), ...overrides };
+  const validation = validateParams(descriptor, values);
+  if (!validation.ok) {
+    throw new Error(
+      `the ENGAGED_PARAMS entry for "${descriptor.id}" in web/test/gpu-golden/harness.ts is not a ` +
+        `valid parameter set for it:\n` +
+        validation.issues.map((problem) => `  ${problem.key}: ${problem.message}`).join("\n"),
+    );
+  }
+  return values;
 }
 
 /** Build an effect's passes, fetching whatever build-time data it declares. */
@@ -567,10 +724,25 @@ async function initialise(): Promise<HarnessInfo> {
   const planDescriptors: EffectDescriptor[] = [];
   const effects: GpuEffect[] = [];
 
+  // Before anything is rendered: an entry naming an effect the registry does not
+  // report as a GPU effect is a leftover from a rename, and the render loop would
+  // never reach it to say so. The reference tree would keep the orphan and
+  // `run.mjs` would blame the tree.
+  const gpuIds = new Set(descriptors.map((descriptor) => descriptor.id));
+  for (const id of Object.keys(ENGAGED_PARAMS)) {
+    if (gpuIds.has(id)) continue;
+    throw new Error(
+      `ENGAGED_PARAMS in web/test/gpu-golden/harness.ts names "${id}", which the registry does ` +
+        `not report as a GPU effect. Remove the entry, or restore the effect.`,
+    );
+  }
+
   for (const descriptor of descriptors) {
     const gpu = buildEffect(resolver, descriptor.id);
     await layer.compiler.compile(descriptor, gpu);
     for (const variant of VARIANTS) {
+      const values = variantParams(descriptor, variant);
+      if (values === undefined) continue;
       plan.push({
         effect: descriptor.id,
         name: descriptor.name,
@@ -580,11 +752,7 @@ async function initialise(): Promise<HarnessInfo> {
         passes: gpu.passes.length,
         quantized: descriptor.requiresIndexMap,
       });
-      params.push(
-        variant === "defaults"
-          ? { ...defaultParams(descriptor) }
-          : surpriseParams(descriptor),
-      );
+      params.push(values);
       planDescriptors.push(descriptor);
       effects.push(gpu);
     }

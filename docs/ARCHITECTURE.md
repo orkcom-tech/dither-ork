@@ -1,15 +1,15 @@
 # Architecture
 
 dither-ork is a browser application that reproduces the Dither Boy feature set
-for still images: the spec's 61 named effects in a stackable reorderable
+for still images: the spec's 63 named effects in a stackable reorderable
 pipeline, full colour with palette extraction, CMYK halftone, timeline animation
 with live playback, batch processing, and PNG / JPEG / SVG / GIF / MP4 export.
 
-**60 of those 61 are built and registered, plus 7 of the 8 preprocessing nodes
-(F-PP), plus four the spec does not name at all: 71 effects in the catalogue.**
-By family: 15 error diffusion, 6 ordered, 11 pattern, 16 glitch, 17 special, 6
-preprocess. By execution: 15 WASM, 56 WebGPU. By slot: 3 source, 18 preprocess,
-29 dither, 21 postprocess. One of the 61 is absent on purpose and it is recorded
+**62 of those 63 are built and registered, plus 7 of the 8 preprocessing nodes
+(F-PP), plus four the spec does not name at all: 73 effects in the catalogue.**
+By family: 15 error diffusion, 6 ordered, 13 pattern, 16 glitch, 17 special, 6
+preprocess. By execution: 15 WASM, 58 WebGPU. By slot: 3 source, 18 preprocess,
+31 dither, 21 postprocess. One of the 63 is absent on purpose and it is recorded
 where the decision was made — F-GL-06 JPEG glitch, which needs an encoder and
 therefore an execution kind that does not exist. The one remaining F-PP gap is
 F-PP-08, masking, and it is now **partly** built: a mask is a second image edge,
@@ -50,7 +50,7 @@ for exactly that reason, and adding it is a decision about the execution model
 rather than one more shader.
 
 - **15 serial kernels** run on the CPU in WebAssembly, compiled from Rust.
-- **53 parallel effects** run on the GPU as WebGPU compute passes.
+- **58 parallel effects** run on the GPU as WebGPU compute passes.
 - **The boundary between them is the performance ceiling.** Each serial node
   costs a GPU readback plus an upload. Two mitigations, both also correct for
   the look: consecutive parallel nodes are coalesced into a single GPU pass, and
@@ -189,7 +189,7 @@ kept in the same order and `mask.test.ts` pins the ordinals and channels.
 ### What is built, and what is not
 
 The engine takes any number of input ports. **The catalogue declares almost
-none.** Of 71 effects, every one has a single `image` input and exactly one —
+none.** Of 73 effects, every one has a single `image` input and exactly one —
 `feedback` — declares a second port, which is its own previous frame. The `layer`
 and `displace` roles are defined, documented and unused.
 
@@ -357,25 +357,70 @@ A noise field animated on `evolve` — the third coordinate of a 3D field, which
 is why the fields are 3D — passes F-AN-06's seam hash: *the loop closes, frame
 48 is frame 0*, measured in the browser.
 
-### F-INF-01, and which half of it exists
+### F-INF-01, and both halves of it
 
 `gpu/sdf.ts` is the shared signed-distance-field contract F-INF-01 asks for: one
 `f32` per pixel, **distance to the nearest boundary in working-resolution
-texels, negative inside**, plus the channel layout for carrying a field in the
-ordinary colour buffer and the canonical WGSL for the analytic primitives.
-`gen-shape` uses it, and `sdf.test.ts` diffs the fenced copy in every shader
+texels, negative inside**, plus the gradient of that signed distance, the channel
+layout for carrying a field in the ordinary colour buffer, and the canonical WGSL
+for **both producers**. `sdf.test.ts` diffs the fenced copies in every shader
 against the canonical text — which is the first time `CONVENTIONS.md`'s "so the
 copies can be diffed mechanically" is actually a check.
 
-**The analytic half is built; the transform half is not.** A field can come from
-parameters (closed form, exact, no extra passes) or from the picture (the
-distance to wherever the index map changes value, which needs a jump flood over
-a scratch *texture* — a role `ScratchSize` does not have). Outline (F-SP-10) and
-dilate/erode (F-SP-11) ship reading the index map directly and are exact for a
-one-texel neighbourhood; what they would gain from a field is a width in pixels
-rather than in taps, and what F-PT-10 needs is the transform and nothing less.
-Consumers are written against the value, not against where it came from, so the
-two producers are interchangeable when the second arrives.
+**Both halves are now built.** A field can come from parameters (`SDF_WGSL`:
+closed form, exact, no extra passes — `gen-shape` uses it) or **from the
+picture** (`SDF_TRANSFORM_WGSL`: a subject mask, then a jump flood, which is the
+construction F-INF-01 names — `wave-field` uses it).
+
+This section used to say the transform "needs a scratch *texture* — a role
+`ScratchSize` does not have", and that sentence is what kept it unbuilt for a
+phase. It was wrong. A jump flood carries a packed seed **coordinate** per texel
+rather than a colour, and a `u32` in a storage buffer holds one exactly: no
+format, no filtering, and no ping-pong of textures the scheduler would have to
+know about. The missing role was never a texture; it was writing down that the
+seed is an integer.
+
+The schedule is eighteen passes, built by `sdfTransformPasses` and put in front
+of the consumer's own: **two to smooth the mask, one to seed its boundary,
+fifteen to flood.** Three of those deserve their reasons stated here because each
+was measured rather than assumed.
+
+- **The smoothing is not optional.** A per-texel luminance threshold on a
+  photograph is not a subject; it is a few hundred islands, each with its own
+  closed boundary and its own field around it. A wave field over that comes out
+  as fragments following the jacket seams. The mask is therefore box-averaged
+  along each axis first — a running sum per line, so it is O(1) per texel at any
+  radius — and the radius is a control whose zero is the identity.
+- **The flood's step is computed from the extent, not baked into the pass.** A
+  pass list is static, so the level count has to cover the largest extent this
+  build can reach; deriving `longest >> (level + 1)` in the shader means no pass
+  is ever a no-op copy at preview resolution, and levels past log₂(extent) become
+  JFA+1 refinement rounds instead of waste.
+- **Fifteen levels, and the count must stay odd.** Even levels read buffer A and
+  write B, so an odd count leaves the answer in B — which is the buffer
+  `sdf_field` reads. An even one would leave a field that is one round stale
+  everywhere and right nowhere; `sdfTransformPasses` asserts it.
+
+**A jump flood is approximate and that is stated where it is used.** Its error is
+a few texels taking a seed that is not quite their nearest; it is deterministic,
+because every pass reads one buffer and writes the other, so nothing observes
+another invocation's write. The exact alternative is a Felzenszwalb envelope scan
+per axis — two passes instead of fifteen — and it is not the construction the
+requirement names, so it is not what is built. Consumers read `sdf_field`, so
+swapping it later changes nothing above.
+
+**One source F-INF-01 names is not implemented: a selection over the index map.**
+A pass may bind `input-index` only if its effect declares `requiresIndexMap`, and
+that is a property of the whole effect rather than of one parameter, so offering
+it would make *every* consumer of the transform illegal in front of a dither —
+including a wave field over an unquantized photograph, which is the case the
+requirement was asked for. The cost is real and named in `gpu/sdf.ts`: a subject
+the same brightness as its background cannot be separated.
+
+Outline (F-SP-10) and dilate/erode (F-SP-11) still ship reading the index map
+directly and are exact for a one-texel neighbourhood; what they would gain from a
+field is a width in pixels rather than in taps, and the transform is now there
+for them to take.
 
 ## Data layout
 
@@ -867,13 +912,15 @@ of the page, not of the engine, and it is the page's next job.
 
 The list below is the strategy. What is built today: 157 Rust tests including
 golden images for all 15 registered diffusion kernels across four fixtures and
-two palettes, and the GIF encoder's own set; 1,893 TypeScript tests including the
+two palettes, and the GIF encoder's own set; 2,188 TypeScript tests including the
 catalogue test that runs the startup validator over the shipped descriptors and
 asserts the counts above, the `.dork` round trip, the document store and its
 history, the image intake, the animation core's clock, modulators, seam and
 plan, the timeline's keyframes and playback arithmetic, the batch queue and
 naming, the animated containers, and the pure halves of the viewport and every
-panel; and golden images for the parallel catalogue at two parameter sets each.
+panel; and 121 golden images for the parallel catalogue — two parameter sets for
+each of the 58 GPU effects, and a third for the five whose defaults are the
+identity.
 
 **What no automated test covers, and it is still the important gap:** nothing
 *automated* drives the assembled application. Every panel's model is unit-tested
@@ -914,15 +961,45 @@ it a check rather than a ritual:
 - **The plan is enumerated from the registry**, never listed. An effect added
   next week is rendered without the harness being edited; an effect that stops
   being discovered leaves its reference behind and the run fails on the orphan.
-- **Two parameter sets per effect** — the declared defaults, and the far end of
-  every declared surprise range. Defaults alone would record the identity for
-  the handful of effects that legitimately open as one; the surprise end alone
-  would leave unprotected the state most renders actually use.
-- **A vacuity check that runs in bless mode too.** An effect that returns its
-  input at both parameter sets, or that renders an almost black frame, fails the
-  run instead of having that output stored as the truth forever. It is the one
+- **Two parameter sets per effect, and a third where two are not enough** — the
+  declared defaults, and the far end of every declared surprise range. Defaults
+  alone would record the identity for the handful of effects that legitimately
+  open as one; the surprise end alone would leave unprotected the state most
+  renders actually use. Five effects — `brightness-contrast`, `channel-swap`,
+  `curves`, `hsl` and `levels` — are corrections before they are looks, so they
+  open on the identity and their `defaults` reference was byte-identical to the
+  source fixture: it recorded the fixture rather than the shader. Each now also
+  carries an **engaged** render at a written-down parameter set, `ENGAGED_PARAMS`
+  in `web/test/gpu-golden/harness.ts`. That table is the only per-effect
+  knowledge in the harness and it cannot be derived — the interesting second
+  setting for a channel swap is a *rotation*, which no arithmetic over an enum's
+  declared options produces.
+- **A vacuity check that runs in bless mode too, judged per variant.** An effect
+  that returns its input, or that renders an almost black frame, fails the run
+  instead of having that output stored as the truth forever. It is the one
   failure a golden set cannot otherwise catch, because it is the failure that
-  was present when the set was blessed.
+  was present when the set was blessed. It used to take the *best* of an
+  effect's variants, which is how the five identity references passed on the
+  strength of their surprise render; now every variant is judged on its own and
+  the legitimate identity is handled by being named. The check runs both ways:
+  an effect that is the identity at defaults and has no `engaged` entry fails,
+  and an `engaged` entry for an effect whose defaults are *not* the identity
+  fails as stale — because a declaration nobody re-reads is how the hole opened.
+
+**Two references are weak and the reason is geometric, not a defect.** The
+fixture is 100x76, and the surprise derivation pushes every parameter to the far
+end of its declared range — which for the two line-drawing effects means a period
+comparable to the frame. `ridgeline/surprise` runs at pitch 40 on a 76-pixel-tall
+fixture, so two rows fit; `wave-field/surprise` runs at wavelength 90 on a
+100-pixel-wide one, so barely one wavefront does, and both take `invert: true`,
+which makes the remaining ground white. Measured, 90.8% and 89.5% of those two
+frames sit in a single 1/255 luminance bucket. They are correct renders and they
+still move when the shader moves — 90% of pixels differ from the fixture — but a
+reader cannot tell a right wave field from a wrong one by looking at that image,
+so the diagnostic weight for both effects rests on their `defaults` reference.
+Not papered over: narrowing a declared surprise range to suit the fixture would
+change what Surprise Me produces in the product, which is not a decision the test
+harness gets to make, and widening the fixture would re-bless all 121 images.
 
 What remains outside CI is the proof page's own judgement: `web/src/main.ts`
 renders the catalogue and states per effect how much of the frame moved, what it

@@ -49,8 +49,13 @@ describe("the queries that failed before descriptions existed", () => {
     expect(ids("noise")).toContain("blue-noise");
   });
 
-  it("finds the wave effect from wave", () => {
-    expect(top("wave")).toBe("wave-warp");
+  it("finds both wave effects from wave", () => {
+    // There are two now. `wave-field` (F-PT-10) landed with `wave-warp` already
+    // in the catalogue, and the word is a whole-word name match on both, so
+    // asserting one of them at the top would be an assertion about the tie
+    // break rather than about search. What has to hold is that neither is
+    // buried.
+    expect(ids("wave")).toEqual(expect.arrayContaining(["wave-warp", "wave-field"]));
   });
 
   it("finds the CMYK separation node from halftone", () => {
@@ -112,7 +117,11 @@ describe("searchCatalogue reports a miss instead of returning nothing", () => {
     // descriptor to find and no unbuilt entry to report. A person typing "mask"
     // still gets CRT mask, which is a real effect, and that was always the
     // right answer for that word.
-    for (const query of ["jpeg", "unknown pleasures", "radio waves"]) {
+    //
+    // "unknown pleasures" and "radio waves" used to be here too and are not:
+    // F-PT-09 and F-PT-10 are built, so those queries now reach `ridgeline` and
+    // `wave-field`. That move is asserted below rather than merely deleted.
+    for (const query of ["jpeg"]) {
       const search = searchCatalogue(EFFECTS, query);
       expect(search.results, query).toEqual([]);
       expect(search.miss?.kind, query).toBe("unbuilt");
@@ -125,19 +134,26 @@ describe("searchCatalogue reports a miss instead of returning nothing", () => {
       return miss?.kind === "unbuilt" ? miss.feature.requirement : undefined;
     };
     expect(requirementFor("jpeg glitch")).toBe("F-GL-06");
-    expect(requirementFor("unknown pleasures")).toBe("F-PT-09");
-    expect(requirementFor("ridgeline")).toBe("F-PT-09");
-    expect(requirementFor("radio waves")).toBe("F-PT-10");
+  });
+
+  it("sends the queries that used to name a gap to the effect that closed it", () => {
+    // The other half of the unbuilt table's guarantee. An entry that becomes
+    // real must not merely stop being reported — the words a person types have
+    // to arrive somewhere, and the descriptor is where they moved to.
+    expect(top("unknown pleasures")).toBe("ridgeline");
+    expect(top("ridgeline")).toBe("ridgeline");
+    expect(top("radio waves")).toBe("wave-field");
+    expect(ids("flow around")).toContain("wave-field");
   });
 
   it("offers the nearest built effects alongside the gap", () => {
-    const miss = searchCatalogue(EFFECTS, "unknown pleasures").miss;
+    const miss = searchCatalogue(EFFECTS, "jpeg").miss;
     expect(miss?.kind).toBe("unbuilt");
     if (miss?.kind !== "unbuilt") return;
     expect(miss.nearest.map((e) => e.id)).toEqual([
-      "line-screen",
-      "wave-warp",
-      "row-displacement",
+      "bit-crush",
+      "block-shuffle",
+      "noise-burst",
     ]);
   });
 
@@ -156,9 +172,14 @@ describe("searchCatalogue reports a miss instead of returning nothing", () => {
   });
 
   it("says the filter is what hid the match, not the query", () => {
-    // "glow" matches epsilon-glow, which is a postprocess node; asking for it in
-    // the dither slot is a filter problem and retyping cannot fix it.
-    const search = searchCatalogue(EFFECTS, "glow", { slot: "dither" });
+    // "bloom" matches epsilon-glow, which is a postprocess node; asking for it
+    // in the dither slot is a filter problem and retyping cannot fix it.
+    //
+    // The query used to be "glow" and had to move: `ridgeline` is a dither-slot
+    // node whose description says to put epsilon glow after it, so "glow" now
+    // legitimately returns a result under that filter. That is the descriptions
+    // working, not the filter failing.
+    const search = searchCatalogue(EFFECTS, "bloom", { slot: "dither" });
     expect(search.miss?.kind).toBe("filtered-out");
     if (search.miss?.kind !== "filtered-out") return;
     expect(search.miss.nearest.map((e) => e.id)).toContain("epsilon-glow");
@@ -194,10 +215,10 @@ describe("describeMiss", () => {
       if (search.miss === null) continue;
       expect(describeMiss(search.miss, query).length, query).toBeGreaterThan(20);
     }
-    const filtered = searchCatalogue(EFFECTS, "glow", { slot: "dither" });
+    const filtered = searchCatalogue(EFFECTS, "bloom", { slot: "dither" });
     expect(filtered.miss).not.toBeNull();
     if (filtered.miss === null) return;
-    expect(describeMiss(filtered.miss, "glow")).toContain("filter");
+    expect(describeMiss(filtered.miss, "bloom")).toContain("filter");
   });
 });
 

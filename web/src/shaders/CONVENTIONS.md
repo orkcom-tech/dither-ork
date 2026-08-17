@@ -1,6 +1,6 @@
 # WGSL conventions
 
-56 of the catalogue's 71 effects run as WebGPU compute passes, and all 56 exist.
+58 of the catalogue's 73 effects run as WebGPU compute passes, and all 58 exist.
 They are rules rather than suggestions because the alternative is 53 shaders
 that each need to be read before they can be bound.
 
@@ -58,6 +58,18 @@ The blocks that exist, and what each one is:
 | `edge handling` | 4 | clamp / wrap / mirror for the displacement effects |
 | `bilinear fetch` | 2 | fractional sampling written out, since there is no sampler on this path |
 | `seeded hash` / `seeded hashing` / `integer hash` | 10 | a PCG-style integer hash plus `hash2`/`hash3`/`hash01` |
+| `analytic signed distance fields` | 1 | F-INF-01's closed-form primitives and their gradient |
+| `signed distance transform of the picture` | 1 | F-INF-01's other producer: subject mask, boundary seed, jump flood, and the read |
+
+The two SDF blocks are the ones with a real diff behind them:
+`web/src/gpu/sdf.ts` holds the canonical text and `sdf.test.ts` compares every
+fenced copy against it byte for byte, so "keep identical across shaders" is a
+check rather than a request. The transform block is also the only shared block
+that declares **entry points and bindings** rather than only functions — it
+claims bindings 6, 7 and 8, so a carrier's own scratch starts at 9, and it reads
+`params.sdf_source`, `params.sdf_threshold`, `params.sdf_invert` and
+`params.sdf_smooth` by name out of a struct it does not own. Build the offsets
+with `sdfTransformUniformFields` rather than by hand.
 
 **The hash is the one that drifted.** Those three fence names hold three
 different implementations — each self-consistent within its own group, plus a

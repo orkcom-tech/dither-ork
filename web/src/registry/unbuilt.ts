@@ -18,8 +18,8 @@
  * exist.
  *
  * The reasons are copied from where the decisions were made — the spec's own
- * F-PT-09 and F-PT-10 entries and the note at the top of
- * `registry/catalogue.test.ts` — rather than restated from memory.
+ * entries and the note at the top of `registry/catalogue.test.ts` — rather than
+ * restated from memory.
  */
 
 /** One named requirement the catalogue does not implement. */
@@ -32,8 +32,8 @@ export interface UnbuiltFeature {
   readonly summary: string;
   /**
    * Why it is not built. Stated, because "not yet" without a reason reads as an
-   * oversight, and three of these four are deliberate sequencing rather than
-   * something anyone forgot.
+   * oversight, and the entries that have left this table left it because their
+   * stated reason was checkable and turned out to be wrong.
    */
   readonly reason: string;
   /** What a person searching for this would type. Same rules as an effect's. */
@@ -70,54 +70,23 @@ export const UNBUILT_FEATURES: readonly UnbuiltFeature[] = [
     // picture by attacking how it is stored rather than what it looks like.
     nearest: ["bit-crush", "block-shuffle", "noise-burst"],
   },
-  {
-    requirement: "F-PT-09",
-    name: "Luminance-displaced line screen",
-    summary:
-      "Parallel lines whose displacement across their own run is driven by the image's brightness — the Unknown Pleasures ridgeline.",
-    reason:
-      "Nothing in the catalogue displaces by the picture. Row displacement offsets by a seed, wave warp offsets by a fixed geometric function, and line screen draws lines without moving them; the missing piece is exactly the one that makes the lines read as a contour of the image rather than as a texture over it, together with the hidden-line removal that makes them read as depth.",
-    keywords: [
-      "unknown pleasures",
-      "joy division",
-      "ridgeline",
-      "ridge",
-      "contour",
-      "terrain",
-      "topographic",
-      "elevation",
-      "displaced lines",
-      "luminance displacement",
-      "mountain",
-      "heightmap",
-      "oscilloscope",
-    ],
-    nearest: ["line-screen", "wave-warp", "row-displacement"],
-  },
-  {
-    requirement: "F-PT-10",
-    name: "Wave field with obstacle interaction",
-    summary:
-      "Waves emanating from a source that bend around the picture's subject, or are blocked by it and leave a shadow behind it.",
-    reason:
-      "It has to know where the subject is as a shape — how far every pixel is from it and in which direction — which is a signed distance field (F-INF-01). Half of that infrastructure now exists: web/src/gpu/sdf.ts fixes what a field is and ships the analytic primitives the Shape source draws from. The half this needs does not — a field transformed out of the picture rather than described by parameters, which is a jump flood over a scratch texture the pass vocabulary has no role for. Concentric rings and spiral are the geometric screens that already ship; they are radial patterns that take no account of what is in the picture at all.",
-    keywords: [
-      "radio waves",
-      "wave field",
-      "wavefront",
-      "diffraction",
-      "obstacle",
-      "flow around",
-      "shadow",
-      "occlusion",
-      "sonar",
-      "ripple around",
-      "interference",
-      "subject aware",
-    ],
-    nearest: ["concentric-rings", "wave-warp", "line-screen"],
-  },
 ];
+
+// F-PT-09 and F-PT-10 were here from the day the owner found the reference
+// images this catalogue could not reproduce. **Both are built** — `ridgeline`
+// and `wave-field` — so their entries are gone rather than reworded, which is
+// the rule this table's own test enforces: an entry that becomes real fails the
+// build rather than going on telling people a shipped effect does not exist.
+//
+// What made F-PT-10 possible was F-INF-01's second producer, and its stated
+// reason for being unbuilt turned out to be wrong rather than merely unfinished:
+// the entry here said a jump flood "needs a scratch texture the pass vocabulary
+// has no role for". A jump flood carries a packed seed *coordinate* per texel,
+// not a colour, and `ScratchSize` holds that exactly. See `web/src/gpu/sdf.ts`.
+//
+// The keywords both entries carried are now on the descriptors, so the queries
+// that used to reach this table — "unknown pleasures", "radio waves",
+// "ridgeline" — reach a real effect instead of an explanation.
 
 // F-PP-08, node masking, was here from phase 3 until multi-input landed. Its
 // stated reason — "a mask is a second image edge on the render graph, and the
@@ -161,8 +130,8 @@ export function unbuiltFor(
     ];
     let score = 0;
     for (const token of tokens) {
-      // A whole word beats being a fragment of one, so "wave" scores on the
-      // "wave field" keyword rather than tying with everything containing "ave".
+      // A whole word beats being a fragment of one, so "jpeg" scores on the
+      // "jpeg" keyword rather than tying with everything containing "peg".
       if (haystack.some((h) => h.split(" ").includes(token))) score += 2;
       else if (haystack.some((h) => h.includes(token))) score += 1;
     }

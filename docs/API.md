@@ -365,8 +365,8 @@ what F-GL-06 would cost.
 
 Totals: 15 `wasm`, 52 `gpu`; 18 preprocess, 29 dither, 20 postprocess.
 
-Four requirements the spec names have no descriptor, and **the application says
-so by name** rather than leaving a search to come back empty. They are declared
+One requirement the spec names has no descriptor, and **the application says so
+by name** rather than leaving a search to come back empty. It is declared
 in `web/src/registry/unbuilt.ts`, with the reason and the closest built
 alternatives, and `search.test.ts` asserts that none of them is a registered
 effect — so an entry that becomes real fails the build instead of going on
@@ -375,17 +375,21 @@ telling people a shipped effect does not exist:
 | Requirement | | Why not |
 | --- | --- | --- |
 | **F-GL-06** | JPEG glitch | Needs a JPEG encoder inside the render path, and therefore an execution kind that does not exist |
-| **F-PT-09** | Luminance-displaced line screen | Nothing in the catalogue displaces by the picture; the missing piece is that, plus hidden-line removal |
-| **F-PT-10** | Wave field with obstacle interaction | Needs a signed distance field — shared infrastructure (F-INF-01) that is not built |
 
 `registry/search.ts` consults that table only after the catalogue has returned
 nothing, and `describeMiss` writes the sentence — one implementation, so the
 picker, the hover help and the guide give the same account of the same miss.
 
-**F-SP-14** nearest-neighbour upscale was a fifth such gap and is now built: it
-is the other half of the F-PP-01 pair — internal resolution runs the middle of
-the stack small, nearest upscale brings the frame back to size with the chunk
-intact — which is what made it a pass rather than a resampling stage.
+Three entries have left the table by becoming real, which is the direction it is
+supposed to move in. **F-SP-14** nearest-neighbour upscale is the other half of
+the F-PP-01 pair — internal resolution runs the middle of the stack small,
+nearest upscale brings the frame back to size with the chunk intact — which is
+what made it a pass rather than a resampling stage. **F-PT-09** is `ridgeline`
+and **F-PT-10** is `wave-field`; the second needed F-INF-01's transform half,
+which is built now and is described in docs/ARCHITECTURE.md. The queries that
+used to reach the table — "unknown pleasures", "radio waves" — now reach an
+effect, and `search.test.ts` asserts that too rather than only asserting that
+they stopped being reported.
 
 The `preprocess` family holds F-PP-01 (internal resolution), F-PP-02
 (brightness/contrast), F-PP-03 (levels), F-PP-04 (HSL), F-PP-05 (curves) and

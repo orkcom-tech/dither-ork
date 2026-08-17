@@ -54,18 +54,20 @@ const EXPECTED_BY_FAMILY: Readonly<Record<EffectFamily, number>> = {
   preprocess: 6,
   "error-diffusion": 15,
   ordered: 6,
-  // Eight screens plus the three generators (F-GN-01..03). They are filed here
+  // Ten screens plus the three generators (F-GN-01..03). They are filed here
   // rather than under `special` because a generator draws a figure from
   // geometry, which is what this family already is; `family` is a filing
-  // decision and `slot` is the positional one.
-  pattern: 11,
+  // decision and `slot` is the positional one. The tenth and ninth screens are
+  // `ridgeline` (F-PT-09) and `wave-field` (F-PT-10), which closed the last two
+  // entries the unbuilt table carried besides JPEG glitch.
+  pattern: 13,
   glitch: 16,
   special: 17,
 };
 
 const EXPECTED_BY_EXECUTION: Readonly<Record<ExecutionKind, number>> = {
   wasm: 15,
-  gpu: 56,
+  gpu: 58,
 };
 
 const EXPECTED_BY_SLOT: Readonly<Record<NodeSlot, number>> = {
@@ -74,12 +76,12 @@ const EXPECTED_BY_SLOT: Readonly<Record<NodeSlot, number>> = {
   // against this slot in both directions.
   source: 3,
   preprocess: 18,
-  dither: 29,
+  dither: 31,
   postprocess: 21,
 };
 
 /**
- * 67 of these are the spec's. The other four are ids this build assigns:
+ * 69 of these are the spec's. The other four are ids this build assigns:
  * `feedback` (F-FB-01) and the three generators (F-GN-01 noise, F-GN-02
  * gradient, F-GN-03 shape).
  *
@@ -89,7 +91,7 @@ const EXPECTED_BY_SLOT: Readonly<Record<NodeSlot, number>> = {
  * count that quietly excluded them would be the one place a reader could look
  * and conclude the effects are not really there.
  */
-const EXPECTED_TOTAL = 71;
+const EXPECTED_TOTAL = 73;
 
 /**
  * Every WGSL file the build ships, keyed by the effect id it is named for.

@@ -19,7 +19,8 @@
  *
  * - **Generated fixture, stored outputs.** `fixture.ts` is code a reviewer can
  *   read; the fixture's own PNG is written beside the references so a change to
- *   the generator is one image diff instead of eighty-eight unexplained ones.
+ *   the generator is one image diff instead of a hundred and twenty-one
+ *   unexplained ones.
  * - **A stated tolerance with the reasoning for it**, below.
  * - **An environment-variable re-bless mode that says so loudly**, on the real
  *   stderr, because a harness nobody can regenerate is a harness that gets
@@ -61,6 +62,7 @@
  * when it passes.
  */
 
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import {
   createReadStream,
@@ -286,7 +288,7 @@ function vitals(fixture, fixtureWidth, fixtureHeight, frame, width, height) {
 }
 
 /**
- * Refuse a reference pair that records nothing.
+ * Refuse a reference that records nothing.
  *
  * The failure a golden set cannot catch is the one it was blessed against: an
  * effect that returns its input, or a black rectangle, is stored as the truth
@@ -294,29 +296,86 @@ function vitals(fixture, fixtureWidth, fixtureHeight, frame, width, height) {
  * this is the same check with the eye removed, and it runs in bless mode too —
  * which is the only place it can do any good.
  *
- * Judged across both variants rather than each one. The identity at defaults is
- * a legitimate opening state for a rearrangement node — a channel swap opens
- * with every output reading its own channel — so it is only a finding when the
- * far end of the surprise range does nothing either.
+ * ## Judged per variant, which it was not
+ *
+ * This used to take the *best* of an effect's variants and ask only whether that
+ * one moved. The reasoning was sound as far as it went — the identity at defaults
+ * is a legitimate opening state for a correction node, so it is not on its own a
+ * defect — but the conclusion was too weak, and it cost the set five references.
+ * `brightness-contrast`, `channel-swap`, `curves`, `hsl` and `levels` each stored
+ * a `defaults.png` **byte-identical to the source fixture**, passing on the
+ * strength of their surprise render, and half of their coverage was decorative
+ * while the run reported a clean sheet.
+ *
+ * So every variant is now judged on its own, and the legitimate case is handled
+ * by *naming* it: an effect that is the identity at defaults is expected to carry
+ * an `engaged` variant, which is `ENGAGED_PARAMS` in `harness.ts`. The check runs
+ * in both directions — an identity at defaults with no `engaged` render fails,
+ * and an `engaged` render for an effect whose defaults are *not* the identity
+ * fails as stale — because a declaration nobody re-reads is how this hole opened.
+ *
+ * The luminance check stays across variants: an effect that renders black at one
+ * setting and a picture at another is doing its job, and only an effect that is
+ * black everywhere has a reference of a black rectangle.
  *
  * `MOVED` is deliberately low. It is not a claim about how much an effect should
  * change; it is the line below which the reference contains no information about
- * the shader at all.
+ * the shader at all. Measured against the shipped set, the lowest non-vacuous
+ * reference moves 14.5% of its pixels, so nothing sits near the line.
  */
 function vacuous(byEffect) {
   const MOVED = 0.005;
   const LIT = 0.01;
   const found = [];
+  const percent = (value) => `${(value * 100).toFixed(3)}%`;
+
   for (const [effect, seen] of byEffect) {
-    const movedMost = Math.max(...seen.map((s) => s.changed));
+    const at = (variant) => seen.find((s) => s.variant === variant);
     const brightest = Math.max(...seen.map((s) => s.luma));
-    if (movedMost < MOVED) {
+
+    for (const observed of seen) {
+      if (observed.changed >= MOVED) continue;
+      if (observed.variant === "defaults" && at("engaged") !== undefined) {
+        // Declared and expected: the whole point of the engaged variant.
+        continue;
+      }
+      if (observed.variant === "defaults") {
+        found.push(
+          `${effect}: returned its input unchanged at its declared defaults ` +
+            `(${percent(observed.changed)} of pixels moved), and the harness has no second ` +
+            `non-default parameter set for it, so defaults.png records the fixture rather than ` +
+            `the shader. Add an entry for "${effect}" to ENGAGED_PARAMS in ` +
+            `web/test/gpu-golden/harness.ts.`,
+        );
+      } else {
+        found.push(
+          `${effect}: rendered its input unchanged at its ${observed.variant} parameter set ` +
+            `(${percent(observed.changed)} of pixels moved). That reference records nothing ` +
+            `about the shader.`,
+        );
+      }
+    }
+
+    const defaults = at("defaults");
+    const engaged = at("engaged");
+    if (engaged !== undefined && defaults !== undefined && defaults.changed >= MOVED) {
       found.push(
-        `${effect}: returned its input unchanged at its declared defaults AND at the far end ` +
-          `of its surprise range (${(movedMost * 100).toFixed(3)}% of pixels moved). Its ` +
-          `reference images record nothing about the shader.`,
+        `${effect}: has an ENGAGED_PARAMS entry in web/test/gpu-golden/harness.ts, which says its ` +
+          `defaults are the identity, but its defaults render moved ${percent(defaults.changed)} ` +
+          `of the frame. The entry is stale — remove it, and the two ordinary variants cover it.`,
       );
-    } else if (brightest < LIT) {
+    }
+
+    const surprise = at("surprise");
+    if (engaged !== undefined && surprise !== undefined && engaged.digest === surprise.digest) {
+      found.push(
+        `${effect}: its engaged and surprise renders are the same frame, so the third reference ` +
+          `costs a picture to review and records nothing the second one did not. Choose values ` +
+          `in ENGAGED_PARAMS that the surprise derivation does not already reach.`,
+      );
+    }
+
+    if (brightest < LIT) {
       found.push(
         `${effect}: rendered an almost black frame in every variant (mean luminance ` +
           `${(brightest * 100).toFixed(2)}%). A reference of a black rectangle passes forever.`,
@@ -529,9 +588,14 @@ async function main() {
           ? ""
           : ` ${width}x${height}`;
       const seen = vitalsByEffect.get(planned.effect) ?? [];
-      seen.push(
-        vitals(fixtureRgba, info.fixture.width, info.fixture.height, rgba, width, height),
-      );
+      seen.push({
+        variant: planned.variant,
+        // Only ever compared against another frame of the same effect, to catch
+        // two variants that landed on one picture. Never stored, never compared
+        // across runs — that is what the reference tree is for.
+        digest: createHash("sha256").update(rgba).digest("hex"),
+        ...vitals(fixtureRgba, info.fixture.width, info.fixture.height, rgba, width, height),
+      });
       vitalsByEffect.set(planned.effect, seen);
 
       const path = goldenPath(planned.effect, planned.variant);

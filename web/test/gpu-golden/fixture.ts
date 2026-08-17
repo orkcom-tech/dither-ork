@@ -13,9 +13,9 @@
  * whole image and its behaviour changes with the image. The parallel effects
  * are a different problem: they are per-pixel independent, so what matters is
  * that *every* kind of content a shader can key off is present in the one frame
- * each of them renders. Five fixtures times forty-eight effects times two
- * parameter sets is 480 reference images to review; one fixture with four
- * regions is 96, and it catches the same defects because each region is the
+ * each of them renders. Five fixtures times fifty-eight effects times two
+ * parameter sets is 580 reference images to review; one fixture with four
+ * regions is 121, and it catches the same defects because each region is the
  * thing some family of shaders needs:
  *
  * - **Hue sweep** — the only region with chroma. Channel swap, RGB split,
@@ -43,7 +43,8 @@
  * machine.
  *
  * Alpha is 255 everywhere. Nothing in the catalogue keys off alpha, and a
- * varying alpha would only add a channel of noise to eighty-eight diffs.
+ * varying alpha would only add a channel of noise to a hundred and twenty-one
+ * diffs.
  */
 
 import { srgbToLinear } from "../../src/gpu";

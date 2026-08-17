@@ -225,7 +225,11 @@ describe("the catalogue view", () => {
   });
 
   it("reports why a query found nothing instead of showing an empty page", () => {
-    const view = catalogueFor(registry, "unknown pleasures");
+    // "unknown pleasures" used to be the query here and now returns
+    // `ridgeline`, so the one requirement still absent is what asks the
+    // question: F-GL-06, which needs an encoder the pipeline has no execution
+    // kind for.
+    const view = catalogueFor(registry, "jpeg");
     expect(view.catalogue.effects).toBe(0);
     expect(view.miss).not.toBeNull();
     // The registry's own explanation — a specified feature this build does not

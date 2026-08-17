@@ -27,7 +27,7 @@ The application: a toolbar reading **open image · undo · redo · fit · 100% �
 save · open · presets · export · batch · surprise me** on the left and
 **guide · dark** on the right, a stack panel on the left, a viewport in the
 middle, properties and palette on the right, a timeline and a **node editor**
-along the bottom, and a status bar reading `effects 71` with the GPU adapter
+along the bottom, and a status bar reading `effects 73` with the GPU adapter
 beside it and **source · docs · Made by ORKCOM** at its right end. Press **open
 image**, choose a picture, press **add node**, and pick an effect.
 
@@ -63,11 +63,12 @@ Three more that are equally uncovered, because they are about what the interface
   should explain that a dark two-colour palette is what makes it the neon one.
   Type `wavy`; wave warp should appear, matched on a keyword rather than on its
   name.
-- **Search admits its gaps.** Type `radio`. The picker should say that
-  *Wave field with obstacle interaction (F-PT-10) is specified but not built*,
-  give the reason, and offer the closest built effects. That table is
-  `web/src/registry/unbuilt.ts`, and `search.test.ts` fails the build if an
-  entry in it ever becomes a real effect.
+- **Search admits its gaps.** Type `jpeg`. The picker should say that *JPEG
+  glitch (F-GL-06) is specified but not built*, give the reason, and offer the
+  closest built effects. That table is `web/src/registry/unbuilt.ts`, and
+  `search.test.ts` fails the build if an entry in it ever becomes a real effect —
+  which is how F-PT-09 and F-PT-10 left it. Type `radio` or `unknown pleasures`
+  now and you get `wave-field` and `ridgeline` instead of an explanation.
 - **Hover help describes what a control does to the picture** (F-UI-13). Rest the
   pointer on a parameter for 700 ms, or focus it and press **F1**. The panel's
   prose comes off the descriptor and nowhere else, so a control with no help is
@@ -76,7 +77,7 @@ Three more that are equally uncovered, because they are about what the interface
 **guide** opens the user guide (F-UI-14): seven written chapters, then *Every
 effect*, which is generated from the sealed registry rather than written — so an
 effect added today is documented today, in its own author's words. Its search box
-consults the same unbuilt table the picker does, so `radio` gives the same answer
+consults the same unbuilt table the picker does, so `jpeg` gives the same answer
 in both places.
 
 If instead you get one full-page screen naming a missing capability, that is
@@ -351,6 +352,18 @@ the parallel half of what `core/crates/dither-core/tests/golden.rs` does for the
 serial half, and it is deliberately the same shape: generated fixture, stored
 outputs, a stated tolerance, a loud re-bless mode, and orphan detection.
 
+**121 images**: the 58 GPU effects at their declared defaults and at the far end
+of every declared surprise range, plus a third **engaged** render for the five
+that open on the identity. Those five — `brightness-contrast`, `channel-swap`,
+`curves`, `hsl` and `levels` — are corrections before they are looks, so their
+`defaults.png` was byte-identical to the source fixture and recorded nothing
+about the shader behind it. `ENGAGED_PARAMS` in `harness.ts` is the parameter set
+each is rendered at instead, and it is the one table in the harness that names
+effects: an effect that is the identity at defaults and is *not* in it fails the
+run, and an entry whose effect is not the identity at defaults fails as stale.
+Adding an effect that opens as a no-op therefore fails loudly with a message
+naming what to add, rather than silently blessing a picture of the fixture.
+
 Why it exists: a transposed coefficient in a halftone screen and an off-by-one in
 a displacement kernel both compile, both validate, and both produce a picture.
 Nothing but a stored reference catches either. Before this, the parallel
@@ -404,8 +417,8 @@ Every startup failure prints the same block regardless of which path reached it:
 the page's URL, `document.readyState`, `crossOriginIsolated`, `isSecureContext`,
 whether `SharedArrayBuffer` and `navigator.gpu` exist, the scripts it loaded, and
 the whole transcript in order. Live echo drops to problems-only once the plan is
-in hand, because ninety-six renders times three debug lines is a log nobody
-reads — but nothing stops being *recorded*, and a failure quotes all of it.
+in hand, because a hundred and twenty-one renders times three debug lines is a
+log nobody reads — but nothing stops being *recorded*, and a failure quotes all of it.
 
 Cross-origin isolation is asserted rather than inferred, on both sides: `run.mjs`
 refuses if the page reports `crossOriginIsolated !== true`, and `harness.ts`

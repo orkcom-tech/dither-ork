@@ -419,10 +419,12 @@ export function searchCatalogue(
     return { query, results, miss: { kind: "filtered-out", nearest: [] } };
   }
 
-  // The unbuilt table is consulted first. When someone types "unknown
-  // pleasures" the useful answer is that F-PT-09 is not built, even though
-  // `line-screen` would also have come back as a near miss — a near miss
-  // invites another five minutes of looking, a named gap does not.
+  // The unbuilt table is consulted first. When someone types "jpeg" the useful
+  // answer is that F-GL-06 is not built, even though `bit-crush` would also have
+  // come back as a near miss — a near miss invites another five minutes of
+  // looking, a named gap does not. (The example used to be "unknown pleasures"
+  // and F-PT-09; that query now reaches a real effect, which is the direction
+  // this table is meant to move in.)
   const requirement = asRequirementId(query);
   const feature =
     requirement !== null

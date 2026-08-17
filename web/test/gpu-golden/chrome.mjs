@@ -180,8 +180,8 @@ function locationText(url, lineNumber, columnNumber) {
  * How much of what the page says is echoed live.
  *
  * `all` during startup, because that is the phase whose failures had nowhere to
- * appear. `problems` once the harness is running, because ninety-six renders
- * times three debug lines is a log nobody reads — and a log nobody reads is the
+ * appear. `problems` once the harness is running, because a hundred and twenty-one
+ * renders times three debug lines is a log nobody reads — and a log nobody reads is the
  * same silence in a larger font. Nothing is *discarded* at either setting: the
  * full transcript is kept and quoted by any failure.
  */

@@ -24,7 +24,7 @@ a vector file. Nothing is uploaded: there is no server.
 
 ## What it does
 
-- **71 effects** you can reorder and wire — 15 error diffusion, 6 ordered, 11
+- **73 effects** you can reorder and wire — 15 error diffusion, 6 ordered, 13
   pattern, 16 glitch, 17 special, 6 preprocess. Any effect, any number of times,
   each with its own opacity and blend mode.
 - **A node graph, not a list.** A document is nodes plus edges: a branch can be
@@ -116,7 +116,7 @@ build ships a `_headers` file; CI fails if either goes missing.
   per-layer transform: a node's opacity, blend and mask compose it against *its
   own input*, and the wiring is the only compositing order there is.
 - **No node that takes a second picture.** The graph carries as many input ports
-  as an effect declares, and today no effect declares one: of 71 effects, every
+  as an effect declares, and today no effect declares one: of 73 effects, every
   one has a single image input and only `feedback` has a second port, its own
   previous frame. So two branches can meet on a node's **mask** port and nowhere
   else. Blending two chains as colour, and displacing one picture by another,
@@ -131,27 +131,29 @@ build ships a `_headers` file; CI fails if either goes missing.
 - **Keyframe tracks do not survive a save.** Modulator bindings do; they
   round-trip through `.dork`, autosave and share links. Keyframes have no field
   in the schema yet, so they last the session. The timeline panel says so.
-- **Three named requirements are declared absent rather than stubbed.** They are
-  listed in `web/src/registry/unbuilt.ts`, and searching for one of them returns
-  the requirement, the reason and the nearest built effects instead of nothing.
-  A test fails the build if one of them ever becomes real:
+- **One named requirement is declared absent rather than stubbed.** It is listed
+  in `web/src/registry/unbuilt.ts`, and searching for it returns the requirement,
+  the reason and the nearest built effects instead of nothing. A test fails the
+  build if it ever becomes real. F-PT-09 and F-PT-10 left this table by becoming
+  real, which is the direction it is supposed to move in:
 
 | Requirement | What it would do | Why it is not built |
 | --- | --- | --- |
 | F-GL-06 JPEG glitch | Re-encode as JPEG at a chosen quality, corrupt the compressed bytes | Needs a JPEG encoder in the render path. Every node is a compute pass or a serial CPU kernel; this would be a third execution kind |
-| F-PT-09 Luminance-displaced line screen | Lines displaced by the picture's brightness — the *Unknown Pleasures* ridgeline | Nothing in the catalogue displaces by the picture itself, and it needs hidden-line removal to read as depth |
-| F-PT-10 Wave field with obstacle interaction | Waves that bend around the subject, or are blocked and leave a shadow | Needs a distance field *transformed out of the picture*. The shared contract and the analytic primitives are built (`web/src/gpu/sdf.ts`, used by the Shape source); the transform — a jump flood over a scratch texture the pass vocabulary has no role for — is not |
 
 ## Tests
 
 ```bash
-docker compose exec -T web sh -c 'npm test -- --run'                                # 2120 tests, 132 files
+docker compose exec -T web sh -c 'npm test -- --run'                                # 2188 tests, 133 files
 docker compose run --rm --entrypoint bash wasm -c 'cd /app/core && cargo test --all' # 157 tests
 ```
 
 CI runs both, plus `cargo fmt`, `clippy -D warnings`, a typecheck, a production
 build, a check that the production build actually boots, and a GPU golden-image
-comparison against a pinned Chrome for Testing build on SwiftShader.
+comparison against a pinned Chrome for Testing build on SwiftShader — 121 stored
+renders, every GPU effect at its defaults and at the far end of its declared
+surprise range, plus a third parameter set for the five that open on the
+identity and would otherwise store a picture of the input.
 
 ## Documentation
 

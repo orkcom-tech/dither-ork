@@ -9,6 +9,56 @@ also the day it landed on `main` — every push that passes CI deploys itself.
 
 ### Added
 
+- **The look the catalogue could not make: lines that read the picture.** Two
+  effects and the shared infrastructure the second one needed.
+
+  **Ridgeline (F-PT-09)** draws the picture as parallel rows displaced by its own
+  brightness — the *Unknown Pleasures* construction. Nothing in the catalogue did
+  this: line screen varies a line's *width* with tone and never moves it, wave
+  warp displaces by a fixed geometric function, row displacement by a seed. The
+  difference is the whole look, because it turns a texture laid over an image
+  into a reading of it.
+
+  **Hidden-line removal is what makes it depth rather than noise**, and it is on
+  by default. A row in front is opaque and hides what is behind it. It is done
+  without sorting and without a second buffer, by asking the painter's-algorithm
+  question at each pixel instead of executing it: the visible row is the nearest
+  one whose stroke or fill reaches this pixel, which is one bounded walk.
+
+  Amplitude is measured in **pitches, not texels**, because what the eye reads is
+  how far a row travels relative to the gap to the next one — so the picture
+  survives having the pitch dragged. Over a dark two-colour palette with epsilon
+  glow after it, this is the neon line look; both descriptions say so, because it
+  is not discoverable from either node's controls alone.
+
+  **Wave field (F-PT-10)** draws waves from a point, a line or the frame's edge,
+  and the subject of the picture interacts with them. *Flow around* delays the
+  fronts near the subject so they bend past it and carry over it, the way contour
+  lines part around a hill. *Shadow* lets the subject block them, leaving the
+  region behind it relative to the source empty, with a penumbra one wavelength
+  wide. Which part of the picture counts as the subject is a control — a
+  brightness threshold or the alpha channel, with an invert and a smoothing
+  radius — not a guess.
+
+- **A signed distance field out of the picture (F-INF-01), as shared
+  infrastructure.** `web/src/gpu/sdf.ts` already fixed what a field is and shipped
+  the analytic primitives the Shape source draws from. The other producer —
+  a field transformed out of a photograph rather than described by parameters —
+  is now there too: a subject mask, its boundary, and a jump flood, which is the
+  construction the requirement names.
+
+  It is built shared because at least four things want it. Outline gets smooth,
+  variable-width strokes from it; epsilon glow gets a falloff by distance from
+  the subject rather than by blur radius; dilate/erode is a threshold on it by
+  definition. Writing it inside the wave field would have meant writing it four
+  times.
+
+  The note that had kept it unbuilt said a jump flood needs a scratch *texture*
+  and the pass vocabulary has no role for one. That was wrong, and it is why the
+  half sat unbuilt for a phase: a jump flood carries a packed seed **coordinate**
+  per texel rather than a colour, and a `u32` in a storage buffer holds one
+  exactly. The missing role was never a texture.
+
 - **The node editor — where the wiring is actually drawn and changed.** A band
   under the picture, so the frame stays live while you wire. Nodes on a canvas
   with their ports labelled, wires you drag between them, pan, zoom, select,
@@ -177,7 +227,49 @@ also the day it landed on `main` — every push that passes CI deploys itself.
     transport bar. Nothing anywhere shows a frame the export would not produce:
     a frame the store cannot serve is refused rather than faked.
 
+### Changed
+
+- **The unbuilt table is down to one entry.** F-PT-09 and F-PT-10 left it by
+  becoming real, which is the direction it is supposed to move in, and the
+  build fails if an entry in it ever names a shipped effect. Typing *unknown
+  pleasures* or *radio waves* into the picker now reaches an effect instead of an
+  explanation; only **F-GL-06** (JPEG glitch) still answers with a reason, and its
+  reason is an execution kind that does not exist rather than work not yet done.
+
 ### Fixed
+
+- **Five golden references were pictures of the input.** `brightness-contrast`,
+  `channel-swap`, `curves`, `hsl` and `levels` each stored a `defaults.png` that
+  was **byte-identical to the source fixture**. That is not an accident of those
+  five: they are corrections before they are looks, and a correction that altered
+  the picture the moment it was added could not be added without committing to a
+  change, so the identity is the right default. It does mean the stored image
+  recorded the fixture and not the shader, and a rewritten shader that never ran
+  would have matched it forever. Half the coverage of five effects was
+  decorative and the run reported a clean sheet.
+
+  The vacuity check is why it went unseen: it took the *best* of an effect's two
+  variants and asked only whether that one moved, so each of the five passed on
+  the strength of its surprise render. **Every variant is now judged on its own**,
+  and the legitimate identity is handled by being named rather than by being
+  averaged away. Each of the five carries a third **engaged** reference at a
+  written-down parameter set — a contrast lift, a true cyclic channel rotation, an
+  S-curve, a third of a hue turn, a darkening gamma — every value inside the
+  parameter's own declared surprise range and checked against the descriptor with
+  the application's `validateParams`, so each is a picture the product can really
+  make. They move 49% to 90% of the frame where they moved nothing before.
+
+  The check closes in both directions, because a declaration nobody re-reads is
+  how this opened: an effect that is the identity at defaults with no engaged
+  entry fails the run naming what to add, an engaged entry for an effect whose
+  defaults are *not* the identity fails as stale, and an engaged render that comes
+  out identical to that effect's surprise render fails as a third picture worth
+  reviewing that says nothing new. All three were verified by breaking the table
+  on purpose and watching the run go red. The `defaults` references are kept, not
+  deleted: they now pin the claim that the opening state really is a no-op.
+
+  The whole set was re-blessed in the pinned browser image afterwards and the
+  116 existing references came back byte-identical.
 
 - **Deleting the picture that fed a mask left a document that would not render.**
   Removing a node rewires its consumers to whatever fed *its* `in` port, which is
@@ -204,12 +296,19 @@ Stated here because they are the difference between what this release built and
 what it was for.
 
 - **No node takes a second picture.** The graph carries as many input ports as an
-  effect declares, and of the 71 effects every one declares a single image input;
+  effect declares, and of the 73 effects every one declares a single image input;
   only `feedback` has a second port, and that is its own previous frame. So two
   branches can converge on a node's **mask** port and nowhere else. Blending two
   chains as colour and displacing one picture by another — the other two reasons
   multiple inputs were built — need a node that does not exist yet. The `layer`
   and `displace` roles are defined and unused.
+
+- **The subject mask reads brightness or alpha, not the index map.** F-INF-01
+  names a third source — *the subject is palette entries 2 and 5* — and it is not
+  offered. A pass may bind the index map only if its whole effect declares it
+  needs one, and that declaration would make the wave field illegal in front of a
+  dither, which is the case it was asked for. So a subject the same brightness as
+  its background cannot be separated, and nothing guesses at one.
 
 - **Masking exposes one of its three coverages.** F-PP-08 asks for coverage from
   a luminance range, a colour range, or a picture. All three are implemented and
