@@ -1,0 +1,462 @@
+/*
+ * The node editor.
+ *
+ * Shares the control primitives in `../properties/properties.css` — `.badge`,
+ * `.field__note` and `.ui-button` — because a node card wears the same slot and
+ * execution badges a stack row does. No colour literal appears here; every value
+ * is a token from `src/ui/theme.css`.
+ *
+ * Nothing in this file decides a **size** that `./metrics.ts` also decides. Card
+ * width, card height and port row height arrive as inline styles, because the
+ * layout that spaced the columns used exactly those numbers and a second copy
+ * here would drift from it silently. What is here is colour, weight, rule and
+ * state.
+ */
+
+.geditor {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+/* --- the bar ------------------------------------------------------------ */
+
+.geditor__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg-raised);
+  flex: none;
+}
+
+.geditor__spacer {
+  flex: 1 1 auto;
+}
+
+.geditor__zoom,
+.geditor__count,
+.geditor__note {
+  color: var(--fg-faint);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.geditor__zoom {
+  min-width: 34px;
+  text-align: center;
+}
+
+.geditor__note {
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--radius);
+  padding: 1px 6px;
+  cursor: help;
+}
+
+.geditor__refusal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: var(--text-sm);
+  color: var(--warn);
+  background: var(--bg-inset);
+  border-bottom: 1px solid var(--rule);
+  flex: none;
+}
+
+.geditor__picker {
+  flex: none;
+  max-height: 50%;
+  overflow: auto;
+  border-bottom: 1px solid var(--rule);
+}
+
+/* --- the canvas --------------------------------------------------------- */
+
+.geditor__canvas {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-sunken);
+  /*
+   * A grid, so panning an empty region is visibly panning rather than a blank
+   * rectangle that does not appear to move. It is drawn in the rule colour at
+   * the same 22px pitch in both axes and is deliberately faint: it is a sense of
+   * place, not information.
+   */
+  background-image:
+    linear-gradient(to right, var(--rule) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--rule) 1px, transparent 1px);
+  background-size: 22px 22px;
+  cursor: grab;
+  outline-offset: -2px;
+}
+
+.geditor__canvas:focus-visible {
+  outline: 2px solid var(--focus);
+}
+
+.geditor__canvas--panning {
+  cursor: grabbing;
+}
+
+.geditor__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  text-align: center;
+  pointer-events: none;
+}
+
+.geditor__world {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  /* The children are placed by the layout; the layer itself has no size. */
+  width: 0;
+  height: 0;
+}
+
+.geditor__wires {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* --- wires -------------------------------------------------------------- */
+
+.gwire {
+  fill: none;
+  stroke: var(--rule-hover);
+  stroke-width: 1.5;
+}
+
+/*
+ * A wire's role is its colour, because the roles are different contracts and a
+ * graph where a mask edge and an image edge look alike is a graph in which the
+ * one thing masking needed to make visible is invisible.
+ */
+.gwire--mask {
+  stroke: var(--warn);
+  stroke-dasharray: 5 3;
+}
+
+.gwire--layer {
+  stroke: var(--accent-dim);
+}
+
+.gwire--displace {
+  stroke: var(--accent-dim);
+  stroke-dasharray: 2 3;
+}
+
+.gwire--feedback {
+  stroke: var(--accent);
+  stroke-dasharray: 4 4;
+  stroke-width: 1.5;
+}
+
+.gwire--live {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.gwire--live.gwire--refused {
+  stroke: var(--fail);
+}
+
+/* --- a node card -------------------------------------------------------- */
+
+.gnode {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  background: var(--bg-raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  box-shadow: var(--shadow);
+}
+
+.gnode--selected {
+  border-color: var(--accent);
+}
+
+.gnode--output {
+  /* The picture. One card in the document is it, so it is worth an outline. */
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow);
+}
+
+.gnode--off,
+.gnode--unreached {
+  opacity: 0.45;
+}
+
+.gnode--issue {
+  border-color: var(--fail);
+}
+
+.gnode--wiring {
+  border-color: var(--accent);
+}
+
+.gnode__head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  height: 26px;
+  flex: none;
+  border-bottom: 1px solid var(--rule);
+  overflow: hidden;
+}
+
+.gnode__enable,
+.gnode__solo,
+.gnode__picture {
+  background: none;
+  border: none;
+  color: var(--fg-faint);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: var(--text-sm);
+  line-height: 1;
+}
+
+.gnode__enable[aria-pressed="true"] {
+  color: var(--fg);
+}
+
+.gnode__solo[aria-pressed="true"],
+.gnode__picture--on {
+  color: var(--accent);
+}
+
+/* The id every refusal message refers to. Quiet, findable, never competing. */
+.gnode__id {
+  flex: none;
+  color: var(--fg-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.gnode__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: none;
+  border: none;
+  color: var(--fg);
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.gnode__title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gnode__issue {
+  color: var(--fail);
+  font-family: var(--font-mono);
+  font-weight: bold;
+  cursor: help;
+}
+
+.gnode__ports {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 auto;
+}
+
+.gnode__out {
+  position: absolute;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* Half of the port dot hangs outside the card, which is where a wire meets it. */
+  transform: translateX(5px);
+}
+
+/* --- ports -------------------------------------------------------------- */
+
+.gport {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px 0 0;
+  box-sizing: border-box;
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+}
+
+.gport__dot,
+.gnode__port--out {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--rule-hover);
+  background: var(--bg-sunken);
+  cursor: pointer;
+}
+
+.gport__dot {
+  /* Half outside the card's left edge, where the wire lands. */
+  margin-left: -5px;
+}
+
+.gport__dot:disabled {
+  cursor: default;
+}
+
+.gport--wired > .gport__dot {
+  background: var(--fg-dim);
+}
+
+.gport--mask > .gport__dot {
+  border-color: var(--warn);
+}
+
+.gport--mask.gport--wired > .gport__dot {
+  background: var(--warn);
+}
+
+.gport--feedback > .gport__dot {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.gport--needed > .gport__dot {
+  border-color: var(--fail);
+}
+
+.gport--legal > .gport__dot {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.gport--refused > .gport__dot {
+  border-color: var(--fail);
+}
+
+.gport--active > .gport__dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.gport--refused.gport--active > .gport__dot {
+  background: var(--fail);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--fail) 40%, transparent);
+}
+
+.gport__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gport__role,
+.gport__source {
+  margin-left: auto;
+  color: var(--fg-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.gnode__port--out {
+  cursor: crosshair;
+}
+
+.gnode__port--out:focus-visible,
+.gport__dot:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* --- the verdict under the cursor --------------------------------------- */
+
+.geditor__verdict {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  right: 8px;
+  padding: 4px 8px;
+  font-size: var(--text-sm);
+  color: var(--fg);
+  background: var(--bg-inset);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+
+.geditor__verdict--refused {
+  color: var(--warn);
+  border-color: var(--fail);
+}
+
+/* --- the key list ------------------------------------------------------- */
+
+/*
+ * One line, always, scrolling sideways on a narrow window rather than wrapping.
+ *
+ * Wrapping costs the canvas a second row of height on exactly the windows that
+ * have the least of it, and the canvas is the panel. The list is a reference —
+ * it is read once and then remembered — so putting the tail of it behind a
+ * sideways scroll costs less than taking twenty pixels off the graph forever.
+ */
+.geditor__keys {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 2px 12px;
+  list-style: none;
+  margin: 0;
+  padding: 4px 8px;
+  flex: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-top: 1px solid var(--rule);
+  background: var(--bg-raised);
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+}
+
+.geditor__keys li {
+  white-space: nowrap;
+}
+
+.geditor__keys kbd {
+  font-family: var(--font-mono);
+  color: var(--fg-dim);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  padding: 0 3px;
+}
+
+/*
+ * Nothing in this editor animates, so there is nothing to switch off under
+ * `prefers-reduced-motion` — panning and zooming follow the pointer directly
+ * and the wire follows it frame by frame, which is direct manipulation rather
+ * than motion. This note is here so that the absence reads as a decision
+ * instead of as an omission.
+ */

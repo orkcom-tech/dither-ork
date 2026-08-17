@@ -12,8 +12,12 @@ preprocess. By execution: 15 WASM, 56 WebGPU. By slot: 3 source, 18 preprocess,
 29 dither, 21 postprocess. One of the 61 is absent on purpose and it is recorded
 where the decision was made — F-GL-06 JPEG glitch, which needs an encoder and
 therefore an execution kind that does not exist. The one remaining F-PP gap is
-F-PP-08, masking: it is a second image edge on the graph rather than a pass, and
-the graph carries one edge per node. The four that are not in the numbered spec
+F-PP-08, masking, and it is now **partly** built: a mask is a second image edge,
+the graph carries as many edges per node as the effect declares, and the coverage
+taken from a wired picture works end to end. The luminance-range and colour-range
+coverages the requirement also names are implemented and agree between the two
+backends, but nothing in the interface sets them — see "Multiple inputs, and node
+masking" below. The four that are not in the numbered spec
 all come from `docs/dither-ork-node-graph.md`: **`feedback` (F-FB-01)**, the only
 node in the catalogue that is not a pure function of its inputs — see "Feedback"
 below — and the three **generators** (`gen-noise` F-GN-01, `gen-gradient`
@@ -127,8 +131,11 @@ open-source project and it is the one that does not work.
 
 ## Render graph
 
-- A document compiles to a DAG. Linear today; typed as a DAG so node groups and
-  masking do not need a new engine.
+- A document compiles to a DAG. It **is** one now rather than being typed as one
+  in advance: a document is nodes plus edges, a node has an input port per role
+  its effect declares, and two branches may converge. The prediction this line
+  used to make — "typed as a DAG so node groups and masking do not need a new
+  engine" — held: masking landed without a second engine.
 - Every node exposes a **content hash** over its parameters, seed and input
   hash. Node outputs are cached against it. Editing a parameter invalidates that
   node and everything downstream; nothing upstream re-runs.
@@ -139,6 +146,85 @@ open-source project and it is the one that does not work.
   nodes. Unbound nodes render once and are reused for all `N` frames, which is
   why an `N`-frame export is far cheaper than `N` renders.
 
+## Multiple inputs, and node masking
+
+Step 3 of `docs/dither-ork-node-graph.md`. A node's input ports are a property of
+its **effect**, declared as `EffectDescriptor.inputs` and resolved for everybody
+by `web/src/graph/ports.ts`. Three rules are folded in there rather than repeated:
+an effect that declares nothing still takes one image on `in`; every node gets a
+`mask` port for free, so no effect can become unmaskable by forgetting to declare
+one; and a node that resamples gets no `mask` port at all, because it has no
+pixel-for-pixel correspondence with its own input for coverage to be *of*.
+
+**Port order is load-bearing.** A node's content hash folds in its inputs' hashes
+"in port order", so the order has to be a property of the code rather than of
+however a document happened to list its edges — otherwise two documents that are
+the same graph hash differently and neither reuses the other's cache. It is stated
+once, in `portOrder`: declared ports in declaration order, then `mask`.
+
+**Cycles.** "No cycles" stopped being an invariant and became a property exactly
+one kind of edge may violate. An edge into a port whose role is `feedback` reads
+the producer's previous frame, so it contributes nothing to in-degree; Kahn's
+algorithm runs on the feedback-free subgraph and every other cycle is still
+refused, naming the nodes that could not be ordered. A feedback edge's producer is
+always the consumer itself, because the frame store is keyed by node id: a general
+delay edge — B reading A's previous frame — is refused rather than rendered from
+pixels nobody kept.
+
+**Scheduling is deterministic by construction.** A DAG has no single topological
+order, and the project guarantees one picture per document, so the order is fixed
+by two rules in sequence: prefer the execution kind just scheduled (every switch
+between the WASM and WebGPU paths costs a readback plus an upload), then the
+node's position in `document.stack`. Neither consults a `Set` or `Map` iteration
+order — those are deterministic today for reasons nobody wrote down.
+
+**A mask is spatially-varying opacity and nothing else.** Not an effect, not a
+node, not a layer: it is the number the composite already applies, with a value
+per pixel. Mask and opacity multiply, because they answer different questions —
+how much of this node overall, and where. `web/src/graph/mask.ts` is the
+definition and `web/src/shaders/_composite.wgsl` is a transcription of it; both
+must produce the same numbers or preview and export stop matching, so the two are
+kept in the same order and `mask.test.ts` pins the ordinals and channels.
+
+### What is built, and what is not
+
+The engine takes any number of input ports. **The catalogue declares almost
+none.** Of 71 effects, every one has a single `image` input and exactly one —
+`feedback` — declares a second port, which is its own previous frame. The `layer`
+and `displace` roles are defined, documented and unused.
+
+The consequence is worth stating plainly rather than leaving to be discovered:
+**two branches can converge on a node's `mask` port and nowhere else.** Blending
+two chains as colour, and displacing one picture by another — two of the three
+things multi-input was built for — need a node that does not exist yet. What
+multi-input delivered is the machinery and masking.
+
+Masking itself is half-exposed. `store.setNodeMask` can set any of the three
+coverages, and no control calls it. The only masking gesture is wiring a picture
+into a mask port, which sets the `image` coverage on its luminance channel as one
+undo step; there is no channel picker, no invert, and no way to reach a
+luminance-band or colour mask except by writing the document by hand. This is a
+gap in the interface, not in the pipeline, and it is recorded here, in
+`web/src/ui/graph/model.ts` beside the constant that hard-codes the choice, and in
+`web/src/registry/unbuilt.ts`.
+
+### The schema, and every document written before it
+
+`.dork` went to **schema 2**: a stack of nodes became nodes plus `edges` and
+`output`. Schema 1 wrote the wiring nowhere — it *was* the array order — so the
+migration in `web/src/io/document/migrate.ts` writes down what the order implied:
+one edge per adjacent pair on the `in` port, no edge into the first node, output
+is the last node. It runs on the raw JSON before any shape is asserted, so the
+validator describes the current schema and only the current schema.
+
+The migration adds what the new schema needs and changes nothing else — no
+parameter touched, no id rewritten, no node dropped. The property that matters,
+and the one `migrate.test.ts` holds: **a schema-1 document loads as a chain, and
+re-saving it produces schema-2 bytes that are the same picture.** Share links are
+covered by the same path, because a link carries a preset and a preset carries a
+document; the link's own encoding version is unchanged, so links made before the
+graph decode and then migrate.
+
 ## Feedback
 
 **One node reads the previous frame's output at its own position in the stack**
@@ -148,11 +234,14 @@ is the only thing in the catalogue that is not a pure function of its inputs.
 Everything below follows from that one sentence, and all three were decided in
 that note before any code was written.
 
-- **It is not a node graph.** Feedback is a node in the existing linear stack,
-  with the existing `.dork` schema and no node editor. What it needed from the
-  pass model is one new binding role, `feedback-color` (`web/src/types/gpu.ts`),
-  legal only on an effect declaring `readsFeedback`, checked in both directions
-  by `gpu/compiler.ts`.
+- **It did not need a node graph.** Feedback shipped as a node in the linear
+  stack, with the schema-1 `.dork` and no node editor — which is what made it
+  step 1 rather than step 3. What it needed from the pass model is one new
+  binding role, `feedback-color` (`web/src/types/gpu.ts`), legal only on an
+  effect declaring `readsFeedback`, checked in both directions by
+  `gpu/compiler.ts`. Multi-input has since landed and the editor **draws** the
+  loop, from the descriptor rather than from an edge: no document stores a
+  feedback edge, so a node that behaves as though it reads itself visibly does.
 - **The buffer is a stated value at frame 0, not whatever the pool held.**
   `gpu/feedback.ts` clears it to transparent black through a render pass, which
   is why `RENDER_ATTACHMENT` is in the texture pool's usage set. With `screen`,
@@ -454,7 +543,14 @@ web/
   src/ui/theme/           the only colours in the application: tokens.css, plus
                           the element base and the shared primitives. Nothing
                           else anywhere may hold a literal colour (F-UI-09)
-  src/ui/stack/           the stack editor
+  src/ui/stack/           the stack editor — the document as a list, and
+                          graph-view.ts, which says per row where that node sits
+                          in the wiring once the list stopped being it
+  src/ui/graph/           the node editor: the deterministic layout (positions
+                          are computed from the wiring, never stored), the view
+                          transform and the forgiving port snap, the drop
+                          judgement, and the keyboard path. Beside the stack
+                          panel rather than in place of it — see its index.ts
   src/ui/picker/          the effect picker: the matcher that says why a row is
                           on screen, the model that groups and judges the
                           catalogue, and the component. Split out of stack/

@@ -26,10 +26,10 @@ all named volumes and survive `down`.
 The application: a toolbar reading **open image · undo · redo · fit · 100% ·
 save · open · presets · export · batch · surprise me** on the left and
 **guide · dark** on the right, a stack panel on the left, a viewport in the
-middle, properties and palette on the right, a timeline along the bottom, and a
-status bar reading `effects 67` with the GPU adapter beside it and
-**source · docs · Made by ORKCOM** at its right end. Press **open image**,
-choose a picture, press **add node**, and pick an effect.
+middle, properties and palette on the right, a timeline and a **node editor**
+along the bottom, and a status bar reading `effects 71` with the GPU adapter
+beside it and **source · docs · Made by ORKCOM** at its right end. Press **open
+image**, choose a picture, press **add node**, and pick an effect.
 
 The chrome is neutral graphite and the green is a state colour — selected,
 moving, playing, live. **If green appears anywhere that is not a state, that is
@@ -42,6 +42,18 @@ raise the scale to 4x and write another; switch the format to **SVG** and write
 that; press **save** for a `.dork`, reload the page, press **open** and load it
 back — the picture should return exactly. Every one of those is a path a person
 takes, and none of them is covered by any of the three test suites.
+
+Since the graph landed there is a second pass worth taking, because the wiring
+has failure modes a chain did not. In the **node editor**: press **add node**
+twice, select the second node and press **X** to detach it — the stack panel
+should mark it *off-graph* rather than leaving it silently doing nothing. Select
+a detached source, press **C** to start a connection, step the target with the
+arrow keys and read the line under the graph: it names what the drop will do, and
+on an illegal target it shows the refusal instead. Step to a node's **Mask** port
+and press **Enter** — that is the whole of the masking UI, and it sets the
+node's coverage and draws the edge as one undo step. Then save, reload, and check
+the node editor lays the graph out in the same places: layout is derived from the
+wiring, so a document that moves between two loads is a bug in `ui/graph/layout.ts`.
 
 Three more that are equally uncovered, because they are about what the interface
 *says* rather than what it computes:
@@ -246,6 +258,13 @@ What the web suite covers today:
 | `src/export/trace.test.ts` | The vector path either side of the WASM call: index widening, the palette flatten in linear light, the clamps that keep a slider off a value the core throws on, and that a >256-colour frame is refused rather than quantized again |
 | `src/export/estimate.test.ts` | That the estimate below the budget *is* the file size, and above it lands close |
 | `src/io/document/*.test.ts` | `.dork` in and out including the self-contained variant, presets, the preset library, share fragments, and the starter set validated against the **real** catalogue |
+| `src/io/document/migrate.test.ts` | The schema 1 → 2 migration: a linear stack becomes the chain its order implied, every parameter survives, and a re-save is byte-identical to what the graph build would have written |
+| `src/graph/topology.test.ts` | Cycle rules — that a feedback edge may close a loop and nothing else may, that the refusal names the stuck nodes, and that the scheduling order is the same on every run |
+| `src/graph/edit.test.ts` | The editing surface: every refusal code and the sentence it carries, and that removing a node heals the graph rather than leaving it unrenderable |
+| `src/graph/mask.test.ts` | The three coverages, and that the CPU formulas and the WGSL agree on ordinals and channels |
+| `src/registry/graph.test.ts` | The grammar over a graph rather than a list: what a node may read, and what combination of effects is refused |
+| `src/ui/graph/*.test.ts` | The node editor's model, geometry, keyboard wiring and layout — including that the same document lays out identically twice |
+| `src/state/wiring.test.ts` | The store's wiring mutations, including that masking a node with a picture is one undo step |
 
 `registry.test.ts` ends with a coverage assertion built on a
 `Record<RegistryIssueCode, true>`: adding a rejection code to the validator

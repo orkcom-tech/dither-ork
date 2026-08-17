@@ -23,7 +23,22 @@ export type GraphErrorCode =
   | "unknown-node"
   /** A node declares the same input port twice. */
   | "duplicate-port"
-  /** The graph is not acyclic. Reported with the ids that could not be ordered. */
+  /** An edge names a port the destination node's effect does not declare. */
+  | "unknown-port"
+  /**
+   * A feedback edge whose producer is not the consumer itself.
+   *
+   * The frame store keys histories by node id and records each node's own
+   * composited output, so no other node's previous frame exists to read.
+   */
+  | "unsupported-feedback"
+  /**
+   * The graph has a cycle of ordinary edges. Reported with the ids that could
+   * not be ordered.
+   *
+   * A cycle closed by a **feedback** edge is legal and is not this: such an
+   * edge reads the previous frame, so it imposes no order within this one.
+   */
   | "cycle"
   /** A parameter value is NaN or infinite, so it cannot be hashed stably. */
   | "non-finite-parameter"

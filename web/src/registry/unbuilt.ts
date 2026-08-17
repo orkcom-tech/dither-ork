@@ -117,31 +117,23 @@ export const UNBUILT_FEATURES: readonly UnbuiltFeature[] = [
     ],
     nearest: ["concentric-rings", "wave-warp", "line-screen"],
   },
-  {
-    requirement: "F-PP-08",
-    name: "Node masking",
-    summary:
-      "Limit any node to part of the picture — by luminance range, by colour range, or by an uploaded mask image.",
-    reason:
-      "A mask is a second image edge on the render graph, and the graph carries one image edge per node. This is the only F-PP requirement with no descriptor, and it is a graph change rather than an effect.",
-    keywords: [
-      "mask",
-      "masking",
-      "selection",
-      "limit",
-      "restrict",
-      "region",
-      "matte",
-      "stencil",
-      "local",
-      "partial",
-      "apply to part",
-    ],
-    // Nothing here masks. Saying so is more use than pointing at a node that
-    // takes a second image for an unrelated purpose.
-    nearest: [],
-  },
 ];
+
+// F-PP-08, node masking, was here from phase 3 until multi-input landed. Its
+// stated reason — "a mask is a second image edge on the render graph, and the
+// graph carries one image edge per node" — stopped being true, so the entry is
+// gone rather than reworded. It is **not** an effect and never appears in the
+// catalogue: a mask is spatially-varying opacity, it lives on the node beside
+// `opacity` and `blend`, and every node in the catalogue has one for free. See
+// `web/src/graph/mask.ts`.
+//
+// Only the `image` coverage is reachable, by wiring a picture into a node's
+// mask port in the node editor. The luminance-band and colour coverages are
+// implemented and evaluated identically on both backends but have no control
+// that sets them, and neither has the channel choice or `invert`. That half is
+// unbuilt in the UI rather than in the engine, so it is recorded in the guide
+// and in docs/ARCHITECTURE.md instead of as an entry here — this table answers
+// "which effect is missing", and masking is not an effect.
 
 /**
  * The unbuilt feature a query is asking about, or `null`.

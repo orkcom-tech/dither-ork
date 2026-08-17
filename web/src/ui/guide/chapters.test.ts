@@ -40,6 +40,7 @@ describe("the guide's chapters", () => {
     expect(GUIDE_CHAPTERS.map((chapter) => chapter.id)).toEqual([
       "start",
       "stack",
+      "graph",
       "palette",
       "light",
       "index-map",

@@ -16,13 +16,14 @@ import {
 } from "@dnd-kit/sortable";
 
 import { logger } from "../../lib/log";
-import { analyseSources, validateStack, type EffectRegistry } from "../../registry";
+import { validateStack, type EffectRegistry } from "../../registry";
 // `field__note` lives there and the stack's empty state uses it. Imported here
 // rather than left to the properties panel's own import, so that this panel
 // styles correctly whatever else happens to be registered.
 import "../properties/properties.css";
 import { AddNodePicker } from "./AddNodePicker";
 import { StackRow } from "./StackRow";
+import { describeRows, shapeNote } from "./graph-view";
 import {
   indexOfNode,
   insertionIndex,
@@ -81,18 +82,35 @@ export function StackPanel({ store, registry }: StackPanelProps): React.ReactEle
   const insertAt = insertionIndex(stack, snapshot.selectedNodeId);
 
   /**
-   * What a source node in this stack discards.
+   * Where each row sits in the wiring, and what a source node discards.
    *
-   * Not part of `validateStack` and deliberately so: a source node is legal
-   * anywhere, because F-ST-03's opacity and blend make "a gradient over the
-   * photograph" a real thing to want. What is owed is visibility, not refusal —
-   * `registry/stack.ts` argues it at length. The rows read this to dim
-   * themselves and to say which node is throwing their work away.
+   * The panel is a **view onto the graph**, not a second model of it: it lists
+   * every node in the document's own order and this says how each one is
+   * connected. On a chain — every document written before schema 2 — every row
+   * comes back plain and the panel is exactly what it was. See `./graph-view.ts`
+   * for the argument.
+   *
+   * The shadow analysis comes from here rather than from `registry/stack.ts`'s
+   * `analyseSources`, and that swap is a bug fix rather than a preference: that
+   * function decides what a source node throws away from its **position in the
+   * list**, which stopped being the wiring at schema 2. A generator feeding some
+   * node's mask port sits at the end of the list and discards nothing, and the
+   * positional answer marks the whole chain as thrown away — a confident, false
+   * sentence on every row. The reasoning is on `describeRows`.
    */
-  const sources = React.useMemo(
-    () => analyseSources(registry, stack),
-    [registry, stack],
+  const view = React.useMemo(
+    () =>
+      describeRows(
+        {
+          stack,
+          edges: snapshot.document.edges,
+          output: snapshot.document.output,
+        },
+        registry,
+      ),
+    [stack, snapshot.document.edges, snapshot.document.output, registry],
   );
+  const shape = shapeNote(view);
 
   const issues = React.useMemo(() => {
     const validation = validateStack(registry, refs);
@@ -203,6 +221,13 @@ export function StackPanel({ store, registry }: StackPanelProps): React.ReactEle
         </span>
       </div>
 
+      {/*
+        Shown only when there is something to say. A line reading "this is a
+        chain" on every document anybody has ever made is noise that teaches
+        people to stop reading this bar.
+      */}
+      {shape === null ? null : <p className="stack__shape">{shape}</p>}
+
       {soloNode === undefined ? null : (
         <div className="stack__solo">
           <span>
@@ -280,8 +305,9 @@ export function StackPanel({ store, registry }: StackPanelProps): React.ReactEle
                     store.setNodeBlend(node.id, blend);
                   }}
                   excluded={isExcludedBySolo(stack, snapshot.soloNodeId, position)}
-                  shadowed={sources.shadowedById.get(node.id)?.message ?? null}
+                  shadowed={view.shadowed.get(node.id) ?? null}
                   issue={issues.get(node.id) ?? null}
+                  wiring={view.rows.get(node.id) ?? null}
                   onSelect={() => store.selectNode(node.id)}
                   onToggleEnabled={() => {
                     log.info("node enable toggled", {

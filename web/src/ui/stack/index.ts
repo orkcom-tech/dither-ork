@@ -68,6 +68,14 @@ export {
   type GrammarVerdict,
 } from "./model";
 export {
+  describeRows,
+  shapeNote,
+  type GraphView,
+  type GraphViewInput,
+  type RowNote,
+  type RowPlacement,
+} from "./graph-view";
+export {
   buildPicker,
   firstAvailable,
   flatten,

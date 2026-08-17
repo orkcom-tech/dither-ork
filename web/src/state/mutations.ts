@@ -35,6 +35,7 @@ import type {
   BlendMode,
   Clock,
   DitherDocument,
+  NodeMask,
   Palette,
   ParameterValue,
   SourceRef,
@@ -42,8 +43,20 @@ import type {
 } from "../types/document";
 import type { EffectRegistry } from "../registry";
 import { coerceParams, defaultParams } from "../registry";
-import { SEED_RANGE } from "../types/registry";
+import { MASK_INPUT_PORT, SEED_RANGE } from "../types/registry";
 import { logger } from "../lib/log";
+import {
+  addGraphNode,
+  chainOf,
+  connect,
+  disconnect,
+  draftOf,
+  isLinearChain,
+  removeGraphNode,
+  setNodeMask as setGraphNodeMask,
+  setOutput as setGraphOutput,
+  type GraphDraft,
+} from "../graph/edit";
 import { createStackNode, nextNodeId } from "./document";
 import { DocumentError } from "./errors";
 
@@ -75,6 +88,32 @@ function withStack(
   return { ...document, stack };
 }
 
+function withDraft(document: DitherDocument, draft: GraphDraft): DitherDocument {
+  return { ...document, stack: draft.stack, edges: draft.edges, output: draft.output };
+}
+
+/**
+ * The list order, restored after a graph edit.
+ *
+ * `addGraphNode` appends — it is about wiring and has no opinion about where a
+ * row appears — and these mutations are the list-shaped ones the stack panel
+ * drives, where the insertion index is the gesture. So the wiring comes from
+ * the graph module and the ordering is applied here, rather than the graph
+ * module growing an index parameter it has no use for.
+ */
+function reorderInto(
+  stack: readonly StackNode[],
+  nodeId: string,
+  at: number,
+): readonly StackNode[] {
+  const without = stack.filter((node) => node.id !== nodeId);
+  const node = stack.find((entry) => entry.id === nodeId);
+  if (node === undefined) return stack;
+  const next = [...without];
+  next.splice(at, 0, node);
+  return next;
+}
+
 /**
  * Add an effect to the stack (F-ST-01).
  *
@@ -102,10 +141,18 @@ export function addNode(
   const nodeId = nextNodeId(document);
   const node = createStackNode(nodeId, effectId, defaultParams(descriptor));
 
-  const stack = [...document.stack];
-  stack.splice(at, 0, node);
+  // Wired into the chain after whatever the row above it is, which is what
+  // "insert here" meant when the document was a list and is now a statement
+  // about edges: everything that read that node reads the new one instead.
+  const after = at === 0 ? null : (document.stack[at - 1]?.id ?? null);
+  const draft = addGraphNode(
+    { stack: document.stack, edges: document.edges, output: document.output },
+    node,
+    after,
+  );
+  const stack = reorderInto(draft.stack, nodeId, at);
   log.info("node added", { nodeId, effect: effectId, at, stack: stack.length });
-  return { document: withStack(document, stack), nodeId };
+  return { document: withDraft(document, { ...draft, stack }), nodeId };
 }
 
 function clampInsertIndex(document: DitherDocument, index?: number): number {
@@ -129,16 +176,21 @@ function clampInsertIndex(document: DitherDocument, index?: number): number {
  */
 export function removeNode(document: DitherDocument, nodeId: string): DitherDocument {
   const at = indexOfNode(document, nodeId);
-  const stack = [...document.stack];
-  stack.splice(at, 1);
+  // The chain heals through the gap: every consumer of this node is rewired to
+  // whatever fed its `in` port, so deleting from the middle leaves a chain
+  // rather than two disconnected halves.
+  const draft = removeGraphNode(
+    { stack: document.stack, edges: document.edges, output: document.output },
+    nodeId,
+  );
   const bindings = document.bindings.filter((binding) => binding.nodeId !== nodeId);
   log.info("node removed", {
     nodeId,
     at,
-    stack: stack.length,
+    stack: draft.stack.length,
     bindingsDropped: document.bindings.length - bindings.length,
   });
-  return { ...document, stack, bindings };
+  return { ...withDraft(document, draft), bindings };
 }
 
 /**
@@ -159,8 +211,14 @@ export function duplicateNode(
 
   const copyId = nextNodeId(document);
   const copy: StackNode = { ...original, id: copyId };
-  const stack = [...document.stack];
-  stack.splice(at + 1, 0, copy);
+  // Directly after the original, wired into the chain there — a duplicate that
+  // was not in the picture would not be a duplicate.
+  const draft = addGraphNode(
+    { stack: document.stack, edges: document.edges, output: document.output },
+    copy,
+    original.id,
+  );
+  const stack = reorderInto(draft.stack, copyId, at + 1);
 
   const copiedBindings = document.bindings
     .filter((binding) => binding.nodeId === nodeId)
@@ -174,8 +232,7 @@ export function duplicateNode(
   });
   return {
     document: {
-      ...document,
-      stack,
+      ...withDraft(document, { ...draft, stack }),
       bindings: [...document.bindings, ...copiedBindings],
     },
     nodeId: copyId,
@@ -208,8 +265,134 @@ export function moveNode(
   const [moved] = stack.splice(from, 1);
   if (moved === undefined) throw new DocumentError("unknown-node", `no node "${nodeId}"`);
   stack.splice(to, 0, moved);
+
+  // On a chain, list order **is** the wiring, so a reorder has to rewire or the
+  // drag would move a row and not the picture. On anything else it is not: the
+  // list is the editor's ordering of rows and the edges are the graph, so the
+  // wiring is left alone — and said so, because a drag that changes nothing
+  // visible should be explicable from the log rather than look like a bug.
+  const draft: GraphDraft = { stack: document.stack, edges: document.edges, output: document.output };
+  if (!isLinearChain(draft)) {
+    log.info("node moved in the list; the document is a graph, so the wiring is unchanged", {
+      nodeId,
+      from,
+      to,
+      edges: document.edges.length,
+    });
+    return withStack(document, stack);
+  }
+  const chain = chainOf(stack);
   log.info("node moved", { nodeId, from, to });
-  return withStack(document, stack);
+  return withDraft(document, { stack, edges: chain.edges, output: chain.output });
+}
+
+// --- the wiring (schema 2) ---------------------------------------------
+//
+// Five mutations, and every rule in them belongs to `graph/edit.ts`. What is
+// here is the document-shaped wrapper: the same immutability rule as everything
+// above, and the bindings and selection consequences the graph module has no
+// business knowing about.
+//
+// They **throw** the refusal `connectionProblem` would have returned, as a
+// `GraphError` whose message is written to be shown. The editor asks first — on
+// every pointer move while a wire is in hand — so it never provokes one; a
+// caller that did not ask gets the same sentence rather than a silently dropped
+// edit. That is the split `graph/edit.ts` describes at length and it is not
+// re-decided here.
+
+/**
+ * Wire one node's output into another's port.
+ *
+ * Replaces whatever the port held, because that is what dropping a wire on an
+ * occupied port means everywhere it exists, and because the alternative —
+ * disconnect, then connect — is two undo steps for one gesture.
+ */
+export function connectNodes(
+  document: DitherDocument,
+  registry: EffectRegistry,
+  from: string,
+  to: string,
+  port: string,
+): DitherDocument {
+  return withDraft(document, connect(draftOf(document), registry, from, to, port));
+}
+
+/**
+ * Clear one port. A port with no edge is not an error to clear.
+ *
+ * Returns the **same document** when there was nothing to clear, rather than an
+ * equal copy. The store skips the commit on identity, so a copy here would put
+ * an undo step in the history for a gesture that changed nothing — and undo
+ * would then appear to do nothing too.
+ */
+export function disconnectPort(
+  document: DitherDocument,
+  to: string,
+  port: string,
+): DitherDocument {
+  const draft = draftOf(document);
+  const next = disconnect(draft, to, port);
+  // `disconnect` hands back the draft it was given when it removed nothing.
+  if (next === draft) return document;
+  return withDraft(document, next);
+}
+
+/**
+ * Point the document's picture at a node (schema 2's `output`).
+ *
+ * Not the same thing as solo (F-ST-02), and the two are easy to confuse. Solo
+ * moves the *render's* output upstream without touching the document and is
+ * forgotten when it is cleared; this **is** the document — it is what a `.dork`
+ * saves, what an export writes and what a share link carries.
+ */
+export function setOutputNode(
+  document: DitherDocument,
+  nodeId: string | null,
+): DitherDocument {
+  return withDraft(document, setGraphOutput(draftOf(document), nodeId));
+}
+
+/**
+ * Set or clear a node's mask (F-PP-08).
+ *
+ * Clearing a mask that read a picture also drops the mask edge — `graph/edit.ts`
+ * does that, and it is the difference between one gesture and a document that
+ * will not render until a second one.
+ */
+export function setNodeMask(
+  document: DitherDocument,
+  nodeId: string,
+  mask: NodeMask | null,
+): DitherDocument {
+  return withDraft(document, setGraphNodeMask(draftOf(document), nodeId, mask));
+}
+
+/**
+ * Mask a node with a picture: set image coverage **and** wire it, as one
+ * mutation.
+ *
+ * One function rather than two calls because it is one gesture — dropping a
+ * branch on a mask port — and because the two halves are not independently
+ * useful: image coverage with nothing wired is a document `graph/plan.ts`
+ * refuses, and an edge into the mask port of an unmasked node is one
+ * `connectionProblem` refuses. Committing them separately would put an
+ * unrenderable document in the undo history between them.
+ *
+ * `mask` is a parameter rather than a constant so the channel and the invert
+ * flag stay the editor's decision; this module has no opinion about which
+ * channel a picture should be read by.
+ */
+export function maskNodeWith(
+  document: DitherDocument,
+  registry: EffectRegistry,
+  from: string,
+  to: string,
+  mask: NodeMask,
+): DitherDocument {
+  const masked = setGraphNodeMask(draftOf(document), to, mask);
+  const wired = connect(masked, registry, from, to, MASK_INPUT_PORT);
+  log.info("node masked with a picture", { from, to });
+  return withDraft(document, wired);
 }
 
 /** Per-node enable toggle (F-ST-02). */

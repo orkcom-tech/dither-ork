@@ -23,7 +23,7 @@
  * both ways.
  */
 
-import type { BlendMode, Palette } from "../types/document";
+import type { BlendMode, NodeMask, Palette } from "../types/document";
 import type {
   ContentHash,
   GraphNode,
@@ -31,11 +31,20 @@ import type {
   RenderGraph,
 } from "../types/graph";
 import type { EffectDescriptor, ExecutionKind } from "../types/registry";
+import { MASK_INPUT_PORT } from "../types/registry";
 import type { GraphTopology } from "./topology";
-import { PORT_ORDER, analyseGraph } from "./topology";
+import { analyseGraph } from "./topology";
+import { isFeedbackRole } from "./ports";
 import type { FeedbackAnalysis } from "./feedback";
 import { analyseFeedback } from "./feedback";
-import { ASSET_PARAM_KEY, PALETTE_PARAM_KEY, contentHash, paletteDigest } from "./hash";
+import {
+  ASSET_PARAM_KEY,
+  MASK_PARAM_KEY,
+  PALETTE_PARAM_KEY,
+  contentHash,
+  paletteDigest,
+} from "./hash";
+import { maskDigest, maskNeedsImage, maskProblem } from "./mask";
 import type { NodeAssets } from "./assets";
 import { GraphError, expect } from "./errors";
 
@@ -78,6 +87,15 @@ export interface ResolvedInput {
 export interface CompositeOp {
   readonly opacity: number;
   readonly blend: BlendMode;
+  /**
+   * Spatially-varying opacity (F-PP-08), or `null` on an unmasked node.
+   *
+   * It rides on the composite rather than being a step of its own because that
+   * is what it *is*: the coverage multiplies `opacity` per pixel, so a masked
+   * node costs the same one dispatch an unmasked composited node costs and
+   * needs no extra buffer. See `graph/mask.ts`.
+   */
+  readonly mask: NodeMask | null;
 }
 
 export interface PlannedNode {
@@ -262,11 +280,19 @@ export function prepareGraph(
       "invariant",
       `descriptor for ${nodeId} missing`,
     );
+    const ports = expect(topology.ports.get(nodeId), "invariant", `ports for ${nodeId} missing`);
 
+    // Port order comes from the descriptor, so it is a property of the code
+    // rather than of however a document happened to list its edges — which is
+    // what `ContentHashInput.inputs` means by "in port order". A **feedback**
+    // port is skipped: the previous frame comes out of the frame store, not out
+    // of a buffer the plan resolves, and folding a hash for it would be a hash
+    // of the node's own output before it exists.
     const resolved: ResolvedInput[] = [];
-    for (const port of PORT_ORDER) {
-      const origin = declaredOrigin(node, port);
-      if (origin !== null) resolved.push({ port, origin });
+    for (const port of ports) {
+      if (isFeedbackRole(port.role)) continue;
+      const origin = declaredOrigin(node, port.key);
+      if (origin !== null) resolved.push({ port: port.key, origin });
     }
     inputs.set(nodeId, resolved);
 
@@ -279,12 +305,14 @@ export function prepareGraph(
 
     const usesPalette = descriptor.producesIndexMap || descriptor.requiresIndexMap;
     const assetDigest = assets?.digestOf(nodeId) ?? null;
+    const mask = node.mask ?? null;
     const params =
-      usesPalette || assetDigest !== null
+      usesPalette || assetDigest !== null || mask !== null
         ? {
             ...node.params,
             ...(usesPalette ? { [PALETTE_PARAM_KEY]: digest } : {}),
             ...(assetDigest === null ? {} : { [ASSET_PARAM_KEY]: assetDigest }),
+            ...(mask === null ? {} : { [MASK_PARAM_KEY]: maskDigest(mask) }),
           }
         : node.params;
 
@@ -433,7 +461,7 @@ export function planRender(
             ? { kind: "batch" as const, nodeId: input.origin.nodeId }
             : input.origin,
       })),
-      composite: compositeOf(node, descriptor),
+      composite: compositeOf(node, descriptor, resolved),
       cacheable: cacheable(nodeId),
     };
   };
@@ -499,16 +527,65 @@ export function planRender(
  * slider that has no effect on one node in the stack is precisely the thing
  * this round was for.
  */
-function compositeOf(node: GraphNode, descriptor: EffectDescriptor): CompositeOp | null {
-  if (node.opacity === 1 && node.blend === "normal") return null;
+function compositeOf(
+  node: GraphNode,
+  descriptor: EffectDescriptor,
+  resolved: readonly ResolvedInput[],
+): CompositeOp | null {
+  const mask = node.mask ?? null;
+
+  // A mask makes the composite non-identity whatever the opacity is: at full
+  // opacity in normal blend an unmasked node emits its own output everywhere,
+  // and a masked one emits its input wherever coverage is zero. So the identity
+  // shortcut is only available to an unmasked node.
+  if (mask === null && node.opacity === 1 && node.blend === "normal") return null;
+
   if (descriptor.resamples === true) {
     throw new GraphError(
       "unsupported-composite",
-      `node ${node.id} runs ${descriptor.name}, which writes a different extent than it reads, and asks for opacity ${node.opacity} in blend "${node.blend}"; a composite blends a node's output with its own input pixel for pixel, and those two are different pixel grids`,
+      mask === null
+        ? `node ${node.id} runs ${descriptor.name}, which writes a different extent than it reads, and asks for opacity ${node.opacity} in blend "${node.blend}"; a composite blends a node's output with its own input pixel for pixel, and those two are different pixel grids`
+        : `node ${node.id} runs ${descriptor.name}, which writes a different extent than it reads, and carries a mask; a mask is opacity per pixel and there is no pixel-for-pixel correspondence between this node's output and its own input for the coverage to be of`,
       { nodeId: node.id, effect: node.effect, opacity: node.opacity, blend: node.blend },
     );
   }
-  return { opacity: node.opacity, blend: node.blend };
+
+  if (mask !== null) {
+    // Checked here rather than trusted from the document, because this is the
+    // last point before pixels: a mask whose band is empty or whose tolerance
+    // is zero renders a node that contributes nothing anywhere, which looks
+    // exactly like a broken effect.
+    const problem = maskProblem(mask);
+    if (problem !== null) {
+      throw new GraphError(
+        "unsupported-composite",
+        `node ${node.id} carries a mask that cannot be evaluated: ${problem}`,
+        { nodeId: node.id, effect: node.effect },
+      );
+    }
+    // The two halves of an image mask have to agree. A mask edge with no image
+    // mask is an edge that does nothing, and an image mask with no edge is a
+    // node asking for coverage from a picture nobody wired — both are refused
+    // rather than defaulted to "fully covered", which would be a mask that
+    // silently is not one.
+    const wired = resolved.some((input) => input.port === MASK_INPUT_PORT);
+    if (maskNeedsImage(mask) && !wired) {
+      throw new GraphError(
+        "unsupported-composite",
+        `node ${node.id} takes its coverage from a mask image, and nothing is wired to its "${MASK_INPUT_PORT}" port`,
+        { nodeId: node.id, effect: node.effect },
+      );
+    }
+    if (!maskNeedsImage(mask) && wired) {
+      throw new GraphError(
+        "unsupported-composite",
+        `node ${node.id} has a picture wired to its "${MASK_INPUT_PORT}" port but takes its coverage from its own input (${mask.source.kind}); the edge would be read by nothing`,
+        { nodeId: node.id, effect: node.effect },
+      );
+    }
+  }
+
+  return { opacity: node.opacity, blend: node.blend, mask };
 }
 
 /**

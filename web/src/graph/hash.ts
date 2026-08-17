@@ -256,6 +256,22 @@ export const PALETTE_PARAM_KEY = "@palette";
  */
 export const ASSET_PARAM_KEY = "@assets";
 
+/**
+ * The key a node's mask is folded in under.
+ *
+ * Same mechanism and same reason again (F-PP-08). A mask is spatially-varying
+ * opacity, `opacity` is already in the hash because it changes the pixels the
+ * node emits, and a mask changes *which* pixels — so a document whose mask
+ * moved is a different picture and must not be served the previous one.
+ *
+ * The mask's own edge, when it has one, needs no help: an image mask is wired
+ * to the `mask` port and that port's producer hash is already in
+ * `ContentHashInput.inputs` in port order.
+ *
+ * The `@` prefix is not a legal registry parameter key, so it cannot collide.
+ */
+export const MASK_PARAM_KEY = "@mask";
+
 // --- the hashes the graph mints -----------------------------------------
 
 /**

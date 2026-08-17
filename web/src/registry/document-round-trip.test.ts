@@ -173,6 +173,8 @@ const DOCUMENT: DitherDocument = {
       seed: 991,
     },
   ],
+  edges: [],
+  output: "n1",
   bindings: [
     {
       nodeId: "n1",

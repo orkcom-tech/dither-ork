@@ -190,7 +190,7 @@ describe("the index-map rule", () => {
     expect(result.ok).toBe(false);
     expect(result.issues.map((i) => i.code)).toEqual(["index-map-missing"]);
     expect(result.issues[0]?.nodeId).toBe("n2");
-    expect(result.issues[0]?.message).toContain("nothing in front of it quantizes");
+    expect(result.issues[0]?.message).toContain("nothing upstream of it quantizes");
   });
 
   it("rejects a consumer under a dither that emits no map, naming both", () => {
@@ -359,7 +359,7 @@ describe("the shipped catalogue", () => {
   it("rejects an outline with no dither in front of it at all", () => {
     const result = validateStack(registry, [node("n1", "blur"), node("n2", "outline")]);
     expect(result.ok).toBe(false);
-    expect(result.issues[0]?.message).toContain("nothing in front of it quantizes");
+    expect(result.issues[0]?.message).toContain("nothing upstream of it quantizes");
   });
 });
 

@@ -9,6 +9,107 @@ also the day it landed on `main` — every push that passes CI deploys itself.
 
 ### Added
 
+- **The node editor — where the wiring is actually drawn and changed.** A band
+  under the picture, so the frame stays live while you wire. Nodes on a canvas
+  with their ports labelled, wires you drag between them, pan, zoom, select,
+  duplicate, delete, and one click to say which node is the picture.
+
+  **Connecting is forgiving and refusals are sentences.** A wire lands on the
+  nearest port rather than on the one you hit, and a connection that cannot be
+  made is refused *with the reason* — the same reason the engine would give, in
+  the same voice the effect picker uses when it explains why an effect cannot go
+  where the caret is. An illegal port is still something you can aim at and read,
+  because being told why is the point.
+
+  **Dropping a branch on a mask port masks the node.** That one gesture sets the
+  node's coverage to read the picture and wires it, as a single undo step. It is
+  the path F-PP-08 exists for, and asking for a separate first step is how a
+  feature becomes something people are told about rather than something they use.
+
+  **All of it works from the keyboard.** Arrows move between nodes; `C` starts a
+  connection and the arrows step through every port it could land on, showing
+  the refusal or the consequence for each; `Enter` commits. Disconnect, output,
+  duplicate, delete, zoom and fit are all keys, and every port is a real focusable
+  control with a name that says what it is and what is wired to it. The list of
+  keys is printed in the panel rather than in documentation nobody opens.
+
+  **Positions are computed from the wiring and are not stored.** A node sits one
+  column right of everything it reads and level with the picture it transforms,
+  so a chain comes out as a straight line and a mask branch hangs below the node
+  it modifies. The same document therefore lays out identically on every machine,
+  and a document nobody has opened in the editor still reads correctly. The
+  consequence is stated in the panel rather than discovered: **a node cannot be
+  dragged to a new place**, because there is nowhere to save one and a drag that
+  is lost on reload is a control that only appears to work.
+
+- **The stack panel stays, as a view onto the graph.** Most documents are chains,
+  most people think in chains, and every document, preset and share link written
+  before schema 2 is one — so the list is not replaced and is not a second model
+  of the document. It lists every node in the document's own order, and now says
+  per row where that node sits in the wiring: on the chain to the picture, or
+  feeding some other node's mask, or reaching the frame not at all. On a chain
+  there is nothing to say and the panel is exactly what it was.
+
+  Fixed with it: **a generator wired into a mask port no longer claims to throw
+  the whole stack away.** What a source node discards was decided from its
+  position in the list, which stopped being the wiring at schema 2; it is now
+  read off the wiring, which gives the same answer on a chain and the true one
+  on a graph.
+
+- **Multiple image inputs per node, and the wiring written down.** A `.dork` is
+  now **nodes plus edges** rather than a list whose order was the wiring. An
+  effect declares how many pictures it reads and what each one *means* — a mask
+  is not a second layer is not a displacement source — so the editor can label a
+  port and refuse nonsense before a wire is dropped rather than after a render
+  fails. All 71 shipped effects declare nothing and still read one picture; that
+  is what the default is for, and none of them was touched.
+
+  **Every existing document, preset and share link loads as the chain it always
+  was.** Schema 1 is migrated on load: one edge per adjacent pair, the last node
+  as the picture, and nothing else changed. Load it, save it, load it again and
+  render — the graph and every node's content hash are identical, which is the
+  test that matters, because two graphs with the same hashes cannot draw
+  different pixels.
+
+- **Node masking (F-PP-08), recorded as unbuilt since phase 3.** Its stated
+  reason — "a mask is a second image edge, and the graph carries one image edge
+  per node" — stopped being true, so it is built.
+
+  A mask is **spatially-varying opacity** and nothing else. It is not an effect
+  and never appears in the catalogue: it sits on the node beside opacity and
+  blend, it is applied by the same composite those two are, and **every node is
+  maskable for free**. Coverage comes from a luminance band, from nearness to a
+  colour measured in OKLab, or from a picture wired into the node's mask port —
+  a second branch of the graph. Mask and opacity multiply, because they answer
+  different questions: how much of this node overall, and where.
+
+  Two nodes are refused rather than quietly unmasked. A node that **resamples**
+  has no pixel-for-pixel correspondence with its own input, so there is no
+  picture for coverage to be *of*; it gets no mask port at all. A mask that reads
+  a picture with nothing wired to it is an error, not full coverage.
+
+- **Cycles are legal where a feedback edge makes them.** "No cycles" was an
+  invariant; it is now a property that exactly one kind of edge may violate,
+  because a feedback edge reads the previous frame and imposes no order within
+  this one. Everything else the stack grammar refused, graph validation still
+  refuses — index-map producers and consumers, extent rules, CMYK halftone's
+  missing map — and it adds the refusals a graph makes possible: a dangling edge,
+  a port that does not exist, two pictures on one port, a document that names no
+  picture. A graph that cannot render is impossible to build.
+
+  The limit is stated rather than hidden: the only feedback edge that exists is a
+  node reading **its own** previous output, because the frame store is keyed by
+  node id. A general delay edge — B reading A's previous frame — is refused
+  naming the reason, not accepted and then rendered from pixels nobody wrote.
+
+- **The evaluation order is deterministic, and that is now a guarantee.** A DAG
+  has no single topological order, and the project promises the same document
+  gives the same picture. Ties are broken by the execution kind just scheduled —
+  which keeps GPU runs coalesced and the boundary crossings down — and then by
+  the node's position in the document's own list. Never by a `Set`'s iteration
+  order, which is deterministic today for reasons nobody wrote down.
+
+
 - **Generators — three effects that take no image, so a document can exist
   without a photograph.** `Noise field`, `Gradient` and `Shape` sit in a new
   `source` slot and make their picture from their parameters alone. **new
@@ -75,6 +176,47 @@ also the day it landed on `main` — every push that passes CI deploys itself.
     with the existing preview badge up and a "replaying k/n" counter on the
     transport bar. Nothing anywhere shows a frame the export would not produce:
     a frame the store cannot serve is refused rather than faked.
+
+### Fixed
+
+- **Deleting the picture that fed a mask left a document that would not render.**
+  Removing a node rewires its consumers to whatever fed *its* `in` port, which is
+  what makes deleting from the middle of a chain leave a chain. A generator has
+  nothing feeding it, so its consumers simply became roots — correct for a
+  picture, wrong for a mask: the masked node went on saying its coverage came
+  from a picture, the edge carrying it was gone, and the renderer refused the
+  pair. Undo was the only way back, and after a reload there was no undo, because
+  nothing in the editor can clear a mask. A mask edge that cannot be healed now
+  takes the mask with it — the same pairing `setNodeMask` already enforced from
+  the other direction.
+
+- **Four source files were binary as far as git was concerned.** A raw NUL byte
+  was being used as a key separator inside template literals, and one in a
+  regular expression's character class. Where the byte fell inside git's first
+  8000 bytes — `ui/graph/model.ts`, the node editor's model, and
+  `batch/destination.ts` — git classified the file as binary and refused to diff
+  it, so 19KB of new code would have been committed and reviewed as an opaque
+  blob. They are `\u0000` escapes now: identical at runtime, and text again.
+
+### Known gaps
+
+Stated here because they are the difference between what this release built and
+what it was for.
+
+- **No node takes a second picture.** The graph carries as many input ports as an
+  effect declares, and of the 71 effects every one declares a single image input;
+  only `feedback` has a second port, and that is its own previous frame. So two
+  branches can converge on a node's **mask** port and nowhere else. Blending two
+  chains as colour and displacing one picture by another — the other two reasons
+  multiple inputs were built — need a node that does not exist yet. The `layer`
+  and `displace` roles are defined and unused.
+
+- **Masking exposes one of its three coverages.** F-PP-08 asks for coverage from
+  a luminance range, a colour range, or a picture. All three are implemented and
+  agree between the CPU and GPU paths; only the picture can be reached, by wiring
+  a branch into a mask port, and it always uses the luminance channel. There is
+  no channel picker, no invert, and no control that clears a mask. The
+  requirement is recorded as partly built rather than done.
 
 ## 2026-08-08
 

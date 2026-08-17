@@ -78,15 +78,22 @@ describe("the shader transcription", () => {
   });
 
   it("has an arm in blend_channel for every ordinal", () => {
+    // Scoped to `blend_channel`'s own body rather than the whole file: the
+    // masking half (F-PP-08) has a switch of its own over MASK_CHANNELS, and a
+    // file-wide scan would count its arms as blend modes.
+    const body = /fn blend_channel\([\s\S]*?\n\}/.exec(wgsl)?.[0];
+    expect(body, "_composite.wgsl declares no blend_channel").not.toBeUndefined();
     // The last mode is the `default` arm — WGSL requires one, and the
     // convention (shaders/CONVENTIONS.md) is to spend it on the last real case
     // rather than on a catch-all that could mask a mode nobody wired up.
-    const arms = [...wgsl.matchAll(/case\s+(\d+)u\s*:/g)].map((match) => Number(match[1]));
+    const arms = [...(body ?? "").matchAll(/case\s+(\d+)u\s*:/g)].map((match) =>
+      Number(match[1]),
+    );
     const last = BLEND_MODES.length - 1;
     expect(arms.sort((a, b) => a - b)).toEqual(
       BLEND_MODES.slice(0, last).map((_, index) => index),
     );
-    expect(wgsl).toMatch(/default\s*:/);
+    expect(body).toMatch(/default\s*:/);
   });
 });
 
@@ -159,7 +166,7 @@ describe("blendChannel", () => {
 describe("compositeChannel", () => {
   it("is the base at opacity zero, for every mode", () => {
     for (const mode of BLEND_MODES) {
-      expect(compositeChannel({ opacity: 0, blend: mode }, 0.3, 0.9), mode).toBeCloseTo(
+      expect(compositeChannel({ opacity: 0, blend: mode, mask: null }, 0.3, 0.9), mode).toBeCloseTo(
         0.3,
         12,
       );
@@ -168,7 +175,7 @@ describe("compositeChannel", () => {
 
   it("is the blend at opacity one, for every mode", () => {
     for (const mode of BLEND_MODES) {
-      expect(compositeChannel({ opacity: 1, blend: mode }, 0.3, 0.9), mode).toBeCloseTo(
+      expect(compositeChannel({ opacity: 1, blend: mode, mask: null }, 0.3, 0.9), mode).toBeCloseTo(
         blendChannel(mode, 0.3, 0.9),
         12,
       );
@@ -176,7 +183,7 @@ describe("compositeChannel", () => {
   });
 
   it("interpolates linearly between the two", () => {
-    expect(compositeChannel({ opacity: 0.5, blend: "normal" }, 0.2, 0.8)).toBeCloseTo(0.5, 12);
+    expect(compositeChannel({ opacity: 0.5, blend: "normal", mask: null }, 0.2, 0.8)).toBeCloseTo(0.5, 12);
   });
 });
 
@@ -195,7 +202,7 @@ describe("compositeLinearSurface", () => {
     const base = surface(4, 0.2);
     const top: CpuColorSurface = { ...surface(4, 0.8), a: new Float32Array(4).fill(0.5) };
 
-    const out = compositeLinearSurface(base, top, { opacity: 0.5, blend: "normal" }, 4);
+    const out = compositeLinearSurface(base, top, { opacity: 0.5, blend: "normal", mask: null }, 4);
 
     for (let i = 0; i < 4; i += 1) {
       expect(out.r[i]).toBeCloseTo(0.5, 6);
@@ -211,7 +218,7 @@ describe("compositeLinearSurface", () => {
     const base = surface(2, 0.35);
     const top = surface(2, 0.9);
     for (const mode of BLEND_MODES) {
-      const out = compositeLinearSurface(base, top, { opacity: 0, blend: mode }, 2);
+      const out = compositeLinearSurface(base, top, { opacity: 0, blend: mode, mask: null }, 2);
       expect(out.r[0], mode).toBeCloseTo(0.35, 6);
     }
   });
@@ -219,7 +226,7 @@ describe("compositeLinearSurface", () => {
   it("returns a new surface rather than writing through either input", () => {
     const base = surface(2, 0.2);
     const top = surface(2, 0.8);
-    const out = compositeLinearSurface(base, top, { opacity: 1, blend: "normal" }, 2);
+    const out = compositeLinearSurface(base, top, { opacity: 1, blend: "normal", mask: null }, 2);
     expect(out.r).not.toBe(base.r);
     expect(out.r).not.toBe(top.r);
     expect(base.r[0]).toBeCloseTo(0.2, 6);
@@ -233,6 +240,7 @@ describe("compositeLinearSurface", () => {
     expect(() => compositeLinearSurface(surface(4, 0.2), surface(9, 0.8), {
       opacity: 0.5,
       blend: "normal",
+      mask: null,
     }, 4)).toThrow(/9 samples/);
   });
 });

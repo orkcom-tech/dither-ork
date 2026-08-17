@@ -10,7 +10,7 @@
  * See docs/ARCHITECTURE.md, "Render graph" and "Data layout".
  */
 
-import type { BlendMode, Palette, ParameterValue } from "./document";
+import type { BlendMode, NodeMask, Palette, ParameterValue } from "./document";
 import type { ExecutionKind } from "./registry";
 
 // --- buffers ------------------------------------------------------------
@@ -118,10 +118,22 @@ export interface FrameBuffer {
 // --- nodes --------------------------------------------------------------
 
 /**
- * Input ports. `in` is the image; `mask` limits the node's effect to part of it
- * (F-PP-08) and is absent on nodes that do not support masking.
+ * An input port key.
+ *
+ * A `string` rather than a closed union, and that widening is the whole of what
+ * multi-input changed in this file. The set of ports is a property of the
+ * *effect*, declared as `EffectDescriptor.inputs` — a node that displaces one
+ * picture by another names its second port `displace`, a node that blends two
+ * chains names its second port `layer`, and neither can be enumerated here
+ * without this file knowing the catalogue.
+ *
+ * Nothing accepts an arbitrary string in practice: `graph/ports.ts` resolves a
+ * node's legal ports from its descriptor and `graph/topology.ts` refuses an
+ * edge naming one the node does not declare. Two keys are fixed for every node
+ * — `in`, the picture, and `mask`, spatially-varying opacity (F-PP-08) — and
+ * both are constants in `types/registry.ts`.
  */
-export type InputPort = "in" | "mask";
+export type InputPort = string;
 
 /** Output ports. One today; named so a node can grow a second without a schema change. */
 export type OutputPort = "out";
@@ -155,6 +167,15 @@ export interface GraphNode {
   readonly params: Readonly<Record<string, ParameterValue>>;
   readonly seed: number;
   readonly inputs: readonly NodeInput[];
+  /**
+   * Spatially-varying opacity (F-PP-08), carried through from the document.
+   *
+   * Absent on an unmasked node, which is every node in every document written
+   * before schema 2. When present and its source is `image`, the node has an
+   * edge on its `mask` port and the composite reads that buffer; the other two
+   * sources read the node's own input and need no edge.
+   */
+  readonly mask?: NodeMask;
 }
 
 /** Whether the render may degrade resolution to keep up (F-UI-03). */

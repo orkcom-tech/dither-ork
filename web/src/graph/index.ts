@@ -25,6 +25,7 @@ export type { GraphErrorCode } from "./errors";
 export { sha256Hex } from "./sha256";
 export {
   ASSET_PARAM_KEY,
+  MASK_PARAM_KEY,
   PALETTE_PARAM_KEY,
   contentHash,
   hashBytes,
@@ -42,8 +43,55 @@ export {
 export { NodeAssetStore } from "./assets";
 export type { NodeAsset, NodeAssetStoreOptions, NodeAssets } from "./assets";
 
-export { PORT_ORDER, analyseGraph, renderUpTo } from "./topology";
+export { analyseGraph, renderUpTo } from "./topology";
 export type { GraphTopology } from "./topology";
+
+export {
+  MASK_PORT,
+  derivedFeedbackPorts,
+  isFeedbackRole,
+  isPrimaryPort,
+  portOf,
+  portOrder,
+  portsOf,
+} from "./ports";
+
+export {
+  MASK_CHANNELS,
+  MASK_CHANNEL_ORDINAL,
+  MASK_KINDS,
+  MASK_KIND_ORDINAL,
+  linearLuminance,
+  maskChannelValue,
+  maskCoverage,
+  maskDigest,
+  maskNeedsImage,
+  maskProblem,
+  resolveColorTarget,
+  smoothstep,
+} from "./mask";
+export type { MaskKind, ResolvedColorTarget } from "./mask";
+
+export {
+  addGraphNode,
+  connect,
+  connectionProblem,
+  disconnect,
+  draftOf,
+  chainOf,
+  isLinearChain,
+  legalConnections,
+  removeGraphNode,
+  setNodeMask,
+  setOutput,
+} from "./edit";
+export type {
+  ConnectionRefusal,
+  ConnectionRefusalCode,
+  EffectLookup,
+  GraphDraft,
+  LegalConnection,
+} from "./edit";
 
 export {
   analyseFeedback,

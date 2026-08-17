@@ -48,6 +48,7 @@ import { DOCUMENT_SCHEMA_VERSION } from "../../types/document";
 import { DEFAULT_CLOCK, DEFAULT_PALETTE, createStackNode } from "../../state/document";
 import type { EffectRegistry } from "../../registry";
 import { defaultParams } from "../../registry";
+import { chainOf } from "../../graph/edit";
 import { logger } from "../../lib/log";
 import type { Preset } from "./preset";
 
@@ -131,10 +132,17 @@ function stackFor(registry: EffectRegistry, effects: readonly string[]): readonl
 }
 
 function documentFor(registry: EffectRegistry, spec: StarterPresetSpec): DitherDocument {
+  // The starter set is a set of chains, which is what a starter preset is: a
+  // recipe you read top to bottom. `chainOf` is the one place that turns a list
+  // into wiring, so these are wired exactly as a migrated schema-1 document is.
+  const stack = stackFor(registry, spec.effects);
+  const chain = chainOf(stack);
   return {
     schema: DOCUMENT_SCHEMA_VERSION,
     source: null,
-    stack: stackFor(registry, spec.effects),
+    stack,
+    edges: chain.edges,
+    output: chain.output,
     palette: DEFAULT_PALETTE,
     clock: DEFAULT_CLOCK,
     bindings: [],

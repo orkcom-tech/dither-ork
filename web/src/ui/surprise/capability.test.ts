@@ -77,6 +77,8 @@ describe("probeModulatorSupport", () => {
       schema: DOCUMENT_SCHEMA_VERSION,
       source: null,
       stack: [node],
+      edges: [],
+      output: node.id,
       palette: DEFAULT_PALETTE,
       clock: DEFAULT_CLOCK,
       bindings: [

@@ -32,8 +32,14 @@ function toolbarItem(
 }
 
 describe("panel ids", () => {
-  it("are the four panels F-UI-08 names", () => {
-    expect([...PANEL_IDS]).toEqual(["stack", "properties", "palette", "timeline"]);
+  it("are the four panels F-UI-08 names, plus the node editor", () => {
+    expect([...PANEL_IDS]).toEqual([
+      "stack",
+      "properties",
+      "palette",
+      "timeline",
+      "graph",
+    ]);
   });
 });
 

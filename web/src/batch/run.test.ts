@@ -37,6 +37,8 @@ function documentOf(): DitherDocument {
     schema: DOCUMENT_SCHEMA_VERSION,
     source: null,
     stack: [],
+    edges: [],
+    output: null,
     palette: MONO,
     clock: { frames: 1, fps: 12 },
     bindings: [],

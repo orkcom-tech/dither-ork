@@ -12,9 +12,9 @@
 Free, no account, nothing to install. Your images never leave your machine —
 there is no server, and the whole pipeline runs in the page.
 
-A dithering application that runs in the browser. Open an image, stack effects in
-a reorderable pipeline, animate any parameter, and export a still, a seamless
-loop, or a vector file. Nothing is uploaded: there is no server.
+A dithering application that runs in the browser. Open an image, wire effects
+into a node graph, animate any parameter, and export a still, a seamless loop, or
+a vector file. Nothing is uploaded: there is no server.
 
 <p align="center">
   <img src="docs/images/before-after.png" alt="The source illustration beside the same illustration reduced to a cyan and magenta halftone." width="880">
@@ -24,9 +24,14 @@ loop, or a vector file. Nothing is uploaded: there is no server.
 
 ## What it does
 
-- **71 effects** in a stack you can reorder — 15 error diffusion, 6 ordered, 11
+- **71 effects** you can reorder and wire — 15 error diffusion, 6 ordered, 11
   pattern, 16 glitch, 17 special, 6 preprocess. Any effect, any number of times,
   each with its own opacity and blend mode.
+- **A node graph, not a list.** A document is nodes plus edges: a branch can be
+  fed from a generator instead of the photograph, and two branches can converge
+  on one node. The node editor draws it, and every illegal connection is refused
+  with the reason before you commit it. Documents written before the graph load
+  as the chain their order implied, and re-save as the same picture.
 - **Sources** — three of those take no image at all: noise (value, Perlin,
   simplex, Worley, fractal), gradients (linear, radial, conical) and shapes
   (circle, rectangle, polygon, star, from a signed distance field). Press **new
@@ -106,13 +111,27 @@ build ships a `_headers` file; CI fails if either goes missing.
   it is a separate application rather than a backlog item.
 - **No server and no API.** Everything happens in the page. A CLI is planned and
   does not exist.
-- **No general image editing** — no layers with independent sources, no
-  selections, brushes, text or shape tools.
+- **No general image editing** — no layer stack, no selections, brushes or text
+  tools. Nodes are not composited in list order onto a canvas and there is no
+  per-layer transform: a node's opacity, blend and mask compose it against *its
+  own input*, and the wiring is the only compositing order there is.
+- **No node that takes a second picture.** The graph carries as many input ports
+  as an effect declares, and today no effect declares one: of 71 effects, every
+  one has a single image input and only `feedback` has a second port, its own
+  previous frame. So two branches can meet on a node's **mask** port and nowhere
+  else. Blending two chains as colour, and displacing one picture by another,
+  need a node that does not exist yet.
+- **Masking has one control of the three it specifies.** F-PP-08 asks for
+  coverage from a luminance range, a colour range, or a picture. All three are
+  implemented and produce identical numbers on the GPU and CPU paths, but only
+  the picture can be reached: you wire a branch into a node's mask port. There is
+  no channel picker, no invert, and no way to set a luminance or colour mask
+  except by editing the document by hand.
 - **No accounts, no collaboration, nothing generative.**
 - **Keyframe tracks do not survive a save.** Modulator bindings do; they
   round-trip through `.dork`, autosave and share links. Keyframes have no field
   in the schema yet, so they last the session. The timeline panel says so.
-- **Four named requirements are declared absent rather than stubbed.** They are
+- **Three named requirements are declared absent rather than stubbed.** They are
   listed in `web/src/registry/unbuilt.ts`, and searching for one of them returns
   the requirement, the reason and the nearest built effects instead of nothing.
   A test fails the build if one of them ever becomes real:
@@ -120,20 +139,19 @@ build ships a `_headers` file; CI fails if either goes missing.
 | Requirement | What it would do | Why it is not built |
 | --- | --- | --- |
 | F-GL-06 JPEG glitch | Re-encode as JPEG at a chosen quality, corrupt the compressed bytes | Needs a JPEG encoder in the render path. Every node is a compute pass or a serial CPU kernel; this would be a third execution kind |
-| F-PP-08 Node masking | Limit any node to part of the picture, by luminance range, colour range or an uploaded mask | A mask is a second image edge, and the graph carries one image edge per node. A graph change, not an effect |
 | F-PT-09 Luminance-displaced line screen | Lines displaced by the picture's brightness — the *Unknown Pleasures* ridgeline | Nothing in the catalogue displaces by the picture itself, and it needs hidden-line removal to read as depth |
 | F-PT-10 Wave field with obstacle interaction | Waves that bend around the subject, or are blocked and leave a shadow | Needs a distance field *transformed out of the picture*. The shared contract and the analytic primitives are built (`web/src/gpu/sdf.ts`, used by the Shape source); the transform — a jump flood over a scratch texture the pass vocabulary has no role for — is not |
 
 ## Tests
 
 ```bash
-docker compose exec -T web sh -c 'npm test -- --run'                                # 1918 tests, 121 files
+docker compose exec -T web sh -c 'npm test -- --run'                                # 2120 tests, 132 files
 docker compose run --rm --entrypoint bash wasm -c 'cd /app/core && cargo test --all' # 157 tests
 ```
 
 CI runs both, plus `cargo fmt`, `clippy -D warnings`, a typecheck, a production
-build, and a GPU golden-image comparison against a pinned Chrome for Testing
-build on SwiftShader.
+build, a check that the production build actually boots, and a GPU golden-image
+comparison against a pinned Chrome for Testing build on SwiftShader.
 
 ## Documentation
 

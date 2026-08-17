@@ -74,6 +74,7 @@
 
 import type { Palette } from "../../types/document";
 import type { ParamDescriptor } from "../../types/registry";
+import { MASK_INPUT_PORT, PRIMARY_INPUT_PORT } from "../../types/registry";
 import type {
   ContentHash,
   FrameBuffer,
@@ -133,8 +134,12 @@ export class GpuRenderBackend implements GpuBackend {
 
     for (const planned of batch.nodes) {
       const input = this.#inputOf(planned, batch, outputs);
+      // F-PP-08. Resolved beside the picture rather than inside `#runNode`,
+      // because it is the same lookup on a different port and the two must
+      // agree about which batch a buffer came from.
+      const maskBuffer = this.#portOf(planned, batch, outputs, MASK_INPUT_PORT);
       const started = performance.now();
-      const output = await this.#runNode(planned, batch, input);
+      const output = await this.#runNode(planned, batch, input, maskBuffer);
       outputs.set(planned.node.id, output);
       timings.push({
         nodeId: planned.node.id,
@@ -155,8 +160,24 @@ export class GpuRenderBackend implements GpuBackend {
     batch: GpuBatch,
     produced: ReadonlyMap<string, FrameBuffer>,
   ): FrameBuffer {
+    const buffer = this.#portOf(planned, batch, produced, PRIMARY_INPUT_PORT);
+    if (buffer !== null) return buffer;
+    throw new GraphError(
+      "invariant",
+      `node ${planned.node.id} has no "${PRIMARY_INPUT_PORT}" input; every node reads one picture`,
+      { nodeId: planned.node.id },
+    );
+  }
+
+  /** The buffer on one port, or `null` when that port is unwired. */
+  #portOf(
+    planned: PlannedNode,
+    batch: GpuBatch,
+    produced: ReadonlyMap<string, FrameBuffer>,
+    port: string,
+  ): FrameBuffer | null {
     for (const input of planned.inputs) {
-      if (input.port !== "in") continue;
+      if (input.port !== port) continue;
       const origin = input.origin;
       if (origin.kind === "source") {
         if (batch.source === null) {
@@ -181,17 +202,14 @@ export class GpuRenderBackend implements GpuBackend {
       }
       return buffer;
     }
-    throw new GraphError(
-      "invariant",
-      `node ${planned.node.id} has no "in" input; every stack node reads one`,
-      { nodeId: planned.node.id },
-    );
+    return null;
   }
 
   async #runNode(
     planned: PlannedNode,
     batch: GpuBatch,
     input: FrameBuffer,
+    maskBuffer: FrameBuffer | null,
   ): Promise<FrameBuffer> {
     const nodeId = planned.node.id;
 
@@ -274,7 +292,14 @@ export class GpuRenderBackend implements GpuBackend {
       const outColor =
         planned.composite === null
           ? rendered
-          : this.#compositeOutput(nodeId, inputColor, rendered, color.extent, planned.composite);
+          : this.#compositeOutput(
+              nodeId,
+              inputColor,
+              rendered,
+              color.extent,
+              planned.composite,
+              maskBuffer,
+            );
 
       const producedIndex = index.hasContent ? index.current : null;
       const outIndex =
@@ -349,7 +374,24 @@ export class GpuRenderBackend implements GpuBackend {
     rendered: GPUTexture,
     extent: Extent,
     op: CompositeOp,
+    maskBuffer: FrameBuffer | null,
   ): GPUTexture {
+    // A mask picture that is not GPU-resident is a bug in the renderer, which
+    // guarantees residency for every port before the call — not a case to
+    // recover from by rendering the node unmasked, which would be a mask that
+    // silently is not one.
+    if (maskBuffer !== null && maskBuffer.color.residency !== "gpu") {
+      throw new GraphError(
+        "invariant",
+        `node ${nodeId} was handed a CPU-resident mask picture; the renderer guarantees residency before the call`,
+        { nodeId },
+      );
+    }
+    const maskTexture =
+      maskBuffer !== null && maskBuffer.color.residency === "gpu"
+        ? maskBuffer.color.texture
+        : null;
+
     const target = this.#deps.layer.textures.acquire(
       "rgba16float",
       extent.width,
@@ -364,6 +406,8 @@ export class GpuRenderBackend implements GpuBackend {
         extent,
         opacity: op.opacity,
         blend: op.blend,
+        mask: op.mask,
+        maskTexture,
         label: nodeId,
       });
     } catch (error) {

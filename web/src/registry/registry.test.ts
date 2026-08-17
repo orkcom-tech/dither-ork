@@ -223,6 +223,42 @@ function withFields(fields: Readonly<Record<string, unknown>>): EffectDescriptor
   return asDescriptor({ ...VALID, ...fields });
 }
 
+/**
+ * The two ports a feedback effect declares.
+ *
+ * `readsFeedback` and a `feedback`-role input port are now two halves of one
+ * statement — the port is what makes the loop a drawable edge rather than a
+ * hidden read of the frame store — so a descriptor claiming one without the
+ * other is refused, and every accepted case below carries both.
+ */
+/** The `in` port every declared list has to start with. */
+const VALID_INPUT_HEAD = [
+  {
+    key: "in",
+    label: "Image",
+    role: "image",
+    description: "The picture this node works on.",
+    required: false,
+  },
+] as const;
+
+const FEEDBACK_PORTS = [
+  {
+    key: "in",
+    label: "Image",
+    role: "image",
+    description: "The picture this frame's trail is laid over.",
+    required: false,
+  },
+  {
+    key: "history",
+    label: "Previous frame",
+    role: "feedback",
+    description: "This node's own output one frame ago, decayed.",
+    required: false,
+  },
+] as const;
+
 /** Every failure mode reached by a test, so the coverage check at the end is real. */
 const observed = new Set<RegistryIssueCode>();
 
@@ -393,11 +429,11 @@ describe("validateEffect rejects", () => {
     // everything after it, and the document would already be marked
     // non-looping, for a history nothing reads.
     rejects(
-      validateEffect({ ...DIFFUSION, readsFeedback: true }),
+      validateEffect({ ...DIFFUSION, readsFeedback: true, inputs: FEEDBACK_PORTS }),
       "feedback-must-run-on-gpu",
       "a serial kernel has none",
     );
-    accepts(withFields({ readsFeedback: true }));
+    accepts(withFields({ readsFeedback: true, inputs: FEEDBACK_PORTS }));
   });
 
   it("an effect that both reads feedback and resamples", () => {
@@ -405,9 +441,126 @@ describe("validateEffect rejects", () => {
     // writes. A node changing extent has no common pixel grid with its own
     // history, and the extent would move on every frame it ran.
     rejects(
-      validateEffect(withFields({ readsFeedback: true, resamples: true })),
+      validateEffect(withFields({ readsFeedback: true, resamples: true, inputs: FEEDBACK_PORTS })),
       "feedback-must-not-resample",
       "no common pixel grid with its own history",
+    );
+  });
+
+  it("an effect declaring an empty input list", () => {
+    // Omitting `inputs` means one image input, which is what 71 effects mean.
+    // Declaring none is a different claim and one nothing can honour: every
+    // node has a picture it transforms and the composite blends against it.
+    rejects(
+      validateEffect(withFields({ inputs: [] })),
+      "primary-input-port-missing",
+      "omit the field",
+    );
+  });
+
+  it("an effect whose first input is not the picture", () => {
+    rejects(
+      validateEffect(
+        withFields({
+          inputs: [
+            {
+              key: "layer",
+              label: "Layer",
+              role: "layer",
+              description: "A second picture to combine with the first.",
+              required: true,
+            },
+          ],
+        }),
+      ),
+      "primary-input-port-missing",
+      "every node has one picture it transforms",
+    );
+  });
+
+  it("an effect declaring the same input port twice", () => {
+    rejects(
+      validateEffect(
+        withFields({
+          inputs: [
+            ...VALID_INPUT_HEAD,
+            {
+              key: "layer",
+              label: "Layer",
+              role: "layer",
+              description: "A second picture to combine with the first.",
+              required: true,
+            },
+            {
+              key: "layer",
+              label: "Layer again",
+              role: "layer",
+              description: "A third picture, on the same key as the second.",
+              required: true,
+            },
+          ],
+        }),
+      ),
+      "duplicate-input-port",
+      "would be ambiguous",
+    );
+  });
+
+  it("an effect declaring the reserved mask port", () => {
+    // Masking is spatially-varying opacity and opacity is a property of every
+    // node, so `graph/ports.ts` appends the port to all of them. A declared one
+    // would shadow it and make exactly one effect mask differently.
+    rejects(
+      validateEffect(
+        withFields({
+          inputs: [
+            ...VALID_INPUT_HEAD,
+            {
+              key: "mask",
+              label: "Mask",
+              role: "mask",
+              description: "Coverage for this node, from a second picture.",
+              required: false,
+            },
+          ],
+        }),
+      ),
+      "reserved-input-port",
+      "that key is reserved",
+    );
+  });
+
+  it("an input port with no description", () => {
+    // Same rule as every other descriptive string (F-UI-15): a port nobody can
+    // explain is a port nobody wires on purpose.
+    rejects(
+      validateEffect(
+        withFields({
+          inputs: [
+            ...VALID_INPUT_HEAD,
+            { key: "layer", label: "Layer", role: "layer", description: "", required: true },
+          ],
+        }),
+      ),
+      "malformed-input-port",
+      "F-UI-15",
+    );
+  });
+
+  it("a feedback port on an effect that does not read the previous frame", () => {
+    // The previous frame comes from the frame store, and the store is only
+    // consulted for a node whose descriptor marks it — so an edge into that
+    // port would never be served.
+    rejects(
+      validateEffect(withFields({ inputs: FEEDBACK_PORTS })),
+      "feedback-port-mismatch",
+      "would never be served",
+    );
+    // And the other direction: the declaration without the port.
+    rejects(
+      validateEffect(withFields({ readsFeedback: true })),
+      "feedback-port-mismatch",
+      "exactly one",
     );
   });
 
@@ -1043,6 +1196,11 @@ const EVERY_FAILURE_MODE: Record<RegistryIssueCode, true> = {
   "resampler-must-run-on-gpu": true,
   "feedback-must-run-on-gpu": true,
   "feedback-must-not-resample": true,
+  "malformed-input-port": true,
+  "duplicate-input-port": true,
+  "primary-input-port-missing": true,
+  "reserved-input-port": true,
+  "feedback-port-mismatch": true,
   "source-must-run-on-gpu": true,
   "source-must-not-read-index-map": true,
   "source-must-not-resample": true,

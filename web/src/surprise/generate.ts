@@ -59,6 +59,7 @@ import type { EffectRegistry } from "../registry";
 import { defaultParams, validateStack } from "../registry";
 // The leaf, not the `state` barrel: that barrel re-exports `session.ts`, which
 // reaches the render worker and the palette editor, and this module is pure.
+import { chainOf } from "../graph/edit";
 import { createStackNode } from "../state/document";
 import { retainBindings, sampleBindings } from "./animation";
 import { composeStack, type ComposedStack } from "./grammar";
@@ -383,10 +384,18 @@ export function generateSurprise(request: SurpriseRequest): SurpriseResult {
   const bindings = bindingsFor(request, stack);
   const palette = locks.palette ? base.palette : request.palette;
 
+  // Surprise Me's grammar is still a sentence about a line — preprocess, one
+  // dither, post — so what it generates is a chain. Generating a *graph* is
+  // step 4 of docs/dither-ork-node-graph.md and is deliberately not attempted
+  // here: a graph generator that produced mush would lose the best thing in the
+  // product, which is named as the sleeper risk in that note.
+  const chain = chainOf(stack);
   const document: DitherDocument = {
     schema: DOCUMENT_SCHEMA_VERSION,
     source: base.source,
     stack,
+    edges: chain.edges,
+    output: chain.output,
     palette,
     clock: base.clock,
     bindings,

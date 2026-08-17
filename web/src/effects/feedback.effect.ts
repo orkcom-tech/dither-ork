@@ -333,6 +333,30 @@ export default defineEffect({
   slot: "postprocess",
   family: "special",
   execution: "gpu",
+  // The only effect in the catalogue that declares two image inputs, and the
+  // second one is its own previous output. Declaring it makes the loop a real
+  // edge in the graph — drawable by the editor, and the one edge the cycle rule
+  // in `graph/topology.ts` permits — rather than a hidden read of a frame store
+  // that nothing in the wiring hints at. The edge itself is derived rather than
+  // saved: see `graph/ports.ts`.
+  inputs: [
+    {
+      key: "in",
+      label: "Image",
+      role: "image",
+      description:
+        "The picture this frame's trail is laid over. Unwired, the node is a root and reads the image the document opened.",
+      required: false,
+    },
+    {
+      key: "history",
+      label: "Previous frame",
+      role: "feedback",
+      description:
+        "This node's own output one frame ago, decayed and optionally drifted. It is what turns a filter into a system that evolves, and it is why the document does not loop.",
+      required: false,
+    },
+  ],
   params: FEEDBACK_PARAMS,
   // Below ordinary. It is the loudest node in the catalogue — it changes what
   // the document *is* (non-looping, uncached downstream), not just what it

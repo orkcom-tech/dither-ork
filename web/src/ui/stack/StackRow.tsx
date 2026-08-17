@@ -6,6 +6,7 @@ import type { BlendMode, StackNode } from "../../types/document";
 import type { EffectDescriptor } from "../../types/registry";
 import { helpFor } from "../help";
 import { NumberField } from "../properties";
+import type { RowNote } from "./graph-view";
 import {
   BLEND_LABEL,
   BLEND_MODES,
@@ -37,6 +38,14 @@ export interface StackRowProps {
   readonly shadowed: string | null;
   /** A grammar issue this node is the subject of, ready to show. */
   readonly issue: string | null;
+  /**
+   * Where this row sits in the wiring, when that is not simply "next".
+   *
+   * `null` on a chain row, which is every row of every document written before
+   * schema 2 — a badge on all twenty rows of a chain says nothing and costs the
+   * width the effect name needs. See `./graph-view.ts` for what it is.
+   */
+  readonly wiring: RowNote | null;
   readonly onSelect: () => void;
   readonly onToggleEnabled: () => void;
   readonly onToggleSolo: () => void;
@@ -82,6 +91,7 @@ export function StackRow({
   excluded,
   shadowed,
   issue,
+  wiring,
   onSelect,
   onToggleEnabled,
   onToggleSolo,
@@ -113,6 +123,10 @@ export function StackRow({
     // this row is not in the picture. The note below says which of the two it
     // is, so the shared styling does not make them indistinguishable.
     shadowed !== null ? "node--excluded" : "",
+    // A node whose output reaches the picture through nothing is dimmed for the
+    // same reason and by the same rule: it is not in the frame, and that is a
+    // fact rather than an error.
+    wiring?.placement.kind === "detached" ? "node--excluded" : "",
     isDragging ? "node--dragging" : "",
     issue !== null ? "node--issue" : "",
   ]
@@ -317,6 +331,26 @@ export function StackRow({
         </div>
       )}
 
+      {/*
+        Where this row sits in the wiring, when that is not simply "next".
+        Absent on a chain — which every document written before schema 2 is — so
+        such a document's rows are the rows they always were.
+
+        The badge leads the sentence rather than sitting beside the effect's
+        name. On a 260px panel those two compete for the same pixels, and of the
+        two the name is the one that has to stay readable: `Noise field` reduced
+        to `Noi…` to make room for `→ mask` is a worse row, not a better one. At
+        the head of its own line the badge is still what the eye finds when
+        scanning twenty rows for the branch.
+      */}
+      {wiring?.note == null ? null : (
+        <p className="node__wiring">
+          {wiring.badge === null ? null : (
+            <span className="badge badge--wiring">{wiring.badge}</span>
+          )}{" "}
+          {wiring.note}
+        </p>
+      )}
       {shadowed === null ? null : <p className="node__shadowed">{shadowed}</p>}
       {issue === null ? null : <p className="node__issue">{issue}</p>}
     </li>

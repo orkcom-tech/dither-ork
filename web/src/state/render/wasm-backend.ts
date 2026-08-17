@@ -46,6 +46,7 @@ import type { ColorMetric, Palette, ParameterValue } from "../../types/document"
 import type { CpuColorSurface, FrameBuffer } from "../../types/graph";
 import type { WasmBackend, WasmNodeRequest } from "../../graph";
 import { GraphError, compositeLinearSurface } from "../../graph";
+import { MASK_INPUT_PORT, PRIMARY_INPUT_PORT } from "../../types/registry";
 import { linearSurfaceFromSrgbBytes, srgbBytesFromLinearSurface } from "../../io";
 import { logger } from "../../lib/log";
 
@@ -149,10 +150,38 @@ export class WasmRenderBackend implements WasmBackend {
     // that decision is shown, not what the decision was, and blending two
     // indices is meaningless — the average of index 3 and index 7 is not a
     // colour. The argument in full is in `gpu/composite.ts`.
+    //
+    // F-PP-08 rides on the same call: a mask is opacity per pixel, so the
+    // coverage multiplies into the same lerp rather than costing a second pass
+    // over the buffer. A mask that reads a picture takes it from this node's
+    // `mask` port; the other two read `surface`, which is the node's own input.
+    const maskBuffer = this.#portOf(request, MASK_INPUT_PORT);
+    if (maskBuffer !== null && maskBuffer.color.residency !== "cpu") {
+      throw new GraphError(
+        "invariant",
+        `node ${nodeId} was handed a GPU-resident mask picture; the renderer guarantees residency before the call`,
+        { nodeId },
+      );
+    }
+    if (maskBuffer !== null && (maskBuffer.width !== width || maskBuffer.height !== height)) {
+      // Coverage is per pixel, so a mask at another extent has no coordinate
+      // system in common with what it is masking.
+      throw new GraphError(
+        "invariant",
+        `node ${nodeId} reads a ${maskBuffer.width}x${maskBuffer.height} mask picture while it covers ${width}x${height}`,
+        { nodeId },
+      );
+    }
     const color =
       planned.composite === null
         ? diffused
-        : compositeLinearSurface(surface, diffused, planned.composite, width * height);
+        : compositeLinearSurface(
+            surface,
+            diffused,
+            planned.composite,
+            width * height,
+            maskBuffer === null ? null : (maskBuffer.color as CpuColorSurface),
+          );
 
     log.debug("diffusion node complete", {
       nodeId,
@@ -178,8 +207,18 @@ export class WasmRenderBackend implements WasmBackend {
   }
 
   #inputOf(request: WasmNodeRequest): FrameBuffer {
+    const buffer = this.#portOf(request, PRIMARY_INPUT_PORT);
+    if (buffer !== null) return buffer;
+    throw new GraphError(
+      "invariant",
+      `node ${request.node.node.id} has no "${PRIMARY_INPUT_PORT}" input; every node reads one picture`,
+    );
+  }
+
+  /** The buffer on one port, or `null` when that port is unwired. */
+  #portOf(request: WasmNodeRequest, port: string): FrameBuffer | null {
     for (const input of request.node.inputs) {
-      if (input.port !== "in") continue;
+      if (input.port !== port) continue;
       if (input.origin.kind === "source") {
         if (request.source === null) {
           throw new GraphError(
@@ -200,10 +239,7 @@ export class WasmRenderBackend implements WasmBackend {
       }
       return buffer;
     }
-    throw new GraphError(
-      "invariant",
-      `node ${request.node.node.id} has no "in" input; every stack node reads one`,
-    );
+    return null;
   }
 }
 

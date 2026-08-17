@@ -62,6 +62,7 @@
 import type { BlendMode } from "../types/document";
 import type { CpuColorSurface } from "../types/graph";
 import type { CompositeOp } from "./plan";
+import { maskCoverage, maskNeedsImage, resolveColorTarget } from "./mask";
 import { GraphError } from "./errors";
 
 /**
@@ -188,10 +189,41 @@ export function compositeLinearSurface(
   top: CpuColorSurface,
   op: CompositeOp,
   pixels: number,
+  /**
+   * The picture wired to the node's `mask` port (F-PP-08).
+   *
+   * Required when — and legal only when — `op.mask` reads an image. A mask that
+   * reads the node's own input needs none, because `base` is that input.
+   */
+  maskSurface?: CpuColorSurface | null,
 ): CpuColorSurface {
+  const mask = op.mask ?? null;
+  const needsImage = mask !== null && maskNeedsImage(mask);
+  const image = maskSurface ?? null;
+
+  // Both directions refuse, for the reason `gpu/composite.ts` gives: an image
+  // mask with no picture would have to fall back to full coverage, which is a
+  // mask that silently is not one.
+  if (needsImage && image === null) {
+    throw new GraphError(
+      "invariant",
+      "composite: the mask reads a picture and none was supplied",
+    );
+  }
+  if (!needsImage && image !== null) {
+    throw new GraphError(
+      "invariant",
+      "composite: a mask picture was supplied and this node's mask does not read one",
+    );
+  }
+  // Resolved once rather than per pixel: the target does not vary across the
+  // frame and OKLab costs three cube roots.
+  const target = mask?.source.kind === "color" ? resolveColorTarget(mask.source.color) : null;
+
   for (const [label, surface] of [
     ["base", base],
     ["top", top],
+    ...(image === null ? [] : ([["mask", image]] as const)),
   ] as const) {
     for (const [channel, plane] of [
       ["r", surface.r],
@@ -228,10 +260,26 @@ export function compositeLinearSurface(
     const tb = top.b[i] ?? 0;
     const ta = top.a[i] ?? 0;
 
-    r[i] = br + (blendChannel(blend, br, tr) - br) * opacity;
-    g[i] = bg + (blendChannel(blend, bg, tg) - bg) * opacity;
-    b[i] = bb + (blendChannel(blend, bb, tb) - bb) * opacity;
-    a[i] = ba + (ta - ba) * opacity;
+    // Coverage multiplies opacity, per pixel (F-PP-08). The same expression the
+    // WGSL evaluates, from the same definition in `mask.ts` — a difference here
+    // is a preview that does not match its export.
+    const amount =
+      mask === null
+        ? opacity
+        : opacity *
+          maskCoverage(
+            mask,
+            target,
+            [br, bg, bb, ba],
+            image === null
+              ? [0, 0, 0, 0]
+              : [image.r[i] ?? 0, image.g[i] ?? 0, image.b[i] ?? 0, image.a[i] ?? 0],
+          );
+
+    r[i] = br + (blendChannel(blend, br, tr) - br) * amount;
+    g[i] = bg + (blendChannel(blend, bg, tg) - bg) * amount;
+    b[i] = bb + (blendChannel(blend, bb, tb) - bb) * amount;
+    a[i] = ba + (ta - ba) * amount;
   }
 
   return { residency: "cpu", r, g, b, a };

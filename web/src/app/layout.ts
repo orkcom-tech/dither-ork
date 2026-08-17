@@ -48,10 +48,22 @@ export interface RegionLimits {
   readonly initial: number;
 }
 
+/**
+ * How far each region may be dragged, and where it opens.
+ *
+ * The bottom strip is the one that changed when the node editor arrived. It used
+ * to hold the timeline alone, which is a ruler and a few tracks and wants 180px;
+ * it now also holds a graph, which is the one surface in the application whose
+ * useful size is "as much as you will give it". So its ceiling is most of a
+ * laptop's height, and its opening size is enough for both panels to be above
+ * {@link MIN_PANEL_PX} without anything having to be dragged first — a feature
+ * whose first impression is two headers and no content is a feature nobody
+ * opens twice.
+ */
 export const REGION_LIMITS: Readonly<Record<PanelRegion, RegionLimits>> = {
   left: { min: 180, max: 520, initial: 260 },
   right: { min: 220, max: 560, initial: 300 },
-  bottom: { min: 120, max: 480, initial: 180 },
+  bottom: { min: 120, max: 760, initial: 360 },
 };
 
 /** The viewport never gets squeezed below this, whatever a splitter is told. */
@@ -71,7 +83,12 @@ export const DEFAULT_LAYOUT: ShellLayout = {
     right: { size: REGION_LIMITS.right.initial, collapsed: false },
     bottom: { size: REGION_LIMITS.bottom.initial, collapsed: false },
   },
-  panels: {},
+  // One panel opens with a weight of its own: the node editor gets twice the
+  // bottom strip the timeline does. Both are open, because the whole argument
+  // for keeping the stack *and* the editor is that neither is a mode — and a
+  // surface that has to be found before it can be used is a mode with extra
+  // steps. Every other panel takes {@link DEFAULT_PANEL_STATE}.
+  panels: { graph: { collapsed: false, weight: 2 } },
 };
 
 export function regionState(layout: ShellLayout, region: PanelRegion): RegionState {

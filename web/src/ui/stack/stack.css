@@ -280,6 +280,44 @@
 }
 
 /*
+ * Where a row sits in the wiring, when that is not simply "next".
+ *
+ * Quiet, like `.node__shadowed` and for the same reason: a branch is not a
+ * problem, it is what a second image edge looks like from a list. Absent
+ * entirely on a chain, which is every document written before schema 2.
+ */
+.node__wiring {
+  margin: 0;
+  padding: 0 8px 5px 6px;
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.badge--wiring {
+  border-color: transparent;
+  background: var(--bg-inset);
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+
+/*
+ * The document's shape, said once at the top rather than per row.
+ *
+ * Only present when the wiring is not a plain chain — see `shapeNote` in
+ * `./graph-view.ts` for why a line that is always there is a line nobody reads.
+ */
+.stack__shape {
+  margin: 0;
+  padding: 5px 8px;
+  color: var(--fg-dim);
+  background: var(--bg-inset);
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+/*
  * The `.picker__*` block that used to sit here is gone. The effect picker moved
  * to `ui/picker/` with a stylesheet and a class prefix of its own
  * (`.effect-picker__*`), and `AddNodePicker.tsx` is now a two-line re-export.

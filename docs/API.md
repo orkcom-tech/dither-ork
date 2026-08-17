@@ -377,7 +377,6 @@ telling people a shipped effect does not exist:
 | **F-GL-06** | JPEG glitch | Needs a JPEG encoder inside the render path, and therefore an execution kind that does not exist |
 | **F-PT-09** | Luminance-displaced line screen | Nothing in the catalogue displaces by the picture; the missing piece is that, plus hidden-line removal |
 | **F-PT-10** | Wave field with obstacle interaction | Needs a signed distance field — shared infrastructure (F-INF-01) that is not built |
-| **F-PP-08** | Node masking | A mask is a second image edge on the graph, and the graph carries one per node |
 
 `registry/search.ts` consults that table only after the catalogue has returned
 nothing, and `describeMiss` writes the sentence — one implementation, so the
@@ -394,8 +393,12 @@ F-PP-06 (noise injection). F-PP-07, an uploaded threshold map, is registered in
 the `ordered` family, because a user-supplied threshold map *is* an ordered
 dither; its image arrives through `InstanceDataBinding` rather than as a
 parameter. **F-PP-08 (masking) is the one F-PP requirement with no descriptor
-and will not get one**: it is a second image edge on the graph, and the graph
-gives each node one input.
+and will not get one**: a mask is not an effect. It is spatially-varying opacity,
+it lives on the node beside `opacity` and `blend`, and every node in the
+catalogue has one for free — so there is nothing for the table above to list. It
+left that table when multi-input landed; what remains unbuilt is the *interface*
+for two of its three coverages, recorded in `docs/ARCHITECTURE.md` under
+"Multiple inputs, and node masking" rather than here.
 
 `web/src/registry/catalogue.test.ts` asserts every number in that table, runs
 the startup validator over the shipped descriptors, and checks that every `gpu`
@@ -486,13 +489,19 @@ is right and it is in the wrong layer.
 
 ## 3. `.dork` document
 
-Defined in `web/src/types/document.ts`. A document is Source + Stack + Palette +
-Clock + Bindings — the unit that is saved, shared by URL, applied across a
-batch, and generated whole by Surprise Me.
+Defined in `web/src/types/document.ts`. A document is Source + Nodes + Edges +
+Palette + Clock + Bindings — the unit that is saved, shared by URL, applied
+across a batch, and generated whole by Surprise Me.
+
+**Schema 2** writes the wiring down. In schema 1 it was implied by array order —
+node *i* read node *i-1*, and the last node was the picture — which is why there
+could only ever be one image edge per node. `edges` and `output` replace that.
+Every schema-1 document, preset and share link migrates on load
+(`web/src/io/document/migrate.ts`) and loads as the chain it always was.
 
 ```jsonc
 {
-  "schema": 1,
+  "schema": 2,
   "source": { "name": "photo.png", "width": 1600, "height": 1200 },
   "palette": {
     "id": "gameboy-dmg",
@@ -518,9 +527,22 @@ batch, and generated whole by Surprise Me.
       "opacity": 1,
       "blend": "normal",
       "params": { "strength": 1, "serpentine": true },
-      "seed": 991
+      "seed": 991,
+      // Spatially-varying opacity (F-PP-08). Absent on an unmasked node, which
+      // is every node in every document written before schema 2.
+      "mask": {
+        "source": { "kind": "luminance", "low": 0, "high": 0.35, "feather": 0.08 },
+        "invert": false
+      }
     }
   ],
+  // The wiring. `port` is an input the destination effect declares; every node
+  // has "in" (the picture) and "mask" (coverage), and an effect may declare more.
+  // A node with no edge into its "in" port is a root and reads the source image.
+  "edges": [{ "from": "n1", "to": "n2", "port": "in" }],
+  // The node whose output is the picture. A graph has no last element, so it is
+  // named. `null` only for a document with no nodes.
+  "output": "n2",
   "bindings": [
     {
       "nodeId": "n2",
@@ -548,6 +570,18 @@ Rules that the schema encodes:
 - **`source` is a reference, not the image.** The self-contained variant adds
   `source.dataUrl`. A share URL carries the recipe, never the picture.
 - **`surpriseSeed`**, when present, reproduces the whole document exactly.
+- **`stack` is the node list, not the wiring.** It is display order, canonical
+  byte order, and the tie-break that makes the topological sort deterministic.
+  What connects to what is `edges`.
+- **A feedback edge is never stored.** A node whose effect declares
+  `readsFeedback` reads its own previous frame, and that is a fact about the
+  effect rather than a choice the document makes — `web/src/graph/ports.ts`
+  derives it. A cycle in `edges` is therefore always the illegal kind and is
+  refused; the loop a feedback port makes is legal and is the only one.
+- **A mask is not an effect.** It sits on the node beside `opacity` and `blend`
+  because that is what it is: opacity with a value per pixel. `kind` is
+  `luminance`, `color` or `image`; the first two read the node's own input and
+  the third reads the picture wired to its `mask` port.
 
 Normalized loop time:
 
@@ -556,7 +590,8 @@ normalizedTime(clock, frame) === (frame % clock.frames) / clock.frames  // never
 ```
 
 Documents are versioned. A newer `schema` than the build understands is
-**refused**, not read on a best-effort basis.
+**refused**, not read on a best-effort basis; an older one is **migrated**, and
+the migration adds what the new schema needs and changes nothing else.
 
 ### `bindings` is the only animation the schema carries
 
@@ -852,6 +887,43 @@ depends on all four:
    it — a later save would record a picture the recipe was not applied to. With
    nothing open the document keeps its own reference, which is what lets the
    documents panel say which image to go and find.
+
+### Wiring: `connect`, `disconnect`, `setOutput`, `setNodeMask`, `maskNodeWith`
+
+The five mutations the node editor drives. All of them go through
+`web/src/graph/edit.ts`, which is pure and works on the three document fields
+that describe wiring — `stack`, `edges`, `output` — so the editor can ask about a
+connection it has not committed and drive the real change with the same code.
+
+**Refusals are values, not exceptions.** A UI asks "may I connect these?" on
+every mouse move while a wire is being dragged, so `connectionProblem(draft,
+effects, from, to, port)` returns `null` or a `ConnectionRefusal` carrying a code
+and a sentence written to be shown. `connect` is the committing call and throws
+that same sentence when handed a connection that was already refusable. The codes
+are `unknown-node`, `unknown-port`, `port-occupied`, `would-cycle`,
+`unsupported-feedback`, `self-edge`, `mask-not-wanted` and `unknown-effect`.
+
+`connectionProblem` answers questions about **one edge**. Whether a whole graph
+is legal — index maps, extents, slot order — is a question about a combination of
+effects and is answered by `registry/graph.ts`'s `validateGraph`. An editor calls
+both: the first per hover, the second per committed change.
+
+Two pairings are enforced by the model so that no caller has to remember them,
+and both exist because the alternative is a document that will not render:
+
+- `setNodeMask(id, null)` **also drops the node's mask edge**, because an edge
+  read by nothing is exactly what `graph/plan.ts` refuses.
+- `removeGraphNode` **clears the mask of any node whose mask picture it removes**
+  when that edge cannot be healed. Deleting a generator that fed a mask port
+  otherwise left the consumer saying its coverage came from a picture that was no
+  longer there — unrenderable, and unrepairable in the editor, which has no
+  control that clears a mask.
+
+`maskNodeWith(from, to, mask)` is the two-part gesture as one undo step: it sets
+the consumer's coverage to read a picture *and* draws the edge. The editor
+performs it when a wire is dropped on the mask port of an unmasked node, because
+answering that drop with `mask-not-wanted` would be technically correct and
+useless — the gesture already said what it meant.
 
 ## 7. Shell slots
 

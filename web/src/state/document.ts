@@ -42,12 +42,16 @@ export const DEFAULT_PALETTE: Palette = {
  */
 export const DEFAULT_CLOCK: Clock = { frames: 48, fps: 24 };
 
-/** An empty document: no source, no nodes, the two defaults above. */
+/** An empty document: no source, no nodes, no wiring, the two defaults above. */
 export function createDocument(): DitherDocument {
   return {
     schema: DOCUMENT_SCHEMA_VERSION,
     source: null,
     stack: [],
+    edges: [],
+    // No nodes, so nothing to point at. Every other value would be a node id
+    // that is not in the document, which `decodeDocument` refuses.
+    output: null,
     palette: DEFAULT_PALETTE,
     clock: DEFAULT_CLOCK,
     bindings: [],

@@ -73,6 +73,14 @@ export {
   type ParamSetValidation,
 } from "./params";
 export {
+  validateGraph,
+  type GraphIssue,
+  type GraphIssueCode,
+  type GraphNodeRef,
+  type GraphRef,
+  type GraphValidation,
+} from "./graph";
+export {
   analyseSources,
   validateStack,
   type ShadowedNode,

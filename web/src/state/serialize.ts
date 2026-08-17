@@ -27,14 +27,20 @@ import type {
   BlendMode,
   Clock,
   DitherDocument,
+  GraphEdge,
+  MaskChannel,
   ModulatorShape,
+  NodeMask,
   Palette,
   SourceRef,
+  SrgbTriplet,
   StackNode,
 } from "../types/document";
 import { DOCUMENT_SCHEMA_VERSION } from "../types/document";
 import type { EffectRegistry } from "../registry";
 import { coerceParams } from "../registry";
+import { MASK_CHANNELS, MASK_KINDS, maskProblem } from "../graph";
+import { migrateDocument } from "../io/document/migrate";
 import { logger } from "../lib/log";
 import { DocumentError } from "./errors";
 
@@ -148,31 +154,31 @@ export function decodeDocument(
       { schema, understood: DOCUMENT_SCHEMA_VERSION },
     );
   }
-  if (schema !== DOCUMENT_SCHEMA_VERSION) {
-    // Schema 1 is the only version there has ever been, so there is no
-    // migration to run and nothing to migrate from. When there is a second, the
-    // migration goes here and this message stops being reachable.
-    throw new DocumentError(
-      "malformed-document",
-      `schema ${schema} is not a version this build has a migration from`,
-      { schema },
-    );
-  }
+  // Older schemas are brought forward on the raw JSON, before anything below
+  // asserts a shape. Everything after this point describes the **current**
+  // schema and only the current one, which is what keeps the reader from
+  // becoming one branch per version threaded through every field.
+  const current = schema === DOCUMENT_SCHEMA_VERSION ? value : migrateDocument(value, schema);
+
+  const stack = decodeStack(field(current, "stack", "document"), registry);
+  const ids = new Set(stack.map((node) => node.id));
 
   const document: DitherDocument = {
     schema: DOCUMENT_SCHEMA_VERSION,
-    source: decodeSource(field(value, "source", "document")),
-    stack: decodeStack(field(value, "stack", "document"), registry),
-    palette: decodePalette(field(value, "palette", "document")),
-    clock: decodeClock(field(value, "clock", "document")),
-    bindings: decodeBindings(field(value, "bindings", "document")),
-    ...(typeof value["surpriseSeed"] === "string"
-      ? { surpriseSeed: value["surpriseSeed"] }
+    source: decodeSource(field(current, "source", "document")),
+    stack,
+    edges: decodeEdges(field(current, "edges", "document"), ids),
+    output: decodeOutput(field(current, "output", "document"), ids),
+    palette: decodePalette(field(current, "palette", "document")),
+    clock: decodeClock(field(current, "clock", "document")),
+    bindings: decodeBindings(field(current, "bindings", "document")),
+    ...(typeof current["surpriseSeed"] === "string"
+      ? { surpriseSeed: current["surpriseSeed"] }
       : {}),
   };
 
   for (const binding of document.bindings) {
-    if (document.stack.some((node) => node.id === binding.nodeId)) continue;
+    if (ids.has(binding.nodeId)) continue;
     throw new DocumentError(
       "unknown-node",
       `a binding targets node "${binding.nodeId}", which is not in this document's stack`,
@@ -182,11 +188,92 @@ export function decodeDocument(
 
   log.info("document decoded", {
     nodes: document.stack.length,
+    edges: document.edges.length,
+    output: document.output ?? "<none>",
     bindings: document.bindings.length,
     palette: document.palette.id,
     source: document.source?.name ?? "<none>",
+    migratedFrom: schema === DOCUMENT_SCHEMA_VERSION ? undefined : schema,
   });
   return document;
+}
+
+/**
+ * The wiring (schema 2).
+ *
+ * Both ends of every edge must be nodes this document contains. An edge naming
+ * a node that is not here is refused rather than dropped: dropping it produces
+ * a document that renders — just not the one that was saved, and with one
+ * branch silently detached — which is the failure nobody can see.
+ *
+ * The port key is checked for shape only. Whether the destination effect
+ * *declares* that port is a question about the catalogue rather than about the
+ * file, and it is answered by `registry/graph.ts`, which has the descriptors.
+ */
+function decodeEdges(value: unknown, ids: ReadonlySet<string>): readonly GraphEdge[] {
+  if (!Array.isArray(value)) {
+    throw new DocumentError("malformed-document", "document.edges is not an array");
+  }
+  const edges: GraphEdge[] = [];
+  const seen = new Set<string>();
+  for (const [index, raw] of value.entries()) {
+    const where = `edges[${index}]`;
+    if (!isRecord(raw)) {
+      throw new DocumentError("malformed-document", `${where} is not an object`);
+    }
+    const from = asString(field(raw, "from", where), where, "from");
+    const to = asString(field(raw, "to", where), where, "to");
+    const port = asString(field(raw, "port", where), where, "port");
+
+    for (const [role, id] of [
+      ["from", from],
+      ["to", to],
+    ] as const) {
+      if (ids.has(id)) continue;
+      throw new DocumentError(
+        "unknown-node",
+        `${where}.${role} is "${id}", which is not a node in this document; an edge has to name both of its ends`,
+        { nodeId: id },
+      );
+    }
+
+    const key = `${to}\u0000${port}`;
+    if (seen.has(key)) {
+      throw new DocumentError(
+        "malformed-document",
+        `two edges are wired to "${port}" on node "${to}"; a port carries one picture`,
+        { nodeId: to, port },
+      );
+    }
+    seen.add(key);
+    edges.push({ from, to, port });
+  }
+  return edges;
+}
+
+/**
+ * The node whose output is the picture (schema 2).
+ *
+ * `null` is legal and means an empty document. A named node that is not in the
+ * document is refused, because a graph has no last element to fall back to and
+ * picking one would be inventing the answer.
+ */
+function decodeOutput(value: unknown, ids: ReadonlySet<string>): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string") {
+    throw new DocumentError(
+      "malformed-document",
+      `document.output is ${JSON.stringify(value)}; expected a node id or null`,
+    );
+  }
+  if (!ids.has(value)) {
+    throw new DocumentError(
+      "unknown-node",
+      `document.output is "${value}", which is not a node in this document`,
+      { nodeId: value },
+    );
+  }
+  return value;
 }
 
 function decodeSource(value: unknown): SourceRef | null {
@@ -254,6 +341,8 @@ function decodeStack(value: unknown, registry: EffectRegistry): readonly StackNo
       throw new DocumentError("malformed-document", `${where}.params is not an object`);
     }
 
+    const mask = raw["mask"] === undefined ? undefined : decodeMask(raw["mask"], where);
+
     stack.push({
       id,
       effect,
@@ -262,9 +351,115 @@ function decodeStack(value: unknown, registry: EffectRegistry): readonly StackNo
       blend: blend as BlendMode,
       params: coerceParams(descriptor, params).values,
       seed: asNumber(field(raw, "seed", where), where, "seed"),
+      ...(mask === undefined ? {} : { mask }),
     });
   }
   return stack;
+}
+
+/**
+ * One node's mask (F-PP-08).
+ *
+ * Refused rather than repaired, like everything else here. A mask whose band is
+ * inverted or whose tolerance is zero produces a node that contributes nothing
+ * anywhere, which is indistinguishable from a broken effect — so it is rejected
+ * with the reason `graph/mask.ts` gives, at load, rather than rendered as an
+ * invisible node. There is no clamping: unlike a parameter, a mask has no
+ * descriptor with a legal range to clamp against, so a correction here would be
+ * this module inventing one.
+ */
+function decodeMask(value: unknown, where: string): NodeMask {
+  if (!isRecord(value)) {
+    throw new DocumentError("malformed-document", `${where}.mask is not an object`);
+  }
+  const source = field(value, "source", `${where}.mask`);
+  if (!isRecord(source)) {
+    throw new DocumentError("malformed-document", `${where}.mask.source is not an object`);
+  }
+  const kind = asString(field(source, "kind", `${where}.mask.source`), where, "mask.source.kind");
+  if (!MASK_KINDS.includes(kind as (typeof MASK_KINDS)[number])) {
+    throw new DocumentError(
+      "malformed-document",
+      `${where}.mask.source.kind is "${kind}"; expected one of ${MASK_KINDS.join(", ")}`,
+      { kind },
+    );
+  }
+  const invert = asBoolean(field(value, "invert", `${where}.mask`), where, "mask.invert");
+
+  const mask: NodeMask = {
+    source:
+      kind === "luminance"
+        ? {
+            kind: "luminance",
+            low: asNumber(field(source, "low", `${where}.mask.source`), where, "mask.source.low"),
+            high: asNumber(
+              field(source, "high", `${where}.mask.source`),
+              where,
+              "mask.source.high",
+            ),
+            feather: asNumber(
+              field(source, "feather", `${where}.mask.source`),
+              where,
+              "mask.source.feather",
+            ),
+          }
+        : kind === "color"
+          ? {
+              kind: "color",
+              color: decodeMaskColor(field(source, "color", `${where}.mask.source`), where),
+              tolerance: asNumber(
+                field(source, "tolerance", `${where}.mask.source`),
+                where,
+                "mask.source.tolerance",
+              ),
+              feather: asNumber(
+                field(source, "feather", `${where}.mask.source`),
+                where,
+                "mask.source.feather",
+              ),
+            }
+          : {
+              kind: "image",
+              channel: decodeMaskChannel(
+                field(source, "channel", `${where}.mask.source`),
+                where,
+              ),
+            },
+    invert,
+  };
+
+  const problem = maskProblem(mask);
+  if (problem !== null) {
+    throw new DocumentError("malformed-document", `${where}.mask: ${problem}`);
+  }
+  return mask;
+}
+
+function decodeMaskColor(value: unknown, where: string): SrgbTriplet {
+  if (!Array.isArray(value) || value.length !== 3) {
+    throw new DocumentError(
+      "malformed-document",
+      `${where}.mask.source.color is not three packed sRGB components`,
+    );
+  }
+  const [r, g, b] = value as readonly unknown[];
+  return [
+    asNumber(r, where, "mask.source.color[0]"),
+    asNumber(g, where, "mask.source.color[1]"),
+    asNumber(b, where, "mask.source.color[2]"),
+  ];
+}
+
+function decodeMaskChannel(value: unknown, where: string): MaskChannel {
+  const channel = asString(value, where, "mask.source.channel");
+  if (!MASK_CHANNELS.includes(channel as MaskChannel)) {
+    throw new DocumentError(
+      "malformed-document",
+      `${where}.mask.source.channel is "${channel}"; expected one of ${MASK_CHANNELS.join(", ")}`,
+      { channel },
+    );
+  }
+  return channel as MaskChannel;
 }
 
 function decodePalette(value: unknown): Palette {

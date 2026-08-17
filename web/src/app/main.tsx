@@ -7,6 +7,7 @@ import { createEditorSession, type EditorSession } from "../state";
 import { registerBatchControls } from "../ui/batch";
 import { registerDocumentsToolbar } from "../ui/documents";
 import { animatedSourceFor, gifCoreFor, registerExportControls } from "../ui/export";
+import { registerGraphPanel } from "../ui/graph";
 import { registerGuide } from "../ui/guide";
 import { installHelp } from "../ui/help";
 import { paletteStore } from "../ui/palette";
@@ -135,6 +136,12 @@ async function start(): Promise<void> {
   // The panels. Each registers itself into a slot; the shell imports none of
   // them. `ui/palette` registers on import, which is why it has no call here.
   registerStackPanel({ store: session.store, registry: outcome.registry });
+  // The node editor, beside the stack rather than in place of it: the stack is
+  // the document's list and the editor is its wiring, and only one of the two
+  // can express a second image edge. Both read this same store, so selecting a
+  // node in either one is the same selection and drives the same properties
+  // panel. See `ui/graph/index.ts`.
+  registerGraphPanel({ store: session.store, registry: outcome.registry });
   registerPropertiesPanel({ store: session.store, registry: outcome.registry });
   registerToolbar(session);
   // Documents before export, which is the order the two are reached in: you

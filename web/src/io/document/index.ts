@@ -49,6 +49,8 @@
 
 export { DocumentFileError, type DocumentFileErrorCode } from "./errors";
 
+export { migrateDocument } from "./migrate";
+
 export {
   PRESET_FILE_KIND,
   isRecord,

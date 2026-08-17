@@ -23,6 +23,7 @@ import type {
 } from "../types/document";
 import type { EffectDescriptor } from "../types/registry";
 import { DOCUMENT_SCHEMA_VERSION } from "../types/document";
+import { chainOf } from "../graph/edit";
 import { createEffectRegistry, type EffectRegistry } from "../registry/registry";
 import { PATTERN_OFFSET_X, PATTERN_OFFSET_Y, PATTERN_ROTATION } from "./temporal";
 
@@ -262,6 +263,25 @@ export const FEEDBACK_EFFECT: EffectDescriptor = {
   producesIndexMap: false,
   requiresIndexMap: false,
   readsFeedback: true,
+  // The port is the other half of `readsFeedback`: it is what makes the loop a
+  // drawable edge in the graph rather than a hidden read of the frame store,
+  // and the registry refuses one declaration without the other.
+  inputs: [
+    {
+      key: "in",
+      label: "Image",
+      role: "image",
+      description: "The picture this fixture's trail would be laid over.",
+      required: false,
+    },
+    {
+      key: "history",
+      label: "Previous frame",
+      role: "feedback",
+      description: "This node's own output one frame ago; nothing here renders it.",
+      required: false,
+    },
+  ],
   params: [
     {
       key: "decay",
@@ -350,10 +370,13 @@ export function testDocument(
   bindings: readonly Binding[] = [],
   clock: Clock = { frames: 60, fps: 30 },
 ): DitherDocument {
+  const chain = chainOf(stack);
   return {
     schema: DOCUMENT_SCHEMA_VERSION,
     source: null,
     stack,
+    edges: chain.edges,
+    output: chain.output,
     palette: TEST_PALETTE,
     clock,
     bindings,

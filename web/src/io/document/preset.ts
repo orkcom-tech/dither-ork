@@ -116,6 +116,11 @@ export function applyPreset(preset: Preset, document: DitherDocument): DitherDoc
     schema: next.schema,
     source,
     stack: next.stack,
+    // The wiring travels with the recipe, because it *is* part of the recipe
+    // now: a preset that carried its nodes and not its edges would apply as a
+    // chain whatever graph it was saved from.
+    edges: next.edges,
+    output: next.output,
     palette: next.palette,
     clock: next.clock,
     bindings: next.bindings,

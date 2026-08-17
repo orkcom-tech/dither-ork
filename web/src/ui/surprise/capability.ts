@@ -46,6 +46,7 @@ import type { DitherDocument } from "../../types/document";
 import { DOCUMENT_SCHEMA_VERSION } from "../../types/document";
 import type { EffectRegistry } from "../../registry";
 import { defaultParams } from "../../registry";
+import { chainOf } from "../../graph/edit";
 import { DEFAULT_CLOCK, DEFAULT_PALETTE, createStackNode } from "../../state/document";
 // The pure leaf of `state/render/`, which the barrel deliberately does not
 // re-export: it is document -> graph and nothing else, with no device, no
@@ -68,10 +69,14 @@ function probeDocument(registry: EffectRegistry): DitherDocument {
   if (descriptor === undefined) {
     throw new Error("the effect catalogue is empty; nothing can be probed against it");
   }
+  const stack = [createStackNode("n1", descriptor.id, defaultParams(descriptor))];
+  const chain = chainOf(stack);
   return {
     schema: DOCUMENT_SCHEMA_VERSION,
     source: null,
-    stack: [createStackNode("n1", descriptor.id, defaultParams(descriptor))],
+    stack,
+    edges: chain.edges,
+    output: chain.output,
     palette: DEFAULT_PALETTE,
     clock: DEFAULT_CLOCK,
     bindings: [],

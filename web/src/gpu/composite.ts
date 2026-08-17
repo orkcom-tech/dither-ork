@@ -40,7 +40,7 @@
  * because it is the layer that would otherwise read out of bounds.
  */
 
-import type { BlendMode } from "../types/document";
+import type { BlendMode, NodeMask } from "../types/document";
 import type { Extent } from "../types/gpu";
 import { logger } from "../lib/log";
 import type { GpuContext } from "./device";
@@ -65,6 +65,15 @@ export class CompositeError extends Error {
 // document both depend on. `blend.ts` is arithmetic and constants — it pulls in
 // no graph machinery.
 import { BLEND_ORDINAL } from "../graph/blend";
+// Same argument for the mask arithmetic: `mask.ts` is the definition and
+// `_composite.wgsl` is its transcription, so the ordinals come from there
+// rather than being written down a second time here.
+import {
+  MASK_CHANNEL_ORDINAL,
+  MASK_KIND_ORDINAL,
+  maskNeedsImage,
+  resolveColorTarget,
+} from "../graph/mask";
 
 /** Binding numbers, restated from the top of `_composite.wgsl`. */
 const BINDING = {
@@ -72,10 +81,31 @@ const BINDING = {
   output: 1,
   uniforms: 5,
   top: 6,
+  mask: 7,
 } as const;
 
-/** `width: u32, height: u32, mode: u32, opacity: f32`. */
-const UNIFORM_BYTES = 16;
+/**
+ * `width, height, mode: u32; opacity: f32; mask_kind, mask_invert: u32;
+ * mask_a..mask_e: f32; mask_channel: u32` — twelve 4-byte fields, 48 bytes.
+ *
+ * It has to equal the WGSL struct's size exactly: `minBindingSize` below makes
+ * a short buffer a pipeline-creation error, and a long one is a silent waste
+ * that hides a field somebody forgot to pack.
+ *
+ * One layout for masked and unmasked alike. A second, shorter layout for the
+ * unmasked case would be a second `minBindingSize` and a second uniform buffer
+ * per node for 32 bytes, on a buffer that is rewritten on every drag anyway.
+ */
+const UNIFORM_BYTES = 48;
+
+/**
+ * The `mask_kind` value that means "no mask".
+ *
+ * Not a member of `MASK_KINDS`: those are append-only ordinals starting at 0
+ * and any sentinel inside that range would collide with the next kind added.
+ * Restated in `_composite.wgsl` as `MASK_NONE`.
+ */
+const MASK_NONE = 0xffffffff;
 
 const WORKGROUP = 8;
 
@@ -89,6 +119,22 @@ export interface CompositeRequest {
   readonly extent: Extent;
   readonly opacity: number;
   readonly blend: BlendMode;
+  /**
+   * Spatially-varying opacity (F-PP-08), or absent on an unmasked node.
+   *
+   * `mask.source.kind === "image"` is the only case that needs {@link mask
+   * CompositeRequest.maskTexture}; the other two read the base texture, which
+   * is already bound.
+   */
+  readonly mask?: NodeMask | null;
+  /**
+   * The picture wired to the node's `mask` port.
+   *
+   * Required when — and legal only when — the mask's source is `image`. Missing
+   * it is refused rather than treated as full coverage, which would be a mask
+   * that silently is not one.
+   */
+  readonly maskTexture?: GPUTexture | null;
   /** Node id, or anything that identifies the composite in a label and a log line. */
   readonly label: string;
 }
@@ -101,23 +147,39 @@ export interface CompositeRequest {
  * compile mid-render would stall the frame it was meant to serve, which is the
  * same reason `PassCompiler` refuses to compile during encoding.
  */
+/** A pipeline and the bind group layout it was built against. */
+interface CompiledComposite {
+  readonly pipeline: GPUComputePipeline;
+  readonly layout: GPUBindGroupLayout;
+}
+
 export class CompositeProgram {
   readonly #ctx: GpuContext;
   readonly #buffers: BufferCache;
-  readonly #pipeline: GPUComputePipeline;
-  readonly #layout: GPUBindGroupLayout;
+  readonly #plain: CompiledComposite;
+  /**
+   * The variant with a mask texture bound at 7.
+   *
+   * A separate pipeline rather than a flag, because WebGPU requires every
+   * declared binding to be provided: one pipeline would have to be handed some
+   * texture for the mask slot on every unmasked composite, and binding a
+   * texture to a slot the shader is told to ignore is a correctness bug waiting
+   * for the day the flag is wrong.
+   */
+  readonly #masked: CompiledComposite;
   #composites = 0;
+  #maskedComposites = 0;
 
   private constructor(
     ctx: GpuContext,
     buffers: BufferCache,
-    pipeline: GPUComputePipeline,
-    layout: GPUBindGroupLayout,
+    plain: CompiledComposite,
+    masked: CompiledComposite,
   ) {
     this.#ctx = ctx;
     this.#buffers = buffers;
-    this.#pipeline = pipeline;
-    this.#layout = layout;
+    this.#plain = plain;
+    this.#masked = masked;
   }
 
   static async create(ctx: GpuContext, buffers: BufferCache): Promise<CompositeProgram> {
@@ -150,69 +212,100 @@ export class CompositeProgram {
     }
 
     const visibility = GPUShaderStage.COMPUTE;
-    const layout = ctx.device.createBindGroupLayout({
-      label: "composite layout",
-      entries: [
-        {
-          binding: BINDING.base,
-          visibility,
-          texture: { sampleType: "float", viewDimension: "2d" },
-        },
-        {
-          binding: BINDING.output,
-          visibility,
-          storageTexture: {
-            access: "write-only",
-            format: "rgba16float",
-            viewDimension: "2d",
+    const layoutFor = (masked: boolean): GPUBindGroupLayout =>
+      ctx.device.createBindGroupLayout({
+        label: masked ? "composite layout (masked)" : "composite layout",
+        entries: [
+          {
+            binding: BINDING.base,
+            visibility,
+            texture: { sampleType: "float", viewDimension: "2d" },
           },
-        },
-        {
-          binding: BINDING.uniforms,
-          visibility,
-          // minBindingSize makes a short uniform buffer a creation-time error
-          // rather than an out-of-bounds read the shader cannot detect.
-          buffer: { type: "uniform", minBindingSize: UNIFORM_BYTES },
-        },
-        {
-          binding: BINDING.top,
-          visibility,
-          texture: { sampleType: "float", viewDimension: "2d" },
-        },
-      ],
-    });
+          {
+            binding: BINDING.output,
+            visibility,
+            storageTexture: {
+              access: "write-only",
+              format: "rgba16float",
+              viewDimension: "2d",
+            },
+          },
+          {
+            binding: BINDING.uniforms,
+            visibility,
+            // minBindingSize makes a short uniform buffer a creation-time error
+            // rather than an out-of-bounds read the shader cannot detect.
+            buffer: { type: "uniform", minBindingSize: UNIFORM_BYTES },
+          },
+          {
+            binding: BINDING.top,
+            visibility,
+            texture: { sampleType: "float", viewDimension: "2d" },
+          },
+          ...(masked
+            ? [
+                {
+                  binding: BINDING.mask,
+                  visibility,
+                  texture: { sampleType: "float" as const, viewDimension: "2d" as const },
+                },
+              ]
+            : []),
+        ],
+      });
 
-    ctx.device.pushErrorScope("validation");
-    const created = await ctx.device
-      .createComputePipelineAsync({
-        label: "composite",
-        layout: ctx.device.createPipelineLayout({
-          label: "composite pipeline layout",
-          bindGroupLayouts: [layout],
-        }),
-        compute: { module, entryPoint: "composite" },
-      })
-      .then(
-        (pipeline) => ({ ok: true, pipeline }) as const,
-        (error: unknown) => ({ ok: false, error }) as const,
-      );
-    const scoped = await ctx.device.popErrorScope();
+    const compile = async (
+      entryPoint: "composite" | "composite_masked",
+      masked: boolean,
+    ): Promise<CompiledComposite> => {
+      const layout = layoutFor(masked);
+      ctx.device.pushErrorScope("validation");
+      const created = await ctx.device
+        .createComputePipelineAsync({
+          label: entryPoint,
+          layout: ctx.device.createPipelineLayout({
+            label: `${entryPoint} pipeline layout`,
+            bindGroupLayouts: [layout],
+          }),
+          compute: { module, entryPoint },
+        })
+        .then(
+          (pipeline) => ({ ok: true, pipeline }) as const,
+          (error: unknown) => ({ ok: false, error }) as const,
+        );
+      const scoped = await ctx.device.popErrorScope();
 
-    if (!created.ok) {
-      log.error("composite pipeline creation failed", { error: String(created.error) });
-      throw new CompositeError(
-        `the composite pipeline could not be created: ${String(created.error)}`,
-      );
-    }
-    if (scoped !== null) {
-      log.error("composite pipeline validation error", { error: scoped.message });
-      throw new CompositeError(`the composite pipeline is invalid: ${scoped.message}`);
-    }
+      if (!created.ok) {
+        log.error("composite pipeline creation failed", {
+          entryPoint,
+          error: String(created.error),
+        });
+        throw new CompositeError(
+          `the ${entryPoint} pipeline could not be created: ${String(created.error)}`,
+        );
+      }
+      if (scoped !== null) {
+        log.error("composite pipeline validation error", {
+          entryPoint,
+          error: scoped.message,
+        });
+        throw new CompositeError(`the ${entryPoint} pipeline is invalid: ${scoped.message}`);
+      }
+      return { pipeline: created.pipeline, layout };
+    };
+
+    // Both compiled up front, for the reason the class comment gives: a
+    // pipeline that had to compile mid-render would stall the frame it was
+    // meant to serve, and the frame a mask is first switched on is exactly the
+    // frame somebody is watching.
+    const plain = await compile("composite", false);
+    const masked = await compile("composite_masked", true);
 
     log.info("composite program compiled", {
+      pipelines: 2,
       ms: Math.round((performance.now() - started) * 100) / 100,
     });
-    return new CompositeProgram(ctx, buffers, created.pipeline, layout);
+    return new CompositeProgram(ctx, buffers, plain, masked);
   }
 
   /**
@@ -259,21 +352,56 @@ export class CompositeProgram {
       );
     }
 
+    const mask = request.mask ?? null;
+    const maskTexture = request.maskTexture ?? null;
+    const needsImage = mask !== null && maskNeedsImage(mask);
+
+    // Both directions, and both refuse rather than default. A mask picture with
+    // no image mask would be a texture bound for nobody; an image mask with no
+    // picture would have to fall back to full coverage, which is a mask that
+    // silently is not one — exactly the class of failure the opacity sliders
+    // were removed over.
+    if (needsImage && maskTexture === null) {
+      throw new CompositeError(
+        `composite at ${request.label}: the mask reads a picture and none was supplied`,
+      );
+    }
+    if (!needsImage && maskTexture !== null) {
+      throw new CompositeError(
+        `composite at ${request.label}: a mask picture was supplied and this node's mask does not read one`,
+      );
+    }
+    if (maskTexture !== null) {
+      const shape: Extent = { width: maskTexture.width, height: maskTexture.height };
+      if (!extentsEqual(shape, extent)) {
+        throw new CompositeError(
+          `composite at ${request.label}: the mask texture is ${describeExtent(shape)} and the composite covers ${describeExtent(extent)}; coverage is per pixel, so the two have to name the same grid`,
+        );
+      }
+      if (maskTexture === request.output) {
+        throw new CompositeError(
+          `composite at ${request.label}: the mask texture is also the output texture`,
+        );
+      }
+    }
+
     const uniforms = new ArrayBuffer(UNIFORM_BYTES);
     const view = new DataView(uniforms);
     view.setUint32(0, extent.width, true);
     view.setUint32(4, extent.height, true);
     view.setUint32(8, ordinal, true);
     view.setFloat32(12, request.opacity, true);
+    packMask(view, mask);
 
     // One uniform buffer per node, rewritten in place, for the same reason
     // every pass has one: a slider drag re-runs this dozens of times a second.
     const buffer = this.#buffers.uniform(`${request.label}/composite`, UNIFORM_BYTES);
     this.#ctx.device.queue.writeBuffer(buffer, 0, uniforms);
 
+    const compiled = needsImage ? this.#masked : this.#plain;
     const bindGroup = this.#ctx.device.createBindGroup({
       label: `composite @ ${request.label}`,
-      layout: this.#layout,
+      layout: compiled.layout,
       entries: [
         { binding: BINDING.base, resource: request.base.createView() },
         { binding: BINDING.output, resource: request.output.createView() },
@@ -282,10 +410,13 @@ export class CompositeProgram {
           resource: { buffer, offset: 0, size: UNIFORM_BYTES },
         },
         { binding: BINDING.top, resource: request.top.createView() },
+        ...(maskTexture === null
+          ? []
+          : [{ binding: BINDING.mask, resource: maskTexture.createView() }]),
       ],
     });
 
-    compute.setPipeline(this.#pipeline);
+    compute.setPipeline(compiled.pipeline);
     compute.setBindGroup(0, bindGroup);
     compute.dispatchWorkgroups(
       Math.ceil(extent.width / WORKGROUP),
@@ -294,10 +425,12 @@ export class CompositeProgram {
     );
 
     this.#composites += 1;
+    if (mask !== null) this.#maskedComposites += 1;
     log.debug("composite encoded", {
       node: request.label,
       blend: request.blend,
       opacity: request.opacity,
+      mask: mask?.source.kind ?? "none",
       extent: describeExtent(extent),
     });
   }
@@ -318,7 +451,48 @@ export class CompositeProgram {
     this.#ctx.device.queue.submit([encoder.finish()]);
   }
 
-  stats(): { readonly composites: number } {
-    return { composites: this.#composites };
+  stats(): { readonly composites: number; readonly masked: number } {
+    return { composites: this.#composites, masked: this.#maskedComposites };
+  }
+}
+
+/**
+ * The mask half of the uniform block, at byte 16.
+ *
+ * Five generic `f32` slots rather than three named layouts, because a uniform
+ * buffer's layout is fixed when the pipeline is created and three layouts would
+ * be three pipelines for one program. What each slot means per kind is stated
+ * in `_composite.wgsl` beside the code that reads them, and the two are one
+ * edit apart on purpose.
+ */
+function packMask(view: DataView, mask: NodeMask | null): void {
+  if (mask === null) {
+    view.setUint32(16, MASK_NONE, true);
+    return;
+  }
+  view.setUint32(16, MASK_KIND_ORDINAL[mask.source.kind], true);
+  view.setUint32(20, mask.invert ? 1 : 0, true);
+
+  const source = mask.source;
+  switch (source.kind) {
+    case "luminance":
+      view.setFloat32(24, source.low, true);
+      view.setFloat32(28, source.high, true);
+      view.setFloat32(32, source.feather, true);
+      break;
+    case "color": {
+      // Converted here, once per node, rather than per invocation: the target
+      // does not vary across the frame and OKLab costs three cube roots.
+      const target = resolveColorTarget(source.color);
+      view.setFloat32(24, target.l, true);
+      view.setFloat32(28, target.a, true);
+      view.setFloat32(32, target.b, true);
+      view.setFloat32(36, source.tolerance, true);
+      view.setFloat32(40, source.feather, true);
+      break;
+    }
+    case "image":
+      view.setUint32(44, MASK_CHANNEL_ORDINAL[source.channel], true);
+      break;
   }
 }

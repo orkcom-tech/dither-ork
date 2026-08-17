@@ -41,6 +41,8 @@ import type {
   Clock,
   CurvePoint,
   DitherDocument,
+  GraphEdge,
+  NodeMask,
   Palette,
   ParameterValue,
   SourceRef,
@@ -89,6 +91,53 @@ function canonicalParam(value: ParameterValue): ParameterValue {
   return value as ParameterValue;
 }
 
+/**
+ * A node's mask, projected through a fixed field order (F-PP-08).
+ *
+ * Written per kind rather than by spreading the source object, so the bytes
+ * depend on the mask's values and not on how the editor happened to build it —
+ * the same rule the rest of this module follows, and the reason save → load →
+ * save is byte-identical rather than nearly so.
+ */
+function canonicalMask(mask: NodeMask): Record<string, unknown> {
+  const source = mask.source;
+  const projected =
+    source.kind === "luminance"
+      ? { kind: source.kind, low: source.low, high: source.high, feather: source.feather }
+      : source.kind === "color"
+        ? {
+            kind: source.kind,
+            color: [source.color[0], source.color[1], source.color[2]],
+            tolerance: source.tolerance,
+            feather: source.feather,
+          }
+        : { kind: source.kind, channel: source.channel };
+  return { source: projected, invert: mask.invert };
+}
+
+function canonicalEdge(edge: GraphEdge): Record<string, unknown> {
+  return { from: edge.from, to: edge.to, port: edge.port };
+}
+
+/**
+ * The edges, in a canonical order.
+ *
+ * Sorted by destination, then port, then source. Edge order carries no meaning
+ * — the graph is a set of connections — so leaving it as authored would make
+ * two identical graphs different bytes, and the share link and the preset
+ * library both compare recipes by comparing bytes.
+ */
+function canonicalEdges(edges: readonly GraphEdge[]): Record<string, unknown>[] {
+  return [...edges]
+    .sort(
+      (a, b) =>
+        a.to.localeCompare(b.to) ||
+        a.port.localeCompare(b.port) ||
+        a.from.localeCompare(b.from),
+    )
+    .map(canonicalEdge);
+}
+
 function canonicalNode(node: StackNode): Record<string, unknown> {
   const params: Record<string, ParameterValue> = {};
   // Sorted, so the bytes do not depend on the order the descriptor happens to
@@ -107,6 +156,10 @@ function canonicalNode(node: StackNode): Record<string, unknown> {
     blend: node.blend,
     params,
     seed: node.seed,
+    // Last, and only when present: an unmasked node is the ordinary case, and a
+    // schema-1 document migrated forward must produce the same bytes it would
+    // have if masking had always existed and this node had never used it.
+    ...(node.mask === undefined ? {} : { mask: canonicalMask(node.mask) }),
   };
 }
 
@@ -156,6 +209,8 @@ export function canonicalDocument(document: DitherDocument): Record<string, unkn
     palette: canonicalPalette(document.palette),
     clock: canonicalClock(document.clock),
     stack: document.stack.map(canonicalNode),
+    edges: canonicalEdges(document.edges),
+    output: document.output,
     bindings: document.bindings.map(canonicalBinding),
     ...(document.surpriseSeed === undefined ? {} : { surpriseSeed: document.surpriseSeed }),
   };

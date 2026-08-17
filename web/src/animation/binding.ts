@@ -242,7 +242,7 @@ export function resolveBindings(
       );
     }
 
-    const key = `${binding.nodeId} ${binding.param}`;
+    const key = `${binding.nodeId}\u0000${binding.param}`;
     if (seen.has(key)) {
       throw new AnimationError(
         "duplicate-binding",

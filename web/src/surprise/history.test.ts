@@ -16,6 +16,8 @@ const DOCUMENT: DitherDocument = {
   schema: DOCUMENT_SCHEMA_VERSION,
   source: null,
   stack: [],
+  edges: [],
+  output: null,
   palette: DEFAULT_PALETTE,
   clock: DEFAULT_CLOCK,
   bindings: [],

@@ -154,7 +154,10 @@ describe("refusals", () => {
   it("refuses something that is not a document at all", () => {
     expect(() => decodeDocument([], registry)).toThrow(DocumentError);
     expect(() => decodeDocument(null, registry)).toThrow(DocumentError);
-    expect(() => decodeDocument({ schema: 1 }, registry)).toThrow(/no "source"/);
+    // Schema 1 is migrated before its shape is checked, so what a bare
+    // `{ schema: 1 }` is missing first is the stack the chain is built from.
+    expect(() => decodeDocument({ schema: 1 }, registry)).toThrow(/stack is not an array/);
+    expect(() => decodeDocument({ schema: 2, stack: [] }, registry)).toThrow(/no "source"/);
   });
 });
 

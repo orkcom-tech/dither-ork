@@ -41,6 +41,7 @@ import type { EffectRegistry } from "../../registry";
 export type GuideChapterId =
   | "start"
   | "stack"
+  | "graph"
   | "palette"
   | "light"
   | "index-map"
@@ -145,6 +146,32 @@ const STACK: GuideChapter = {
     {
       label: "finish",
       value: `${registry.bySlot("postprocess").length} work on the result`,
+    },
+  ],
+};
+
+const GRAPH: GuideChapter = {
+  id: "graph",
+  title: "The node editor: branches, masks and loops",
+  lede: "The list is one shape a graph can have. The editor is where the others live.",
+  paragraphs: [
+    "The stack panel shows a document as a list because most documents are one — a chain, each node feeding the next. The node editor below the timeline shows the same document as what it actually is: nodes with wires between them. Nothing is duplicated; they are two views of one thing, and a change in either is a change to the document.",
+    "The reason to open the editor is that a graph can do two things a list cannot. A branch can start from a generator instead of the photograph, so part of the picture is made rather than filmed. And two branches can arrive at the same node, which is how one picture comes to control what another one does.",
+    "To wire something: click a node, press C, then step through the possible targets with the arrow keys and press Enter. The line under the graph says what the drop will do before you commit it — and when the target is illegal it says why instead, naming both nodes. Dragging from a node's output dot to an input dot does the same thing. Press X to disconnect a node's inputs, Escape to abandon a connection you started.",
+    "A wire into a node's Mask port is the one that changes what a node means. A mask is not a second layer and it is not blended into the picture: it is the node's opacity with a value for every pixel. Where the mask picture is bright the node shows through; where it is dark the node's input passes untouched. So a blur wired to a circle is a blur that only happens inside the circle, and the parts outside are not a faded blur — they are the original, exactly. Opacity and mask multiply, because they answer different questions: how much of this node overall, and where.",
+    "A node that changes the picture's size cannot be masked, and its Mask port is simply absent. There is no pixel-for-pixel correspondence between what it reads and what it writes, so there is no picture for the coverage to be of.",
+    "Wires normally cannot form a loop, and the refusal names the nodes that would be caught in one. The exception is the Feedback node's Previous frame port, which reads the frame before this one — that is a loop in the picture but not in the arithmetic, so it is legal, and the editor draws it as a ring around the node. A document containing one is marked as not looping, because a trail that decays does not return to where it started.",
+    "Two limits worth knowing before you go looking for them. No effect in the catalogue takes a second picture as colour, so two branches can meet on a Mask port and nowhere else — blending two chains, or displacing one picture by another, needs a node that does not exist yet. And a mask can only be taken from a wired picture: the luminance-range and colour-range masks the pipeline can evaluate have no control in the interface.",
+    "A node wired to nothing that reaches the picture is marked off-graph in the stack panel rather than quietly doing nothing. Making a node the picture — the button on its card — is how you choose what the viewport shows, and it is also how you check a branch in isolation before wiring it in.",
+  ],
+  facts: (registry) => [
+    {
+      label: "sources",
+      value: `${registry.bySlot("source").length} nodes need no picture at all and can start a branch`,
+    },
+    {
+      label: "maskable",
+      value: `${registry.all().filter((effect) => effect.resamples !== true).length} of ${registry.all().length} effects can take a mask; the rest change the picture's size`,
     },
   ],
 };
@@ -270,6 +297,7 @@ const EXPORT: GuideChapter = {
 export const GUIDE_CHAPTERS: readonly GuideChapter[] = [
   START,
   STACK,
+  GRAPH,
   PALETTE,
   LIGHT,
   INDEX_MAP,

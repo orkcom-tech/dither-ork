@@ -72,8 +72,10 @@
  */
 
 import { logger } from "../lib/log";
-import type { EffectDescriptor } from "../types/registry";
+import type { GraphEdge, StackNode } from "../types/document";
+import { PRIMARY_INPUT_PORT } from "../types/registry";
 import type { EffectRegistry } from "./registry";
+import { validateGraph } from "./graph";
 
 const log = logger("app");
 
@@ -88,6 +90,8 @@ export interface StackNodeRef {
   readonly id: string;
   readonly effect: string;
   readonly enabled: boolean;
+  /** Spatially-varying opacity (F-PP-08), when the node carries one. */
+  readonly mask?: StackNode["mask"];
 }
 
 export type StackIssueCode =
@@ -123,144 +127,70 @@ export interface StackValidation {
 /**
  * Check a stack against the grammar its descriptors declare.
  *
- * Reports rather than repairs, like `validateParams`: the stack editor turns
- * the issues into a refusal to drop the node, and Surprise Me discards the
+ * **A linear chain is a graph**, so this builds the chain the list implies —
+ * node *i* reading node *i-1*, the last one being the picture — and hands it to
+ * {@link validateGraph}. There is exactly one implementation of every rule and
+ * it is the graph one; this is the shape the six callers that still hold a list
+ * speak in.
+ *
+ * Reports rather than repairs, like `validateParams`: the editor turns the
+ * issues into a refusal to drop the node, and Surprise Me discards the
  * candidate and draws again. Neither wants a stack silently rewritten under it.
  */
 export function validateStack(
   registry: EffectRegistry,
   stack: readonly StackNodeRef[],
 ): StackValidation {
-  const issues: StackIssue[] = [];
-
-  // Resolve first. A node naming an effect this build does not have makes every
-  // later verdict a guess — nothing is known about what it produces or reads —
-  // so the unknown ids are reported alone rather than alongside consequences
-  // invented from their absence.
-  const descriptors = new Map<string, EffectDescriptor>();
-  for (const node of stack) {
-    const descriptor = registry.get(node.effect);
-    if (descriptor === undefined) {
-      issues.push({
-        code: "unknown-effect",
-        nodeId: node.id,
-        effect: node.effect,
-        message: `node ${node.id} names effect "${node.effect}", which this build does not have`,
-      });
-      continue;
-    }
-    descriptors.set(node.id, descriptor);
+  const edges: GraphEdge[] = [];
+  for (let i = 1; i < stack.length; i += 1) {
+    const from = stack[i - 1];
+    const to = stack[i];
+    if (from === undefined || to === undefined) continue;
+    edges.push({ from: from.id, to: to.id, port: PRIMARY_INPUT_PORT });
   }
-  if (issues.length > 0) {
-    log.warn("stack references unknown effects", {
-      nodes: stack.length,
-      unknown: issues.length,
+
+  const validation = validateGraph(registry, {
+    nodes: stack,
+    edges,
+    output: stack[stack.length - 1]?.id ?? null,
+  });
+
+  // The graph validator reports codes a list cannot produce — a dangling edge,
+  // a cycle, a port that does not exist — because a chain built from an array
+  // cannot contain any of them. The ones that survive are exactly the four this
+  // module has always reported, and anything else would be a bug in the
+  // translation above rather than something a caller can act on, so it is
+  // carried through under its own code and logged rather than silently mapped
+  // onto a code that means something else.
+  const issues: StackIssue[] = validation.issues.map((issue) => ({
+    code: STACK_ISSUE_CODES.includes(issue.code as StackIssueCode)
+      ? (issue.code as StackIssueCode)
+      : "unknown-effect",
+    nodeId: issue.nodeId,
+    effect: issue.effect,
+    ...(issue.otherNodeId === undefined ? {} : { otherNodeId: issue.otherNodeId }),
+    ...(issue.otherEffect === undefined ? {} : { otherEffect: issue.otherEffect }),
+    message: issue.message,
+  }));
+  for (const issue of validation.issues) {
+    if (STACK_ISSUE_CODES.includes(issue.code as StackIssueCode)) continue;
+    log.error("the graph validator reported a code a linear chain cannot produce", {
+      code: issue.code,
+      nodeId: issue.nodeId,
+      message: issue.message,
     });
-    return { ok: false, issues };
   }
 
-  const live = stack.filter((node) => node.enabled);
-
-  // --- the index map ----------------------------------------------------
-  //
-  // Walked in stack order, carrying the node that last emitted a map. A
-  // dither-slot node *replaces* it: quantizing is what the slot is for, so
-  // whatever indices arrived at it no longer describe the pixels leaving it.
-  // That is what makes CMYK halftone clear the map rather than pass one
-  // through, and it is the whole rule this module was written for.
-  let producer: StackNodeRef | null = null;
-  let cleared: StackNodeRef | null = null;
-
-  for (const node of live) {
-    const descriptor = descriptors.get(node.id);
-    if (descriptor === undefined) continue;
-
-    if (descriptor.requiresIndexMap && producer === null) {
-      const blame = cleared;
-      const blameDescriptor = blame === null ? undefined : descriptors.get(blame.id);
-      issues.push({
-        code: "index-map-missing",
-        nodeId: node.id,
-        effect: node.effect,
-        ...(blame === null ? {} : { otherNodeId: blame.id, otherEffect: blame.effect }),
-        message:
-          blame === null || blameDescriptor === undefined
-            ? `${descriptor.name} (node ${node.id}) reads the index map, and nothing in front of it quantizes — add a dither that emits one`
-            : `${descriptor.name} (node ${node.id}) reads the index map, but the dither in front of it is ${blameDescriptor.name} (node ${blame.id}), which emits none`,
-      });
-    }
-
-    // Extents. Checked before the producer is updated, because what matters is
-    // the map that is live *as this node runs* — a resampler that writes its own
-    // map (nearest upscale) is legal precisely because it replaces the one it
-    // was handed rather than leaving it behind.
-    if (descriptor.resamples === true && producer !== null && !descriptor.producesIndexMap) {
-      const producerDescriptor = descriptors.get(producer.id);
-      issues.push({
-        code: "index-map-resampled",
-        nodeId: node.id,
-        effect: node.effect,
-        otherNodeId: producer.id,
-        otherEffect: producer.effect,
-        message:
-          producerDescriptor === undefined
-            ? `${descriptor.name} (node ${node.id}) resamples the image while the index map from node ${producer.id} is still live, and writes no index map of its own`
-            : `${descriptor.name} (node ${node.id}) resamples the image while the index map from ${producerDescriptor.name} (node ${producer.id}) is still live, and writes no index map of its own — palette indices cannot be interpolated, so the colours and the indices would end up naming different pixel grids. Move it in front of ${producerDescriptor.name}, or use Nearest upscale, which carries the map across.`,
-      });
-    }
-
-    if (descriptor.slot === "dither") {
-      producer = descriptor.producesIndexMap ? node : null;
-      cleared = descriptor.producesIndexMap ? null : node;
-    } else if (descriptor.producesIndexMap) {
-      producer = node;
-    }
-  }
-
-  // --- exclusions -------------------------------------------------------
-  //
-  // Reported once per pair, from the later node, so a stack with the same
-  // conflict in it twice does not read as four problems.
-  for (let i = 0; i < live.length; i += 1) {
-    const later = live[i];
-    if (later === undefined) continue;
-    const laterDescriptor = descriptors.get(later.id);
-    if (laterDescriptor === undefined) continue;
-
-    for (let j = 0; j < i; j += 1) {
-      const earlier = live[j];
-      if (earlier === undefined) continue;
-      const earlierDescriptor = descriptors.get(earlier.id);
-      if (earlierDescriptor === undefined) continue;
-
-      const excluded =
-        (laterDescriptor.excludes ?? []).includes(earlier.effect) ||
-        (earlierDescriptor.excludes ?? []).includes(later.effect);
-      if (!excluded) continue;
-
-      issues.push({
-        code: "excluded-combination",
-        nodeId: later.id,
-        effect: later.effect,
-        otherNodeId: earlier.id,
-        otherEffect: earlier.effect,
-        message: `${laterDescriptor.name} (node ${later.id}) and ${earlierDescriptor.name} (node ${earlier.id}) exclude one another; the grammar does not allow them in one stack`,
-      });
-    }
-  }
-
-  if (issues.length > 0) {
-    log.warn("stack rejected by the grammar", {
-      nodes: stack.length,
-      live: live.length,
-      issues: issues.length,
-    });
-  } else {
-    log.debug("stack accepted", { nodes: stack.length, live: live.length });
-  }
-
-  return { ok: issues.length === 0, issues };
+  return { ok: validation.ok, issues };
 }
+
+/** The codes a chain can actually produce. See {@link validateStack}. */
+const STACK_ISSUE_CODES: readonly StackIssueCode[] = [
+  "unknown-effect",
+  "index-map-missing",
+  "index-map-resampled",
+  "excluded-combination",
+];
 
 // --- what a source node discards ----------------------------------------
 //

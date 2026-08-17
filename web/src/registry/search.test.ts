@@ -107,9 +107,12 @@ describe("searchEffects ranks", () => {
 
 describe("searchCatalogue reports a miss instead of returning nothing", () => {
   it("names the requirement when the query is a feature the build does not have", () => {
-    // "mask" is deliberately not in this list: CRT mask is a real effect and a
-    // person typing it should get that, not a lecture about F-PP-08.
-    for (const query of ["jpeg", "unknown pleasures", "radio waves", "node masking"]) {
+    // Node masking used to be here. It is built now (F-PP-08), and it is not an
+    // effect — it is spatially-varying opacity on every node — so it has no
+    // descriptor to find and no unbuilt entry to report. A person typing "mask"
+    // still gets CRT mask, which is a real effect, and that was always the
+    // right answer for that word.
+    for (const query of ["jpeg", "unknown pleasures", "radio waves"]) {
       const search = searchCatalogue(EFFECTS, query);
       expect(search.results, query).toEqual([]);
       expect(search.miss?.kind, query).toBe("unbuilt");
@@ -125,7 +128,6 @@ describe("searchCatalogue reports a miss instead of returning nothing", () => {
     expect(requirementFor("unknown pleasures")).toBe("F-PT-09");
     expect(requirementFor("ridgeline")).toBe("F-PT-09");
     expect(requirementFor("radio waves")).toBe("F-PT-10");
-    expect(requirementFor("node masking")).toBe("F-PP-08");
   });
 
   it("offers the nearest built effects alongside the gap", () => {

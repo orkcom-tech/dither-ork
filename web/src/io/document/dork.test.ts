@@ -172,8 +172,10 @@ describe("canonical bytes", () => {
     // these two differently; the canonical encoder must not.
     const shuffled: DitherDocument = {
       bindings: document.bindings,
+      output: document.output,
       clock: document.clock,
       palette: document.palette,
+      edges: document.edges,
       stack: document.stack,
       source: document.source,
       schema: document.schema,
@@ -201,7 +203,16 @@ describe("canonical bytes", () => {
 
   it("write the fields in the order docs/API.md documents", () => {
     const keys = Object.keys(JSON.parse(encodeDorkFile(sample())) as object);
-    expect(keys).toEqual(["schema", "source", "palette", "clock", "stack", "bindings"]);
+    expect(keys).toEqual([
+      "schema",
+      "source",
+      "palette",
+      "clock",
+      "stack",
+      "edges",
+      "output",
+      "bindings",
+    ]);
   });
 });
 

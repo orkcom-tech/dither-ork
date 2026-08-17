@@ -24,6 +24,13 @@
  * Panel ids are a closed union because F-UI-08 names the four panels the
  * application has. A fifth is a decision, not an accident, and adding one
  * should be a line here.
+ *
+ * **The fifth is `graph`, the node editor**, added with multi-input. It is not a
+ * variant of the stack panel and does not replace it: the stack is the
+ * document's list — order, opacity, blend, twenty rows at a glance — and the
+ * editor is its **wiring**, which is a second image edge per node and therefore
+ * a thing no list can express. Both read the same store and the same selection.
+ * The argument in full is in `ui/graph/index.ts`.
  */
 
 import type { ComponentType } from "react";
@@ -33,7 +40,7 @@ import type { PanelRegion } from "./layout";
 
 const log = logger("app");
 
-export const PANEL_IDS = ["stack", "properties", "palette", "timeline"] as const;
+export const PANEL_IDS = ["stack", "properties", "palette", "timeline", "graph"] as const;
 export type PanelId = (typeof PANEL_IDS)[number];
 
 export interface PanelDefinition {

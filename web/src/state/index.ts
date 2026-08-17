@@ -39,7 +39,10 @@ export { History, type HistoryEntry } from "./history";
 
 export {
   addNode,
+  connectNodes,
+  disconnectPort,
   duplicateNode,
+  maskNodeWith,
   moveNode,
   removeNode,
   requireNode,
@@ -47,8 +50,10 @@ export {
   setClock,
   setNodeBlend,
   setNodeEnabled,
+  setNodeMask,
   setNodeOpacity,
   setNodeParam,
+  setOutputNode,
   setPalette,
   setSource,
 } from "./mutations";

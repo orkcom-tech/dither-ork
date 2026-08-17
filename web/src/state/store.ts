@@ -33,6 +33,7 @@ import type {
   BlendMode,
   Clock,
   DitherDocument,
+  NodeMask,
   Palette,
   ParameterValue,
 } from "../types/document";
@@ -320,6 +321,63 @@ export class DocumentStore {
       next,
       `${this.#effectNameOf(nodeId)}: ${key}`,
       options.continuous === true ? `param:${nodeId}.${key}` : null,
+    );
+  }
+
+  // --- the wiring (schema 2) -------------------------------------------
+  //
+  // What the node editor drives. Each is one undo step, like every other
+  // command, and each throws the refusal `connectionProblem` would have given
+  // rather than dropping an edit — see the note in `mutations.ts`.
+
+  /** Wire `from`'s output into `to`'s port, replacing whatever it held. */
+  connect(from: string, to: string, port: string): void {
+    const next = mutate.connectNodes(this.document, this.#registry, from, to, port);
+    this.#commit(next, `Connect ${this.#effectNameOf(from)} to ${this.#effectNameOf(to)}`);
+  }
+
+  /** Clear one port. Clearing a port with no edge is not a change. */
+  disconnect(to: string, port: string): void {
+    const next = mutate.disconnectPort(this.document, to, port);
+    if (next === this.document) return;
+    this.#commit(next, `Disconnect ${this.#effectNameOf(to)}`);
+  }
+
+  /**
+   * Point the document's picture at a node.
+   *
+   * A document mutation, unlike {@link DocumentStore.setSolo}: this is what the
+   * `.dork` saves and what an export writes.
+   */
+  setOutput(nodeId: string | null): void {
+    const next = mutate.setOutputNode(this.document, nodeId);
+    if (next.output === this.document.output) return;
+    this.#commit(
+      next,
+      nodeId === null ? "No output" : `Output: ${this.#effectNameOf(nodeId)}`,
+    );
+  }
+
+  /** Set or clear a node's mask (F-PP-08). */
+  setNodeMask(nodeId: string, mask: NodeMask | null): void {
+    const next = mutate.setNodeMask(this.document, nodeId, mask);
+    this.#commit(
+      next,
+      mask === null ? `Unmask ${this.#effectNameOf(nodeId)}` : `Mask ${this.#effectNameOf(nodeId)}`,
+    );
+  }
+
+  /**
+   * Mask a node with a picture — coverage and edge in one step.
+   *
+   * One command because it is one gesture, and because either half on its own
+   * is a document that will not render. See `mutations.maskNodeWith`.
+   */
+  maskNodeWith(from: string, to: string, mask: NodeMask): void {
+    const next = mutate.maskNodeWith(this.document, this.#registry, from, to, mask);
+    this.#commit(
+      next,
+      `Mask ${this.#effectNameOf(to)} with ${this.#effectNameOf(from)}`,
     );
   }
 

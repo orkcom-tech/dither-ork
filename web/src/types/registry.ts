@@ -438,6 +438,111 @@ export type ParamDescriptor =
   | SeedParam
   | CurveParam;
 
+// --- image inputs --------------------------------------------------------
+//
+// Until multi-input landed, "how many pictures does this node read" had exactly
+// one answer — one — and the graph hard-coded the port names. Masking, blending
+// two chains and displacing one picture by another all need a second image
+// edge, and each of those three reads its second picture for a *different
+// reason*. A mask is coverage, a layer is colour, a displacement source is a
+// vector field. An editor that knew only "this node has two inputs" could label
+// neither port and could not refuse a mask wired into a displacement input, so
+// what a port MEANS is declared here beside how many there are.
+
+/**
+ * What a node reads a picture *for*.
+ *
+ * The set is closed and short on purpose: each member is a different contract
+ * between the node and the picture on that port, and a reader — the editor
+ * labelling a port, the validator refusing a connection, the guide explaining
+ * one — has to be able to enumerate them.
+ */
+export type InputRole =
+  /** The picture this node transforms. Every node has exactly one, named `in`. */
+  | "image"
+  /**
+   * Coverage: how much of this node's result reaches the picture, per pixel.
+   *
+   * Read as tone rather than as colour, and it is not composited into the
+   * output — it is spatially-varying opacity (F-PP-08). See
+   * `web/src/graph/mask.ts`.
+   */
+  | "mask"
+  /** A second picture combined with the first as colour — blending two chains. */
+  | "layer"
+  /**
+   * A picture read as a vector field: its channels are offsets, not tone.
+   *
+   * Distinct from `layer` because nothing about it is colour. A node reading a
+   * displacement source samples *elsewhere in its own input*; a node reading a
+   * layer samples the layer itself.
+   */
+  | "displace"
+  /**
+   * **The previous frame.** The one role that is not a function of this frame.
+   *
+   * An edge into a port with this role is a *feedback edge*: it does not
+   * contribute to the topological order, and it is the only edge that may close
+   * a cycle. See `web/src/graph/topology.ts`.
+   */
+  | "feedback";
+
+/** One image input a node declares. */
+export interface InputPortDescriptor {
+  /** Stable, kebab-case, unique within the effect. The document's edges name it. */
+  readonly key: string;
+  /** What the editor writes beside the port. */
+  readonly label: string;
+  readonly role: InputRole;
+  /**
+   * One line: what wiring this port does to the picture.
+   *
+   * Required for the same reason every parameter's is (F-UI-15) — a port
+   * nobody can explain is a port nobody wires on purpose — and checked the same
+   * way, including the check that it does not merely restate the label.
+   */
+  readonly description: string;
+  /**
+   * True when the node cannot render without an edge here.
+   *
+   * `in` is never required: a node with no `in` edge is a root and reads the
+   * decoded source, which is what every single-node document is.
+   */
+  readonly required: boolean;
+}
+
+/** The port every node's picture arrives on. */
+export const PRIMARY_INPUT_PORT = "in";
+
+/**
+ * The port key masking uses.
+ *
+ * Universal rather than declared per effect: a mask is spatially-varying
+ * opacity and opacity is a property of *every* node, so declaring it 71 times
+ * would put the interesting declaration where nobody looks — and would let one
+ * effect forget it and silently become unmaskable. `graph/ports.ts` appends it,
+ * and it is the one port key an effect may not declare for itself.
+ */
+export const MASK_INPUT_PORT = "mask";
+
+/**
+ * What a node declares when it says nothing: one image input.
+ *
+ * This is the reason 71 shipped effects needed no edit. `inputs` is optional,
+ * absent means exactly this, and the graph reads {@link inputPortsOf} rather
+ * than the field.
+ */
+export const DEFAULT_INPUT_PORTS: readonly InputPortDescriptor[] = [
+  {
+    key: PRIMARY_INPUT_PORT,
+    label: "Image",
+    role: "image",
+    description:
+      "The picture this node works on. Unwired, the node is a root and reads the image the document opened.",
+    required: false,
+  },
+];
+
 /**
  * One effect's complete self-description.
  *
@@ -501,6 +606,24 @@ export interface EffectDescriptor {
   readonly family: EffectFamily;
   readonly execution: ExecutionKind;
   readonly params: readonly ParamDescriptor[];
+  /**
+   * The image inputs this node reads, in the order the graph evaluates them.
+   *
+   * **Optional, and absent means {@link DEFAULT_INPUT_PORTS}** — one `in` port
+   * of role `image`. That is what keeps the 71 shipped effects untouched by
+   * multi-input: they read one picture, they always did, and restating it 71
+   * times would bury the two descriptors where the declaration is interesting.
+   *
+   * The first entry must be `in` with role `image`, because every node has a
+   * picture it transforms and the composite blends against exactly that one.
+   * The mask port is **not** declared here — it is universal, appended by
+   * `graph/ports.ts`, for the reason given on {@link MASK_INPUT_PORT}.
+   *
+   * Read through {@link inputPortsOf}, never off the field: a reader that
+   * checks `descriptor.inputs` directly sees `undefined` for 71 effects and
+   * concludes they have no inputs at all.
+   */
+  readonly inputs?: readonly InputPortDescriptor[];
   /**
    * Relative likelihood in Surprise Me. 1.0 is ordinary; niche effects sit
    * lower so that signature looks appear more often than curiosities (F-SM-03).
@@ -571,6 +694,19 @@ export interface EffectDescriptor {
    * effect whose passes bind no feedback.
    */
   readonly readsFeedback?: boolean;
+}
+
+/**
+ * The image inputs this effect declares, defaulted.
+ *
+ * The one accessor for the field. Every reader goes through it so "absent means
+ * one image input" is stated once instead of being re-derived — and re-derived
+ * wrongly — in the graph, the validator and the editor.
+ */
+export function inputPortsOf(
+  descriptor: EffectDescriptor,
+): readonly InputPortDescriptor[] {
+  return descriptor.inputs ?? DEFAULT_INPUT_PORTS;
 }
 
 /**
@@ -744,6 +880,11 @@ export type RegistryIssueCode =
   | "resampler-must-run-on-gpu"
   | "feedback-must-run-on-gpu"
   | "feedback-must-not-resample"
+  | "malformed-input-port"
+  | "duplicate-input-port"
+  | "primary-input-port-missing"
+  | "reserved-input-port"
+  | "feedback-port-mismatch"
   | "source-must-run-on-gpu"
   | "source-must-not-read-index-map"
   | "source-must-not-resample"
@@ -1437,6 +1578,170 @@ function checkCurveParam(effectId: string, param: CurveParam, issues: RegistryIs
  * Cross-effect rules — id uniqueness, exclusion targets — need the whole set
  * and live in {@link validateRegistry}.
  */
+/** Every {@link InputRole}, so a malformed one can be named against the set. */
+const INPUT_ROLES: readonly InputRole[] = [
+  "image",
+  "mask",
+  "layer",
+  "displace",
+  "feedback",
+];
+
+/**
+ * The declared image inputs, checked as a set.
+ *
+ * An effect that declares nothing is not checked and cannot be wrong: absent
+ * means {@link DEFAULT_INPUT_PORTS}, which is a constant in this file.
+ *
+ * Everything here is a rule the graph would otherwise discover at wiring time
+ * or — worse — at render time. A port with a duplicate key makes every edge to
+ * it ambiguous; a first port that is not the picture breaks the composite,
+ * which blends a node's output against its `in`; a `feedback` port on an effect
+ * that does not declare `readsFeedback` is an edge nothing would ever serve,
+ * because the previous frame comes from the frame store and the store is only
+ * consulted for a node the descriptor marks.
+ */
+function checkInputPorts(
+  id: string,
+  effect: EffectDescriptor,
+  issues: RegistryIssue[],
+): void {
+  const declared = effect.inputs;
+  const feedbackPorts = (declared ?? []).filter(
+    (port) => isPresentObject(port) && port.role === "feedback",
+  );
+
+  // Both directions. A feedback effect with no port declares a loop nothing can
+  // draw; a feedback port on an ordinary effect declares an edge nothing feeds.
+  if (effect.readsFeedback === true && feedbackPorts.length !== 1) {
+    issues.push(
+      issue(
+        id,
+        "feedback-port-mismatch",
+        `declares readsFeedback: true and ${feedbackPorts.length} input port(s) of role "feedback"; it must declare exactly one, because that port is what makes the loop a visible edge in the graph rather than a hidden read of a frame store`,
+      ),
+    );
+  }
+  if (effect.readsFeedback !== true && feedbackPorts.length > 0) {
+    issues.push(
+      issue(
+        id,
+        "feedback-port-mismatch",
+        `declares an input port of role "feedback" without readsFeedback: true; the previous frame comes from the frame store, which is only consulted for a node whose descriptor marks it, so an edge into that port would never be served`,
+      ),
+    );
+  }
+
+  if (declared === undefined) return;
+
+  if (!Array.isArray(declared) || declared.length === 0) {
+    issues.push(
+      issue(
+        id,
+        "primary-input-port-missing",
+        "declares an empty inputs list; omit the field to mean the default single image input rather than declaring no inputs at all",
+      ),
+    );
+    return;
+  }
+
+  const first = declared[0];
+  if (
+    !isPresentObject(first) ||
+    first["key"] !== PRIMARY_INPUT_PORT ||
+    first["role"] !== "image"
+  ) {
+    issues.push(
+      issue(
+        id,
+        "primary-input-port-missing",
+        `the first declared input must be { key: "${PRIMARY_INPUT_PORT}", role: "image" }; every node has one picture it transforms, and the per-node composite (F-ST-03) blends its output against exactly that port`,
+      ),
+    );
+  }
+
+  const seen: string[] = [];
+  for (const port of declared) {
+    if (!isPresentObject(port)) {
+      issues.push(issue(id, "malformed-input-port", "an input port is not an object"));
+      continue;
+    }
+    const key: unknown = port.key;
+    if (!isText(key) || !EFFECT_ID_PATTERN.test(key)) {
+      issues.push(
+        issue(
+          id,
+          "malformed-input-port",
+          `input port key ${JSON.stringify(key)} is not lowercase kebab-case; the key is written into every saved document's edge list`,
+        ),
+      );
+      continue;
+    }
+    if (key === MASK_INPUT_PORT) {
+      issues.push(
+        issue(
+          id,
+          "reserved-input-port",
+          `declares an input port "${MASK_INPUT_PORT}"; that key is reserved — masking is spatially-varying opacity and is appended to every node by graph/ports.ts, so a declared one would shadow it`,
+        ),
+      );
+      continue;
+    }
+    if (seen.includes(key)) {
+      issues.push(
+        issue(
+          id,
+          "duplicate-input-port",
+          `input port key "${key}" is declared twice; every edge naming it would be ambiguous`,
+        ),
+      );
+    }
+    seen.push(key);
+
+    if (!INPUT_ROLES.includes(port.role as InputRole)) {
+      issues.push(
+        issue(
+          id,
+          "malformed-input-port",
+          `input port "${key}" has role ${JSON.stringify(port.role)}; expected one of ${INPUT_ROLES.join(", ")}`,
+        ),
+      );
+    }
+    if (typeof port.required !== "boolean") {
+      issues.push(
+        issue(
+          id,
+          "malformed-input-port",
+          `input port "${key}" does not say whether it is required; an editor cannot refuse an unwired port it was never told about`,
+        ),
+      );
+    }
+    if (port.role === "image" && port.required === true) {
+      issues.push(
+        issue(
+          id,
+          "malformed-input-port",
+          `input port "${key}" is role "image" and required; an unwired image input is a root node reading the decoded source, which is what every single-node document is`,
+        ),
+      );
+    }
+    if (!isText(port.label)) {
+      issues.push(
+        issue(id, "malformed-input-port", `input port "${key}" has no label`),
+      );
+    }
+    // Same rule and the same reason as every other descriptive string here
+    // (F-UI-15): present, and not a restatement of the label it sits under.
+    checkDescriptiveText(
+      port.description,
+      [isText(port.label) ? port.label : "", key],
+      "malformed-input-port",
+      `input port "${key}" description`,
+      (code, message) => issues.push(issue(id, code, message)),
+    );
+  }
+}
+
 export function validateEffect(effect: EffectDescriptor): readonly RegistryIssue[] {
   const issues: RegistryIssue[] = [];
   const id = typeof effect.id === "string" && effect.id.length > 0 ? effect.id : "<unnamed>";
@@ -1590,6 +1895,8 @@ export function validateEffect(effect: EffectDescriptor): readonly RegistryIssue
   if (effect.excludes !== undefined && effect.excludes.includes(effect.id)) {
     issues.push(issue(id, "self-exclusion", "effect excludes itself"));
   }
+
+  checkInputPorts(id, effect, issues);
 
   const seenKeys: string[] = [];
   for (const param of effect.params) {

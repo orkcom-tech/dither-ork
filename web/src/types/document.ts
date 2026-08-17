@@ -6,7 +6,24 @@
  * Surprise Me. The full field-by-field contract is in docs/API.md.
  */
 
-export const DOCUMENT_SCHEMA_VERSION = 1 as const;
+/**
+ * The schema this build writes and is the ceiling for reading (F-DO-08).
+ *
+ * - **1** — a linear stack. Nodes in an array, node *i* reading node *i-1*, the
+ *   last one being the picture. Every document, preset and share link produced
+ *   before multi-input is this.
+ * - **2** — nodes plus **edges**, plus the node the graph outputs, plus
+ *   per-node masks. The wiring stops being implied by array order.
+ *
+ * A version 1 document is migrated on load by `io/document/migrate.ts` and is
+ * never refused; a version above this is refused rather than read as far as it
+ * goes, because a field this build does not know about would be dropped on the
+ * next save.
+ */
+export const DOCUMENT_SCHEMA_VERSION = 2 as const;
+
+/** The first schema, kept named because the migration is written against it. */
+export const DOCUMENT_SCHEMA_LINEAR_STACK = 1 as const;
 
 /**
  * Where a node may sit in the stack. Surprise Me's grammar reads this.
@@ -107,9 +124,88 @@ export type ParameterValue =
   | SrgbTriplet
   | readonly CurvePoint[];
 
-/** One effect instance in the stack. */
+// --- masking (F-PP-08) ---------------------------------------------------
+//
+// A mask is **not an effect**, and that is the decision the whole shape follows
+// from. F-PP-08 says "limit *any* node", and a node that limits another node
+// would have to sit somewhere in the wiring and would then only limit whatever
+// happened to be next to it. What a mask actually is, is the thing per-node
+// opacity already is — how much of this node's result reaches the picture —
+// with a value per pixel instead of one for the frame.
+//
+// So it lives beside `opacity` and `blend` on the node, it is applied by the
+// same composite those two are applied by, and every node in the catalogue is
+// maskable for free. The three sources F-PP-08 names differ only in where the
+// coverage comes from.
+
+/** Which channel of a wired mask picture is read as coverage. */
+export type MaskChannel = "luminance" | "alpha" | "red" | "green" | "blue";
+
+/**
+ * Where a node's coverage comes from.
+ *
+ * `luminance` and `color` read **the node's own input** — the same picture the
+ * composite blends against — so they need no second edge and work on any node
+ * in any document. `image` reads the node's `mask` port, which is where a
+ * second branch of the graph arrives.
+ */
+export type MaskSource =
+  /**
+   * Coverage from the input's tone.
+   *
+   * Full inside `[low, high]`, falling to nothing across `feather` on either
+   * side. A band rather than a threshold because "the shadows" and "the
+   * highlights" are both bands, and a threshold is the special case where one
+   * bound is at an end of the range.
+   */
+  | {
+      readonly kind: "luminance";
+      /** Both in `[0, 1]`, `low <= high`, measured in linear light. */
+      readonly low: number;
+      readonly high: number;
+      /** Half-width of the falloff either side of the band, in the same units. */
+      readonly feather: number;
+    }
+  /**
+   * Coverage from nearness to a colour.
+   *
+   * Distance is measured in OKLab, like every other perceptual comparison in
+   * the pipeline — `tolerance` in sRGB units would mean something different in
+   * the shadows than in the highlights, which is exactly the complaint that
+   * makes a colour-range mask hard to aim.
+   */
+  | {
+      readonly kind: "color";
+      readonly color: SrgbTriplet;
+      /** OKLab distance at which coverage reaches full. `> 0`. */
+      readonly tolerance: number;
+      /** Falloff beyond the tolerance, in the same units. */
+      readonly feather: number;
+    }
+  /** Coverage from the picture wired into this node's `mask` port. */
+  | {
+      readonly kind: "image";
+      readonly channel: MaskChannel;
+    };
+
+/**
+ * One node's mask: spatially-varying opacity (F-PP-08).
+ *
+ * Multiplied into `opacity` per pixel, so a node at 50% opacity behind a mask
+ * that reads 0.5 contributes a quarter. That composition is deliberate: the two
+ * controls answer different questions — how much of this node overall, and
+ * where — and making one override the other would make an opacity slider that
+ * sometimes does nothing.
+ */
+export interface NodeMask {
+  readonly source: MaskSource;
+  /** Coverage becomes `1 - coverage`. The commonest single thing a mask needs. */
+  readonly invert: boolean;
+}
+
+/** One effect instance in the graph. */
 export interface StackNode {
-  /** Stable per-instance id; bindings reference it. */
+  /** Stable per-instance id; bindings and edges reference it. */
   readonly id: string;
   /** Effect id from the node registry, e.g. "floyd-steinberg". */
   readonly effect: string;
@@ -119,6 +215,42 @@ export interface StackNode {
   readonly params: Readonly<Record<string, ParameterValue>>;
   /** Per-node seed. No node reads an unseeded RNG. */
   readonly seed: number;
+  /**
+   * Spatially-varying opacity (F-PP-08), or absent for an unmasked node.
+   *
+   * Optional rather than a `null` field because absence is the ordinary case
+   * and every schema-1 document is unmasked — an optional field is one the
+   * canonical encoder simply does not write, so a migrated document is the same
+   * bytes it would have been if masking had always existed and this node had
+   * never used it.
+   */
+  readonly mask?: NodeMask;
+}
+
+/**
+ * One image edge: `from`'s output into `to`'s `port`.
+ *
+ * The whole of what schema 2 adds to the wiring. In schema 1 this was implied
+ * by array order — node *i* read node *i-1* — which is why there could only
+ * ever be one image edge per node and why F-PP-08 was recorded as unbuilt for
+ * three phases.
+ *
+ * There is one output port per node, so an edge names no source port. That is a
+ * deliberate omission and not an oversight: `OutputPort` in `types/graph.ts`
+ * exists so a node can grow a second output without a schema change, and on the
+ * day one does, this gains a field with a default.
+ *
+ * **Feedback edges are not stored here.** A node whose effect declares
+ * `readsFeedback` reads its own previous frame, and that edge is derived from
+ * the descriptor by `graph/ports.ts` rather than saved — a saved copy would be
+ * a second place the same fact is written, and a document could then disagree
+ * with its own catalogue about whether a node loops.
+ */
+export interface GraphEdge {
+  readonly from: string;
+  readonly to: string;
+  /** An input port key the destination node declares. See `graph/ports.ts`. */
+  readonly port: string;
 }
 
 export type ModulatorShape =
@@ -170,7 +302,38 @@ export interface SourceRef {
 export interface DitherDocument {
   readonly schema: typeof DOCUMENT_SCHEMA_VERSION;
   readonly source: SourceRef | null;
+  /**
+   * Every node in the document.
+   *
+   * Still called `stack`, and the name is now about the *list* rather than
+   * about the wiring: it is the order the editor shows nodes in, the order the
+   * canonical encoder writes them in, and the tie-break that makes the
+   * topological sort deterministic (`graph/topology.ts`). What it is no longer
+   * is the wiring — that is {@link DitherDocument.edges}.
+   *
+   * Kept as `stack` rather than renamed to `nodes` because the rename touches
+   * 29 modules and 91 call sites for no behavioural gain, and every one of
+   * those is a chance to change a meaning by accident during a schema change.
+   * It is a rename that can be done on its own day.
+   */
   readonly stack: readonly StackNode[];
+  /**
+   * The wiring. Order is irrelevant to meaning and canonical for the bytes.
+   *
+   * A node with no edge into its `in` port is a **root** and reads the decoded
+   * source, which is what the first node of every linear document is.
+   */
+  readonly edges: readonly GraphEdge[];
+  /**
+   * The node whose output is the picture, or `null` for a document with no
+   * nodes.
+   *
+   * Explicit because a DAG has no last element. In schema 1 this was the end of
+   * the array; in a graph, two branches can both end somewhere and only one of
+   * them is the picture. Solo (F-ST-02) does not live here — it moves the
+   * *render's* output upstream without changing the document.
+   */
+  readonly output: string | null;
   readonly palette: Palette;
   readonly clock: Clock;
   readonly bindings: readonly Binding[];

@@ -41,6 +41,8 @@ const BASE: DitherDocument = {
   schema: DOCUMENT_SCHEMA_VERSION,
   source: { name: "photo.png", width: 1600, height: 1200 },
   stack: [],
+  edges: [],
+  output: null,
   palette: DEFAULT_PALETTE,
   clock: DEFAULT_CLOCK,
   bindings: [],

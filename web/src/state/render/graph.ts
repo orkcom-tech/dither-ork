@@ -83,18 +83,37 @@ export function buildRenderGraph(
     });
   }
 
-  const stack =
-    solo === null
-      ? document.stack
-      : document.stack.slice(0, document.stack.findIndex((node) => node.id === solo) + 1);
+  const output = solo ?? document.output;
+  if (output === null) {
+    // No picture named. An empty document, and the caller shows the source.
+    return document.stack.length === 0
+      ? null
+      : (() => {
+          throw new DocumentError(
+            "invalid-value",
+            `this document has ${document.stack.length} node(s) and names none of them as its picture; a graph has no last element, so the output has to be chosen`,
+            { nodes: document.stack.length },
+          );
+        })();
+  }
 
-  if (stack.length === 0) return null;
-
+  // Only what the picture depends on. Solo (F-ST-02) is the same walk from an
+  // earlier node, which is why it needs no mode of its own — and why a branch
+  // that does not reach the output costs nothing rather than being rendered and
+  // thrown away.
+  const reachable = reachableFrom(document, output);
   const nodes: GraphNode[] = [];
-  let previous: string | null = null;
-  for (const node of stack) {
-    const inputs: readonly NodeInput[] =
-      previous === null ? [] : [{ port: "in", from: { nodeId: previous, port: "out" } }];
+  for (const node of document.stack) {
+    if (!reachable.has(node.id)) continue;
+    const inputs: NodeInput[] = [];
+    for (const edge of document.edges) {
+      if (edge.to !== node.id || !reachable.has(edge.from)) continue;
+      inputs.push({ port: edge.port, from: { nodeId: edge.from, port: "out" } });
+    }
+    // The feedback loop is **not** written here, and that is deliberate: it is
+    // derived from the effect's descriptor by `graph/topology.ts`, which has
+    // the registry this function does not. See `graph/ports.ts` for why it is
+    // never saved and never invented by a document.
     nodes.push({
       id: node.id,
       effect: node.effect,
@@ -104,22 +123,42 @@ export function buildRenderGraph(
       params: node.params,
       seed: node.seed,
       inputs,
+      // Every node is wired, including a disabled one: `prepareGraph` resolves
+      // a disabled node's edge past it, so the chain stays intact and toggling
+      // a node in the middle does not rebuild the graph.
+      ...(node.mask === undefined ? {} : { mask: node.mask }),
     });
-    // Every node is wired, including a disabled one: `prepareGraph` resolves a
-    // disabled node's edge past it, so the chain stays intact and toggling a
-    // node in the middle does not rebuild the graph.
-    previous = node.id;
   }
 
-  const last = nodes[nodes.length - 1];
-  if (last === undefined) return null;
+  if (nodes.length === 0) return null;
 
   return {
     nodes,
-    output: { nodeId: last.id, port: "out" },
+    output: { nodeId: output, port: "out" },
     width: options.width,
     height: options.height,
     quality: options.quality,
     frame: options.frame,
   };
+}
+
+/**
+ * The nodes the picture depends on, walking edges backwards from the output.
+ *
+ * Backwards, and it is the same idea `planRender` uses one layer down: a node
+ * nothing reads contributes nothing, and a graph that compiled every node would
+ * make solo cost the whole document.
+ */
+function reachableFrom(document: DitherDocument, output: string): ReadonlySet<string> {
+  const reachable = new Set<string>();
+  const pending = [output];
+  while (pending.length > 0) {
+    const at = pending.pop();
+    if (at === undefined || reachable.has(at)) continue;
+    reachable.add(at);
+    for (const edge of document.edges) {
+      if (edge.to === at) pending.push(edge.from);
+    }
+  }
+  return reachable;
 }
