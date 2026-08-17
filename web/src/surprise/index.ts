@@ -27,7 +27,8 @@
  *                   one is minted.
  * - `sample.ts`     the distributions the registry's surprise metadata declares.
  * - `oklab.ts`      OKLCh to sRGB with gamut-safe chroma reduction.
- * - `grammar.ts`    the stack grammar (F-SM-03) and the chaos ends (F-SM-07).
+ * - `shape.ts`      the legal graph shapes, and which one this surprise is.
+ * - `grammar.ts`    the graph grammar (F-SM-03) and the chaos ends (F-SM-07).
  * - `params.ts`     a node's parameters, one stream per key (F-SM-04).
  * - `palette.ts`    the three palette modes (F-SM-05).
  * - `animation.ts`  modulator bindings (F-SM-09), and what it assumes.
@@ -64,11 +65,25 @@ export {
 export {
   CHAOS,
   GrammarError,
-  composeStack,
+  composeGraph,
+  edgesOf,
   lerp,
-  type ComposedStack,
+  type ComposedEdge,
+  type ComposedGraph,
+  type ComposedNode,
+  type GraphPart,
   type StackGrammarOptions,
 } from "./grammar";
+
+export {
+  PLAIN_CHAIN,
+  SHAPE_CHAOS,
+  decideShape,
+  describeShape,
+  shapeLoops,
+  type GraphShape,
+  type ShapeOptions,
+} from "./shape";
 
 export {
   HISTORY_LIMIT,

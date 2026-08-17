@@ -443,13 +443,20 @@ export function validateFeedbackDeclaration(
  * The third of these paired checks, and the one that makes "a generator takes
  * no image" a fact the machine holds rather than a sentence in a comment.
  *
- * The rule is about the **first** pass, because that is the one whose input is
- * the node's input. A source effect's first pass must bind no `input-color`:
- * the buffer it would be handed is whatever the stack produced above it, and a
- * generator that read it would not be a generator. A later pass of the same
- * effect may bind `input-color` freely — it is reading what the pass before it
- * wrote into this node's own surface chain, which is how every multi-pass
- * effect already works.
+ * # Which pass reads the node's input
+ *
+ * Not "the first pass" — **the first pass that binds `input-color`, provided no
+ * pass before it has written `output-color`.** The distinction is the whole of
+ * this function, and getting it wrong is what stopped row and column
+ * displacement compiling at all: their first pass is a sequential walk that
+ * binds a scratch buffer and nothing else, and the pass that reads the picture
+ * is the second one.
+ *
+ * A node's colour surface chain starts holding the node's input. Each pass that
+ * writes `output-color` advances it, so a pass reads the *node's* input exactly
+ * when nothing before it has written one. A pass that writes only scratch —
+ * a per-row offset table, a histogram, a prefix sum — leaves the chain where it
+ * was and cannot change the answer either way.
  *
  * Both directions are silent failures if they drift:
  *
@@ -465,19 +472,31 @@ export function validateSourceDeclaration(
   descriptor: EffectDescriptor,
   gpu: GpuEffect,
 ): void {
-  const first = gpu.passes[0];
-  if (first === undefined) return; // `compile` already refused an effect with no passes.
-  const readsInput = first.bindings.some((binding) => binding.role === "input-color");
+  if (gpu.passes.length === 0) return; // `compile` already refused an effect with no passes.
+
+  // Indices rather than booleans, because the question is an ordering one: a
+  // pass binding `input-color` after something has written `output-color` is
+  // reading this node's own earlier pass, not the node's input.
+  const readsAt = gpu.passes.findIndex((pass) =>
+    pass.bindings.some((binding) => binding.role === "input-color"),
+  );
+  const writesAt = gpu.passes.findIndex((pass) =>
+    pass.bindings.some((binding) => binding.role === "output-color"),
+  );
+  // `<=` and not `<`: the ordinary single-pass filter binds both roles on one
+  // pass, and that pass reads the node's input.
+  const readsNodeInput = readsAt !== -1 && (writesAt === -1 || readsAt <= writesAt);
   const isSource = descriptor.slot === "source";
 
-  if (isSource && readsInput) {
+  if (isSource && readsNodeInput) {
+    const pass = gpu.passes[readsAt];
     throw new PassCompileError(
-      `effect "${descriptor.id}" sits in the source slot, but its first pass ${first.id} binds input-color; a generator produces its image from parameters alone, and the buffer it would be handed is the one it is defined not to read`,
+      `effect "${descriptor.id}" sits in the source slot, but pass ${pass?.id ?? readsAt} binds input-color before anything has written a frame; a generator produces its image from parameters alone, and the buffer it would be handed is the one it is defined not to read`,
     );
   }
-  if (!isSource && !readsInput) {
+  if (!isSource && !readsNodeInput) {
     throw new PassCompileError(
-      `effect "${descriptor.id}" is in the "${descriptor.slot}" slot, but its first pass ${first.id} binds no input-color; a pass that reads no image produces one from nothing, which is the source slot — declare it, or the node would discard everything above it in the stack with nothing able to say so`,
+      `effect "${descriptor.id}" is in the "${descriptor.slot}" slot, but none of its ${gpu.passes.length} pass(es) binds input-color before the first pass that writes a frame; a node that reads no image produces one from nothing, which is the source slot — declare it, or the node would discard everything above it in the stack with nothing able to say so`,
     );
   }
 }

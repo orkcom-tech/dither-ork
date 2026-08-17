@@ -694,7 +694,66 @@ export interface EffectDescriptor {
    * effect whose passes bind no feedback.
    */
   readonly readsFeedback?: boolean;
+  /**
+   * **Generators only.** What scale this effect's picture has structure at, and
+   * therefore whether it is any use as a mask.
+   *
+   * Required on a `source`-slot effect and refused on every other, because the
+   * question only means something about a picture made from parameters: a filter's
+   * structure is the structure of whatever it was handed.
+   *
+   * # Why this is a declaration and not a rule in the generator
+   *
+   * A mask is read as one channel of a picture and multiplies the masked node's
+   * opacity per pixel. Coverage with structure at the scale of the frame makes the
+   * node happen *here and not there*, which is legible. Coverage that varies at
+   * the scale of a pixel mixes the masked node's output with its input everywhere
+   * at once, and the average of two similar pictures is the picture — which is why
+   * a branch rooted in a fine noise field is a second render pass that buys
+   * nothing.
+   *
+   * Measured, over ninety-six documents at chaos 0.8, as the mean absolute RGB
+   * difference between a branched document and the same document with the branch
+   * cut out:
+   *
+   * | branch root | branches | median difference |
+   * | --- | --- | --- |
+   * | `gen-shape` (a figure) | 12 | 0.145 |
+   * | `gen-gradient` (a ramp) | 5 | 0.045 |
+   * | `gen-noise` (a fractal field) | 13 | **0.017**, six of thirteen under 0.01 |
+   *
+   * `surprise/grammar.ts` roots a mask branch only in a generator that declares
+   * `"large-scale"`. The alternative was a list of effect ids in the generator,
+   * which is the same knowledge in the place that cannot be checked and that a
+   * fourth generator would silently fall out of.
+   *
+   * It is deliberately about the effect and not about its parameters. A noise
+   * field *can* be tuned to one slow billow across the frame, and at that setting
+   * it would mask well; but the value has to be readable before any parameter has
+   * been drawn — the grammar picks the branch root before `params.ts` runs — and
+   * the declaration therefore describes what the effect does across its declared
+   * surprise ranges, which for noise is 12 to 400 pixels per feature over one to
+   * six octaves.
+   */
+  readonly coverage?: CoverageStructure;
 }
+
+/**
+ * The scale a generator's picture has structure at — see
+ * {@link EffectDescriptor.coverage}.
+ *
+ * Two values and not a number, because the only reader is a yes/no question
+ * ("may a mask branch be rooted here?") and a threshold on a made-up scalar would
+ * be a number nobody could argue with.
+ */
+export type CoverageStructure =
+  /** Structure at the scale of the frame: a ramp, a figure, a large region. */
+  | "large-scale"
+  /**
+   * Structure at the scale of a pixel or a few: grain, a fractal field. Fine to
+   * *look* at — it is why the noise generator exists — and useless as coverage.
+   */
+  | "fine";
 
 /**
  * The image inputs this effect declares, defaulted.
@@ -888,6 +947,8 @@ export type RegistryIssueCode =
   | "source-must-run-on-gpu"
   | "source-must-not-read-index-map"
   | "source-must-not-resample"
+  | "source-must-declare-coverage"
+  | "coverage-is-for-generators"
   | "missing-summary"
   | "missing-description"
   | "unhelpful-description"
@@ -1888,6 +1949,37 @@ export function validateEffect(effect: EffectDescriptor): readonly RegistryIssue
         id,
         "feedback-must-not-resample",
         "declares readsFeedback and resamples together; the frame store holds the previous frame at the extent this node writes, and a node that changes extent has no common pixel grid with its own history",
+      ),
+    );
+  }
+
+  // `coverage` is a fact about a picture made from parameters, so it belongs to
+  // exactly the source slot. Both directions are refused, and both are refused
+  // *here* — at the gate that stops the application starting — for the reason
+  // every other declaration in this block is: the reader is Surprise Me's
+  // grammar, which runs long after startup and cannot ask a question of a field
+  // that is not there.
+  //
+  // Missing on a generator is the one that matters. `surprise/grammar.ts` roots
+  // a mask branch only in a generator declaring "large-scale"; a fourth generator
+  // added without the field would silently never be chosen as a branch root, and
+  // "my new generator never shows up in a mask" is not a failure anybody would
+  // connect to a missing line in a descriptor.
+  if (effect.slot === "source" && effect.coverage === undefined) {
+    issues.push(
+      issue(
+        id,
+        "source-must-declare-coverage",
+        'sits in the source slot and declares no `coverage`; a generator is the only thing a mask branch can be rooted in, and whether its picture has structure at the scale of the frame ("large-scale") or of a pixel ("fine") is what decides whether such a branch is visible at all',
+      ),
+    );
+  }
+  if (effect.slot !== "source" && effect.coverage !== undefined) {
+    issues.push(
+      issue(
+        id,
+        "coverage-is-for-generators",
+        `is in the "${effect.slot}" slot and declares coverage "${effect.coverage}"; the field describes the structure of a picture made from parameters, and a filter's structure is whatever it was handed`,
       ),
     );
   }

@@ -354,6 +354,23 @@ export default defineEffect({
   execution: "gpu",
   params: GEN_NOISE_PARAMS,
   surpriseWeight: 0.7,
+  /**
+   * **Fine**, and this is a statement about masking rather than about looking.
+   *
+   * The declared surprise ranges put a feature between 12 and 400 pixels across
+   * over one to six octaves, so the field that comes out is fractal: whatever
+   * large shape the first octave has is broken up by the ones above it. Read as
+   * coverage that mixes a node's output with its own input at the scale of a few
+   * pixels everywhere at once, and the average of two similar pictures is the
+   * picture. Measured over thirteen branches rooted here, the median difference a
+   * branch made was 0.017 mean absolute RGB and six of the thirteen were under
+   * 0.01 — invisible. See {@link EffectDescriptor.coverage}.
+   *
+   * Nothing about that limits the effect. A noise field is one of the best things
+   * in the catalogue to dither, which is what its own surprise weight is for; it
+   * is only refused as the root of a mask branch.
+   */
+  coverage: "fine",
   producesIndexMap: false,
   requiresIndexMap: false,
 });

@@ -20,7 +20,8 @@ import { planAnimation } from "../animation";
 import { discoverEffects } from "../registry/discovery";
 import { createEffectRegistry, type EffectRegistry } from "../registry/registry";
 import { validateParams } from "../registry/params";
-import { validateStack } from "../registry/stack";
+import { validateGraph } from "../registry/graph";
+import { isLinearChain } from "../graph/edit";
 import { DEFAULT_CLOCK, DEFAULT_PALETTE } from "../state/document";
 import {
   NO_EXCLUDES,
@@ -28,6 +29,7 @@ import {
   SurpriseError,
   generateSurprise,
   rerollNodeParams,
+  type SurpriseResult,
 } from "./generate";
 import { synthesizePalette } from "./palette";
 import { seededPcg32 } from "./rng";
@@ -58,14 +60,25 @@ function surprise(seed: bigint, chaos = 0.5, overrides: Partial<Parameters<typeo
     base: BASE,
     palette: PALETTE,
     animate: false,
+    blankCanvas: false,
     ...overrides,
   });
 }
 
-/** Every check the application runs before it will draw a document. */
+/**
+ * Every check the application runs before it will draw a document.
+ *
+ * `validateGraph` and not `validateStack`: the latter builds the chain a list
+ * implies, and a document with a branch in it is not that chain — it would check
+ * a graph nobody is going to render and miss the one that is.
+ */
 function assertRenderable(document: DitherDocument, label: string): void {
-  const stack = validateStack(registry, document.stack);
-  expect(stack.issues.map((issue) => issue.message), label).toEqual([]);
+  const graph = validateGraph(registry, {
+    nodes: document.stack,
+    edges: document.edges,
+    output: document.output,
+  });
+  expect(graph.issues.map((issue) => issue.message), label).toEqual([]);
   for (const node of document.stack) {
     const descriptor = registry.require(node.effect);
     const params = validateParams(descriptor, node.params);
@@ -180,6 +193,7 @@ describe("locks (F-SM-06)", () => {
         base,
         palette: synthesizePalette(seededPcg32(BigInt(i)), "mono", "srgb"),
         animate: false,
+        blankCanvas: false,
       });
       expect(result.document.palette).toEqual(liked);
       stacks.add(result.document.stack.map((node) => node.effect).join(","));
@@ -198,6 +212,7 @@ describe("locks (F-SM-06)", () => {
       base: seeded,
       palette: PALETTE,
       animate: false,
+      blankCanvas: false,
     });
     expect(result.document.stack.map((node) => node.effect)).toEqual(
       seeded.stack.map((node) => node.effect),
@@ -221,6 +236,7 @@ describe("locks (F-SM-06)", () => {
       base: seeded,
       palette: PALETTE,
       animate: false,
+      blankCanvas: false,
     });
     expect(result.document.stack).toEqual(seeded.stack);
   });
@@ -241,6 +257,7 @@ describe("locks (F-SM-06)", () => {
       base: BASE,
       palette: PALETTE,
       animate: false,
+      blankCanvas: false,
     });
     for (const node of result.document.stack) {
       const descriptor = registry.require(node.effect);
@@ -284,6 +301,7 @@ describe("locks (F-SM-06)", () => {
         base: BASE,
         palette: PALETTE,
         animate: true,
+        blankCanvas: false,
       });
       if (first.document.bindings.length === 0) continue;
 
@@ -296,6 +314,7 @@ describe("locks (F-SM-06)", () => {
         base: first.document,
         palette: PALETTE,
         animate: true,
+        blankCanvas: false,
       });
       rerolls += 1;
       carried += second.document.bindings.length;
@@ -333,6 +352,7 @@ describe("locks (F-SM-06)", () => {
       base: seeded,
       palette: PALETTE,
       animate: false,
+      blankCanvas: false,
     });
     expect({ ...result.document, surpriseSeed: undefined }).toEqual({
       ...seeded,
@@ -363,6 +383,7 @@ describe("excludes", () => {
     base: BASE,
     palette: PALETTE,
     animate: true,
+    blankCanvas: false,
   }).document;
 
   it("draws bindings when nothing is excluded, so the rest of this block is not vacuous", () => {
@@ -376,13 +397,14 @@ describe("excludes", () => {
         registry,
         chaos: 1,
         locks: NO_LOCKS,
-        excludes: { animation: true },
+        excludes: { ...NO_EXCLUDES, animation: true },
         base: BASE,
         palette: PALETTE,
         // The build can animate. That is exactly the case that matters: with
         // `animate: false` the document has no bindings for a reason that has
         // nothing to do with what the user asked for.
         animate: true,
+        blankCanvas: false,
       });
       expect(result.document.bindings, `seed ${result.summary.seed}`).toEqual([]);
       expect(result.summary.bindings).toBe(0);
@@ -403,10 +425,11 @@ describe("excludes", () => {
       registry,
       chaos: 1,
       locks: { ...NO_LOCKS, stack: true, params: true, palette: true },
-      excludes: { animation: true },
+      excludes: { ...NO_EXCLUDES, animation: true },
       base: animated,
       palette: PALETTE,
       animate: true,
+      blankCanvas: false,
     });
     expect(result.document.bindings).toEqual([]);
     // Everything else was kept, so the exclude is the only thing that acted.
@@ -435,16 +458,18 @@ describe("excludes", () => {
         base: BASE,
         palette: PALETTE,
         animate: true,
+        blankCanvas: false,
       }).document;
       const off = generateSurprise({
         seed,
         registry,
         chaos: 1,
         locks: NO_LOCKS,
-        excludes: { animation: true },
+        excludes: { ...NO_EXCLUDES, animation: true },
         base: BASE,
         palette: PALETTE,
         animate: true,
+        blankCanvas: false,
       }).document;
 
       expect(off.bindings).toEqual([]);
@@ -467,10 +492,11 @@ describe("excludes", () => {
         registry,
         chaos: 0.5,
         locks: { ...NO_LOCKS, animation: true },
-        excludes: { animation: true },
+        excludes: { ...NO_EXCLUDES, animation: true },
         base: animated,
         palette: PALETTE,
         animate: true,
+        blankCanvas: false,
       }),
     ).toThrow(SurpriseError);
   });
@@ -502,6 +528,7 @@ describe("what it refuses", () => {
         base: foreign,
         palette: PALETTE,
         animate: false,
+        blankCanvas: false,
       }),
     ).toThrow(SurpriseError);
   });
@@ -536,6 +563,7 @@ describe("what it refuses", () => {
         base: illegal,
         palette: PALETTE,
         animate: false,
+        blankCanvas: false,
       }),
     ).toThrow(/registry rejects/);
   });
@@ -605,13 +633,34 @@ describe("rerollNodeParams (F-SM-08)", () => {
 });
 
 /**
- * The generator prefix, which a reroll must not throw away.
+ * The generator prefix — which a reroll must not throw away **on a blank
+ * canvas**, and must not weld on anywhere else.
  *
- * Surprise Me's grammar is a sentence about a photograph and composes no source
- * node. On a document that has one — a blank canvas whose picture is made by a
- * Noise or Gradient node — a reroll that dropped it would leave a black frame,
- * and it would do so through the feature the owner uses most.
+ * On a blank canvas the picture is made by a Noise or Gradient node, so a reroll
+ * that dropped it would leave a black frame through the feature the owner uses
+ * most. With a photograph open the same carry is a ratchet: one press in
+ * twenty-five draws a generator at chaos 0, and from that press on every reroll
+ * kept it, so the photograph never came back and the only exit was deleting the
+ * node by hand. Both halves are tested here, because the defect was the second
+ * half of a rule written only for the first.
  */
+/**
+ * The nodes on the chain of `in` edges that ends at the picture.
+ *
+ * Walked backwards from the output, because that is the chain the document's
+ * picture is actually made of — a branch reaches the picture too, but through
+ * some node's second input, which is a different question.
+ */
+function mainChainOf(document: DitherDocument): ReadonlySet<string> {
+  const chain = new Set<string>();
+  let at = document.output;
+  while (at !== null && !chain.has(at)) {
+    chain.add(at);
+    at = document.edges.find((edge) => edge.to === at && edge.port === "in")?.from ?? null;
+  }
+  return chain;
+}
+
 describe("a stack that begins with a generator", () => {
   const GENERATOR = "gen-noise";
 
@@ -633,8 +682,17 @@ describe("a stack that begins with a generator", () => {
     };
   }
 
+  /** A reroll of that document with the canvas stated blank, as the app does. */
+  function rerollOnBlank(seed: bigint, chaos: number, nodeId = "n1", overrides = {}) {
+    return surprise(seed, chaos, {
+      base: withGenerator(nodeId),
+      blankCanvas: true,
+      ...overrides,
+    });
+  }
+
   it("keeps the generator at the head of the rerolled stack", () => {
-    const result = surprise(0x9e3779b97f4a7c15n, 0.5, { base: withGenerator("n1") });
+    const result = rerollOnBlank(0x9e3779b97f4a7c15n, 0.5);
     expect(result.document.stack[0]?.effect).toBe(GENERATOR);
     expect(result.document.stack[0]?.id).toBe("n1");
     // And the rest is a real reroll rather than the generator alone.
@@ -642,8 +700,8 @@ describe("a stack that begins with a generator", () => {
   });
 
   it("resamples the generator's own parameters, so the look still rerolls", () => {
-    const a = surprise(1n, 0.9, { base: withGenerator("n1") });
-    const b = surprise(2n, 0.9, { base: withGenerator("n1") });
+    const a = rerollOnBlank(1n, 0.9);
+    const b = rerollOnBlank(2n, 0.9);
     expect(a.document.stack[0]?.params).not.toEqual(b.document.stack[0]?.params);
   });
 
@@ -652,7 +710,7 @@ describe("a stack that begins with a generator", () => {
     // to be `n2` would collide with the second composed node, and a stack with
     // two nodes of one id is one `analyseGraph` refuses as an ambiguous edge
     // target — correctly, and far from here.
-    const result = surprise(7n, 0.8, { base: withGenerator("n2") });
+    const result = rerollOnBlank(7n, 0.8, "n2");
     const ids = result.document.stack.map((node) => node.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids[0]).toBe("n2");
@@ -660,22 +718,370 @@ describe("a stack that begins with a generator", () => {
 
   it("does not keep a source node that is not at the head", () => {
     // A generator further down is a composite over the picture rather than the
-    // thing making it, so it is rerolled away with everything else.
+    // thing making it, so it is rerolled away with everything else. The id is
+    // one the minter never produces, so "it survived" is a fact about identity
+    // rather than about which effect the grammar happened to draw.
     const base: DitherDocument = {
       ...BASE,
       stack: [
         { id: "n1", effect: "invert", enabled: true, opacity: 1, blend: "normal", params: {}, seed: 1 },
-        { id: "n2", effect: GENERATOR, enabled: true, opacity: 0.5, blend: "normal", params: {}, seed: 2 },
+        { id: "kept", effect: GENERATOR, enabled: true, opacity: 0.5, blend: "normal", params: {}, seed: 2 },
       ],
     };
-    const result = surprise(11n, 0.5, { base });
-    expect(result.document.stack[0]?.effect).not.toBe(GENERATOR);
+    const result = surprise(11n, 0.5, { base, blankCanvas: true });
+    expect(result.document.stack.map((node) => node.id)).not.toContain("kept");
   });
 
-  it("still produces a stack the registry accepts", () => {
+  it("still produces a graph the registry accepts", () => {
     for (let seed = 1n; seed <= 40n; seed += 1n) {
-      const result = surprise(seed, 0.7, { base: withGenerator("n1") });
-      expect(validateStack(registry, result.document.stack).ok).toBe(true);
+      const result = rerollOnBlank(seed, 0.7);
+      assertRenderable(result.document, `carried generator, seed ${seed}`);
     }
+  });
+
+  it("never draws a second generator on top of the carried one", () => {
+    // The carry and the shape decision both want a source node at the head, and
+    // two of them would be two pictures in a document that shows one. The shape
+    // is told about the carry so the drawn one is suppressed.
+    for (let seed = 1n; seed <= 200n; seed += 1n) {
+      const result = rerollOnBlank(seed, 1);
+      const sources = result.document.stack.filter(
+        (node) => registry.require(node.effect).slot === "source",
+      );
+      // One on the chain that ends at the picture, plus at most one rooting a
+      // mask branch — a different picture for a different port, not a second
+      // head.
+      expect(sources[0]?.id).toBe("n1");
+      const onChain = sources.filter((node) => mainChainOf(result.document).has(node.id));
+      expect(onChain.map((node) => node.id)).toEqual(["n1"]);
+    }
+  });
+
+  /**
+   * The ratchet, which is what the carry actually did to the owner.
+   *
+   * A photograph is open. One press draws a generator; every press after it kept
+   * that generator at the head — measured at 29 of 29 in the running app, at
+   * every chaos including 0, where the panel promises a plain chain over your
+   * image. The photograph never came back.
+   */
+  it("does not keep it when the canvas holds a photograph", () => {
+    for (const chaos of [0, 0.5, 1]) {
+      const survived: string[] = [];
+      for (let seed = 1n; seed <= 60n; seed += 1n) {
+        // `blankCanvas` false: the same base document, the same generator at its
+        // head, and a picture underneath it. The id is one the minter never
+        // produces, so a node carrying it is the base document's own node and
+        // not a fresh draw that happens to be the same effect.
+        const result = surprise(seed, chaos, { base: withGenerator("kept") });
+        if (result.document.stack.some((node) => node.id === "kept")) {
+          survived.push(result.summary.seed);
+        }
+      }
+      expect(survived, `chaos ${chaos}: the generator was carried anyway`).toEqual([]);
+    }
+  });
+
+  it("brings the photograph back on the very next press", () => {
+    // The end-to-end statement of the same thing: reroll the generated document
+    // sixty times against a photograph and count how many still open with a
+    // source node. Only the ones the shape genuinely drew, which at chaos 0 is
+    // a few in a hundred rather than all of them.
+    let generated = 0;
+    for (let seed = 1n; seed <= 60n; seed += 1n) {
+      const result = surprise(seed, 0, { base: withGenerator("n1") });
+      if (registry.require(result.document.stack[0]?.effect ?? "").slot === "source") {
+        generated += 1;
+      }
+    }
+    expect(generated).toBeLessThan(10);
+  });
+
+  it("clears it when graph shape is off, on a blank canvas too", () => {
+    // "Off" says make no shape at all, and a carried node welded to the head is
+    // one. The frame is still not black: `decideShape` forces a generator on a
+    // blank canvas whatever the exclude says, so one is *drawn* rather than kept.
+    for (let seed = 1n; seed <= 40n; seed += 1n) {
+      const result = rerollOnBlank(seed, 1, "kept", {
+        excludes: { ...NO_EXCLUDES, shape: true },
+      });
+      // A generator, so the canvas is not black.
+      expect(registry.require(result.document.stack[0]?.effect ?? "").slot).toBe("source");
+      // Freshly drawn, not the base document's node.
+      expect(result.document.stack.map((node) => node.id)).not.toContain("kept");
+      assertRenderable(result.document, `blank, shape off, seed ${seed}`);
+    }
+  });
+});
+
+/**
+ * The graph shapes, at the level of a whole document.
+ *
+ * `grammar.test.ts` checks the composition; this checks the three things only a
+ * document can be wrong about — that the edges and the node list agree, that the
+ * mask and the edge carrying its picture arrive together, and that what the
+ * summary says about looping is what `animation/plan.ts` will say when the
+ * export asks.
+ */
+describe("graphs (step 4 of docs/dither-ork-node-graph.md)", () => {
+  /** Documents across the chaos range, so every shape is reached. */
+  function sample(count: number, chaos: number): SurpriseResult[] {
+    const out: SurpriseResult[] = [];
+    for (let i = 0; i < count; i += 1) {
+      out.push(surprise(BigInt(i) * 0x2545_f491_4f6c_dd1dn + 7n, chaos));
+    }
+    return out;
+  }
+
+  it("produces branches, generators and feedback across the chaos range", () => {
+    const wild = sample(400, 1);
+    expect(wild.filter((run) => run.summary.branch > 0).length).toBeGreaterThan(40);
+    expect(wild.filter((run) => !run.summary.loops).length).toBeGreaterThan(40);
+    expect(
+      wild.filter((run) => registry.require(run.document.stack[0]?.effect ?? "").slot === "source")
+        .length,
+    ).toBeGreaterThan(20);
+  });
+
+  it("is nearly always a chain at the tame end", () => {
+    const tame = sample(400, 0);
+    const graphs = tame.filter((run) => run.summary.branch > 0).length;
+    expect(graphs / tame.length).toBeLessThan(0.1);
+    // And every one of them loops, which is what makes the tame end safe to
+    // export.
+    expect(tame.every((run) => run.summary.loops)).toBe(true);
+  });
+
+  it("agrees with the animation planner about whether the document loops", () => {
+    // Two modules decide this from two different things — the summary from the
+    // shape, the plan from the nodes that ended up in the document — and a
+    // disagreement is a panel that promises a loop the encoder will not deliver.
+    for (const run of sample(200, 1)) {
+      expect(planAnimation(run.document, registry).loops, run.summary.seed).toBe(
+        run.summary.loops,
+      );
+    }
+  });
+
+  it("wires every image mask to a picture, and every mask edge to a mask", () => {
+    for (const run of sample(300, 0.9)) {
+      const { document } = run;
+      const maskEdges = document.edges.filter((edge) => edge.port === "mask");
+      const masked = document.stack.filter(
+        (node) => node.mask !== undefined && node.mask.source.kind === "image",
+      );
+      expect(maskEdges.length).toBe(masked.length);
+      for (const node of masked) {
+        expect(maskEdges.some((edge) => edge.to === node.id)).toBe(true);
+        // A mask is a composite, and a resampling node has no common pixel grid
+        // with its own input for coverage to be of. `graph/ports.ts` gives such
+        // a node no mask port at all.
+        expect(registry.require(node.effect).resamples ?? false).toBe(false);
+      }
+      // Every node with no mask carries no `mask` key at all — not `undefined`,
+      // which is different bytes to `JSON.stringify` and would make two
+      // identical documents hash differently.
+      for (const node of document.stack) {
+        if (masked.includes(node)) continue;
+        expect(Object.prototype.hasOwnProperty.call(node, "mask")).toBe(false);
+      }
+    }
+  });
+
+  it("names an output that is in the document, and reaches every node from it", () => {
+    for (const run of sample(200, 1)) {
+      const { document } = run;
+      expect(document.stack.some((node) => node.id === document.output)).toBe(true);
+      // Nothing detached: every node reaches the picture, through `in` edges or
+      // through a mask port. A node whose work reaches nothing is a row in the
+      // panel that does nothing.
+      const reaching = new Set<string>([document.output ?? ""]);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const edge of document.edges) {
+          if (reaching.has(edge.to) && !reaching.has(edge.from)) {
+            reaching.add(edge.from);
+            grew = true;
+          }
+        }
+      }
+      expect([...document.stack].map((node) => node.id).filter((id) => !reaching.has(id))).toEqual(
+        [],
+      );
+    }
+  });
+
+  it("reproduces a graph document byte for byte from its seed", () => {
+    // The masks and the edges are part of what a seed means now, so the
+    // reproducibility guarantee (F-SM-02) is re-checked on documents that
+    // actually have them.
+    const branched = sample(200, 1).filter((run) => run.summary.branch > 0);
+    expect(branched.length).toBeGreaterThan(10);
+    for (const run of branched) {
+      const seed = parseSeed(run.summary.seed);
+      expect(seed, run.summary.seed).not.toBeNull();
+      const again = surprise(seed ?? 0n, 1);
+      expect(JSON.stringify(again.document)).toBe(JSON.stringify(run.document));
+    }
+  });
+
+  describe("a blank canvas", () => {
+    // `io/source.ts`'s blank canvas is transparent black, so a document with no
+    // generator in it renders nothing at all. This is the honest form of "a
+    // surprise with no image open" this build can hold: the document schema
+    // carries no extent of its own, so there is no such thing as a document
+    // with no source — there is a stated empty canvas, and this is it.
+    function onBlank(seed: bigint, chaos: number, overrides = {}): SurpriseResult {
+      return surprise(seed, chaos, { blankCanvas: true, ...overrides });
+    }
+
+    it("always puts a generator at the head, at every chaos setting", () => {
+      for (const chaos of [0, 0.5, 1]) {
+        for (let i = 0; i < 60; i += 1) {
+          const run = onBlank(BigInt(i) * 17n + 5n, chaos);
+          const first = run.document.stack[0];
+          expect(registry.require(first?.effect ?? "").slot, `chaos ${chaos}`).toBe("source");
+          assertRenderable(run.document, `blank ${run.summary.seed}`);
+        }
+      }
+    });
+
+    it("puts one there even with graph shape off", () => {
+      for (let i = 0; i < 40; i += 1) {
+        const run = onBlank(BigInt(i) * 7n + 1n, 1, {
+          excludes: { ...NO_EXCLUDES, shape: true },
+        });
+        expect(registry.require(run.document.stack[0]?.effect ?? "").slot).toBe("source");
+        expect(run.summary.loops).toBe(true);
+        expect(run.summary.branch).toBe(0);
+      }
+    });
+
+    it("does not put one there when the source is a photograph", () => {
+      // The flag is what does it, not the chaos setting: the same seeds against
+      // an image are mostly plain chains.
+      let generated = 0;
+      for (let i = 0; i < 60; i += 1) {
+        const run = surprise(BigInt(i) * 17n + 5n, 0);
+        if (registry.require(run.document.stack[0]?.effect ?? "").slot === "source") {
+          generated += 1;
+        }
+      }
+      expect(generated).toBeLessThan(10);
+    });
+  });
+
+  describe("graph shape set to off", () => {
+    function chainOnly(seed: bigint, chaos: number): SurpriseResult {
+      return surprise(seed, chaos, { excludes: { ...NO_EXCLUDES, shape: true } });
+    }
+
+    it("gives a plain chain that loops, at every chaos setting", () => {
+      for (const chaos of [0, 0.5, 1]) {
+        for (let i = 0; i < 120; i += 1) {
+          const run = chainOnly(BigInt(i) * 13n + 3n, chaos);
+          expect(run.summary.loops, run.summary.seed).toBe(true);
+          expect(run.summary.branch).toBe(0);
+          expect(run.document.edges.every((edge) => edge.port === "in")).toBe(true);
+          expect(run.document.stack.every((node) => node.mask === undefined)).toBe(true);
+          expect(
+            run.document.stack.every(
+              (node) => registry.require(node.effect).readsFeedback !== true,
+            ),
+          ).toBe(true);
+          expect(isLinearChain(run.document)).toBe(true);
+          assertRenderable(run.document, `chain-only ${run.summary.seed}`);
+        }
+      }
+    });
+
+    it("drops a generator the base document already had", () => {
+      // "A plain chain over your image" is the sentence the panel prints, and a
+      // source node at the head replaces that image outright. It is dropped
+      // whether it was drawn last press or carried, which is the difference
+      // between the sentence being true and being nearly true.
+      const base: DitherDocument = {
+        ...BASE,
+        stack: [
+          {
+            id: "n1",
+            effect: "gen-noise",
+            enabled: true,
+            opacity: 1,
+            blend: "normal",
+            params: {},
+            seed: 1,
+          },
+        ],
+      };
+      for (let seed = 1n; seed <= 40n; seed += 1n) {
+        const run = surprise(seed, 1, { base, excludes: { ...NO_EXCLUDES, shape: true } });
+        expect(
+          registry.require(run.document.stack[0]?.effect ?? "").slot,
+          run.summary.seed,
+        ).not.toBe("source");
+        expect(run.summary.loops).toBe(true);
+      }
+    });
+  });
+
+  describe("a locked stack keeps its wiring", () => {
+    /** A graph document with a branch in it, made by the generator itself. */
+    function branchedDocument(): DitherDocument {
+      for (let i = 0; i < 400; i += 1) {
+        const run = surprise(BigInt(i) * 0x2545_f491_4f6c_dd1dn + 7n, 1);
+        if (run.summary.branch > 0) return run.document;
+      }
+      throw new Error("no branched document was generated; the sample is not exercising branches");
+    }
+
+    it("carries the edges, the output and the masks across a reroll", () => {
+      const base = branchedDocument();
+      const run = surprise(0xabc_defn, 0.8, {
+        base,
+        locks: { ...NO_LOCKS, stack: true },
+      });
+      expect(run.document.edges).toEqual(base.edges);
+      expect(run.document.output).toBe(base.output);
+      expect(run.document.stack.map((node) => node.mask)).toEqual(
+        base.stack.map((node) => node.mask),
+      );
+      // And the parameters really did reroll, so this is a lock rather than a
+      // no-op.
+      expect(run.document.stack.map((node) => node.params)).not.toEqual(
+        base.stack.map((node) => node.params),
+      );
+      assertRenderable(run.document, "locked graph");
+    });
+
+    it("reports the shape the kept document actually has", () => {
+      const base = branchedDocument();
+      const run = surprise(1n, 0.8, { base, locks: { ...NO_LOCKS, stack: true } });
+      expect(run.summary.branch === 0).toBe(true);
+      expect(run.summary.shape).toContain("masked branch");
+    });
+
+    it("refuses to keep a graph and leave graph shape out at the same time", () => {
+      const base = branchedDocument();
+      expect(() =>
+        surprise(1n, 0.8, {
+          base,
+          locks: { ...NO_LOCKS, stack: true },
+          excludes: { ...NO_EXCLUDES, shape: true },
+        }),
+      ).toThrow(SurpriseError);
+    });
+
+    it("allows the two together when the kept stack is a plain chain", () => {
+      const chain = surprise(3n, 0, { excludes: { ...NO_EXCLUDES, shape: true } }).document;
+      const run = surprise(4n, 0.5, {
+        base: chain,
+        locks: { ...NO_LOCKS, stack: true },
+        excludes: { ...NO_EXCLUDES, shape: true },
+      });
+      expect(run.summary.loops).toBe(true);
+      assertRenderable(run.document, "kept chain with shape off");
+    });
   });
 });

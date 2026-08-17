@@ -48,13 +48,33 @@ export const DEFAULT_CHAOS = 0.35;
 export const CHAOS_STEP = 0.05;
 
 /**
- * The four things a surprise decides independently (F-SM-06), in panel order.
+ * The things a surprise decides independently, in panel order.
  *
- * The same four keys `SurpriseLocks` carries, because an aspect *is* what a lock
- * locks — naming them twice is how the two lists drift apart.
+ * Four of them are what `SurpriseLocks` carries, because an aspect *is* what a
+ * lock locks — naming them twice is how the two lists drift apart. The fifth is
+ * **graph shape**, which has an off and no keep; see {@link LOCKABLE_KEYS}.
  */
-export const ASPECT_KEYS = ["palette", "stack", "params", "animation"] as const;
+export const ASPECT_KEYS = ["palette", "stack", "params", "animation", "shape"] as const;
 export type AspectKey = (typeof ASPECT_KEYS)[number];
+
+/**
+ * The aspects that have a `keep`.
+ *
+ * The four `SurpriseLocks` carries, and graph shape is deliberately not among
+ * them. "Keep the shape" would have to mean "compose a different graph of the
+ * same kind", and that is not something anybody reached for the padlock to ask:
+ * a shape somebody liked came with the effects that were in it, and **`stack`
+ * set to keep already keeps the wiring** — the edges, the output and the masks —
+ * so the useful half of "keep the shape" is a control that already exists. A
+ * second one beside it would be two buttons for one idea, and the one that did
+ * less would be the one people pressed.
+ */
+export const LOCKABLE_KEYS = ["palette", "stack", "params", "animation"] as const;
+export type LockableKey = (typeof LOCKABLE_KEYS)[number];
+
+export function isLockable(key: AspectKey): key is LockableKey {
+  return (LOCKABLE_KEYS as readonly AspectKey[]).includes(key);
+}
 
 /**
  * What a surprise does with one aspect.
@@ -69,23 +89,35 @@ export type AspectMode = "reroll" | "keep" | "off";
 /**
  * The aspects that have an `off`.
  *
- * One, and `surprise/generate.ts`'s {@link SurpriseExcludes} is where the reason
+ * Two, and `surprise/generate.ts`'s {@link SurpriseExcludes} is where the reason
  * lives: an exclude is only offerable where the absence is a state a document
- * can hold, and `bindings: []` is the only one of the four that is. A palette
- * with no colours is refused by the loader and by the GPU; an empty stack is
- * Surprise Me doing nothing; a node with no parameters does not exist. Offering
- * an `off` there would be three controls that either lie or do nothing.
+ * can hold. `bindings: []` is one — an ordinary still document. A plain chain
+ * over the document's own image is the other, and not merely *a* state but the
+ * state every `.dork` written before schema 2 is in.
+ *
+ * The remaining three still have none. A palette with no colours is refused by
+ * the loader and by the GPU; an empty stack is Surprise Me doing nothing; a node
+ * with no parameters does not exist. Offering an `off` there would be three
+ * controls that either lie or do nothing.
  */
-export const EXCLUDABLE_KEYS = ["animation"] as const;
+export const EXCLUDABLE_KEYS = ["animation", "shape"] as const;
 export type ExcludeKey = (typeof EXCLUDABLE_KEYS)[number];
 
 export function isExcludable(key: AspectKey): key is ExcludeKey {
   return (EXCLUDABLE_KEYS as readonly AspectKey[]).includes(key);
 }
 
-/** The modes this aspect offers, in the order the panel shows them. */
+/**
+ * The modes this aspect offers, in the order the panel shows them.
+ *
+ * Built from the two lists rather than written out, so an aspect that gains a
+ * keep or an off gains the button in the same edit that gains the behaviour.
+ */
 export function modesFor(key: AspectKey): readonly AspectMode[] {
-  return isExcludable(key) ? ["reroll", "keep", "off"] : ["reroll", "keep"];
+  const modes: AspectMode[] = ["reroll"];
+  if (isLockable(key)) modes.push("keep");
+  if (isExcludable(key)) modes.push("off");
+  return modes;
 }
 
 export function aspectLabel(key: AspectKey): string {
@@ -98,6 +130,8 @@ export function aspectLabel(key: AspectKey): string {
       return "parameters";
     case "animation":
       return "animation";
+    case "shape":
+      return "graph shape";
   }
 }
 
@@ -127,7 +161,23 @@ export function modeHint(key: AspectKey, mode: AspectMode): string {
   // stack trace nobody can reach.
   if (mode === "off") {
     if (!isExcludable(key)) throw noOffError(key);
-    return "Leave animation out entirely. Nothing moves, and the timeline has no tracks.";
+    return key === "animation"
+      ? "Leave animation out entirely. Nothing moves, and the timeline has no tracks."
+      : // Three things in one sentence because they are one setting: no
+        // generator in place of the picture, no branch driving a mask, and no
+        // feedback. The loop is named because it is the only consequence that
+        // is not about how the picture looks.
+        "A plain chain over your image: no generated source, no branch feeding a mask, and no feedback — so the document loops.";
+  }
+  if (key === "shape") {
+    if (mode === "keep") {
+      // Unreachable through the panel: `modesFor` offers this aspect no keep.
+      // Stated rather than returning a sentence for a state that does not exist.
+      throw new Error(
+        '"shape" has no keep: locking the stack already keeps the wiring, so a second control for it would be two buttons for one idea',
+      );
+    }
+    return "Draw a new shape every press: sometimes a generated source, sometimes a branch feeding a mask, sometimes feedback. Chaos decides how often it is more than a chain.";
   }
   switch (key) {
     case "palette":
@@ -196,6 +246,7 @@ export interface AspectState {
 /** Which of the three states this aspect is in. */
 export function aspectMode(state: AspectState, key: AspectKey): AspectMode {
   if (isExcludable(key) && state.excludes[key]) return "off";
+  if (!isLockable(key)) return "reroll";
   return state.locks[key] ? "keep" : "reroll";
 }
 
@@ -219,19 +270,19 @@ export function withAspectMode(
   if (mode === "off") {
     if (!isExcludable(key)) throw noOffError(key);
     return {
-      locks: { ...state.locks, [key]: false },
+      locks: isLockable(key) ? { ...state.locks, [key]: false } : state.locks,
       excludes: { ...state.excludes, [key]: true },
     };
   }
   return {
-    locks: { ...state.locks, [key]: mode === "keep" },
+    locks: isLockable(key) ? { ...state.locks, [key]: mode === "keep" } : state.locks,
     excludes: isExcludable(key) ? { ...state.excludes, [key]: false } : state.excludes,
   };
 }
 
 /** How many aspects the next press will leave alone. */
 export function keptCount(locks: SurpriseLocks): number {
-  return ASPECT_KEYS.filter((key) => locks[key]).length;
+  return LOCKABLE_KEYS.filter((key) => locks[key]).length;
 }
 
 /** Clamp and snap the chaos slider. Out-of-range input is a caller bug, not a value. */

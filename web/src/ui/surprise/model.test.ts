@@ -7,12 +7,14 @@ import {
   CHAOS_STEP,
   DEFAULT_CHAOS,
   EXCLUDABLE_KEYS,
+  LOCKABLE_KEYS,
   aspectLabel,
   aspectMode,
   chaosLabel,
   clampChaos,
   describeStack,
   isExcludable,
+  isLockable,
   keptCount,
   modeConcept,
   modeHint,
@@ -27,8 +29,10 @@ import {
 const FRESH: AspectState = { locks: NO_LOCKS, excludes: NO_EXCLUDES };
 
 describe("aspects (F-SM-06, and the excludes beside them)", () => {
-  it("names the four the spec lists", () => {
-    expect([...ASPECT_KEYS].sort()).toEqual(["animation", "palette", "params", "stack"].sort());
+  it("names the four the spec lists, and graph shape beside them", () => {
+    expect([...ASPECT_KEYS].sort()).toEqual(
+      ["animation", "palette", "params", "shape", "stack"].sort(),
+    );
   });
 
   it("starts every aspect at reroll", () => {
@@ -125,13 +129,16 @@ describe("keep and off cannot both be true", () => {
  * is a defect that says so rather than a no-op.
  */
 describe("which aspects have an off", () => {
-  it("offers it for animation and for nothing else", () => {
-    expect([...EXCLUDABLE_KEYS]).toEqual(["animation"]);
+  it("offers it for animation and graph shape, and for nothing else", () => {
+    expect([...EXCLUDABLE_KEYS].sort()).toEqual(["animation", "shape"]);
     expect(modesFor("animation")).toEqual(["reroll", "keep", "off"]);
+    // Graph shape is the one aspect with an off and no keep: locking the stack
+    // already keeps the wiring, so a keep here would be a second control for
+    // one idea.
+    expect(modesFor("shape")).toEqual(["reroll", "off"]);
     for (const key of ASPECT_KEYS) {
-      if (key === "animation") continue;
+      if (isExcludable(key)) continue;
       expect(modesFor(key), key).toEqual(["reroll", "keep"]);
-      expect(isExcludable(key)).toBe(false);
     }
   });
 
@@ -140,6 +147,10 @@ describe("which aspects have an off", () => {
       expect(() => withAspectMode(FRESH, key, "off"), key).toThrow(/cannot be turned off/);
       expect(() => modeHint(key, "off"), key).toThrow(/cannot be turned off/);
     }
+  });
+
+  it("refuses to keep an aspect that has no keep", () => {
+    expect(() => modeHint("shape", "keep")).toThrow(/has no keep/);
   });
 
   it("offers a mode list every aspect's own label agrees with", () => {
@@ -231,9 +242,19 @@ describe("describeStack", () => {
 });
 
 describe("the aspect keys the panel iterates", () => {
-  it("is the same list `SurpriseLocks` carries", () => {
-    const keys: readonly AspectKey[] = ASPECT_KEYS;
-    expect([...keys].sort()).toEqual(Object.keys(NO_LOCKS).sort());
+  it("is `SurpriseLocks`'s list for the aspects that lock, plus the ones that only turn off", () => {
+    const lockable: readonly AspectKey[] = LOCKABLE_KEYS;
+    expect([...lockable].sort()).toEqual(Object.keys(NO_LOCKS).sort());
+    // Every aspect the panel iterates either locks or excludes; one that did
+    // neither would render a radiogroup with a single button in it.
+    for (const key of ASPECT_KEYS) {
+      expect(isLockable(key) || isExcludable(key), key).toBe(true);
+    }
+  });
+
+  it("is the same list `SurpriseExcludes` carries, for the ones that turn off", () => {
+    const excludable: readonly AspectKey[] = EXCLUDABLE_KEYS;
+    expect([...excludable].sort()).toEqual(Object.keys(NO_EXCLUDES).sort());
   });
 });
 

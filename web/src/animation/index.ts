@@ -121,7 +121,14 @@ export type {
   TemporalVariation,
 } from "./temporal";
 
-export { documentAtFrame, planAnimation, planTime, stackAtFrame } from "./plan";
+export {
+  FEEDBACK_STILL_FRACTION,
+  documentAtFrame,
+  planAnimation,
+  planTime,
+  stackAtFrame,
+  stillFrameFor,
+} from "./plan";
 export type { AnimationOptions, AnimationPlan } from "./plan";
 
 export { SEAM_PHASE_TOLERANCE, phaseDistance, validateLoopSeam } from "./seam";

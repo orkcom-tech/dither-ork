@@ -145,6 +145,9 @@ export const GENERATOR = defineEffect({
   surpriseWeight: 1,
   producesIndexMap: false,
   requiresIndexMap: false,
+  // Required of every source-slot effect, including a fixture: the validator
+  // that seals this registry is the same one that seals the shipped catalogue.
+  coverage: "large-scale",
 });
 
 export function fixtureRegistry(): EffectRegistry {

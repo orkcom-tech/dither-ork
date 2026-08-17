@@ -246,13 +246,47 @@ describe("validateSourceDeclaration", () => {
   });
 
   it("accepts a source whose later pass reads what its first pass wrote", () => {
-    // The rule is about the *first* pass, because that is the one whose input
-    // is the node's input. A second pass reading the surface chain this node
-    // already wrote is how every multi-pass effect works.
+    // The rule is about which pass reads the *node's* input. A second pass
+    // reading the surface chain this node already wrote is how every multi-pass
+    // effect works.
     expect(() =>
       validateSourceDeclaration(
         sourceDescriptor("gen-two-pass"),
         effect("gen-two-pass", [generatorPass("gen-two-pass/field"), pass("gen-two-pass/blur")]),
+      ),
+    ).not.toThrow();
+  });
+
+  /**
+   * The case that shipped broken.
+   *
+   * Row and column displacement open with a sequential walk that writes a
+   * per-row offset table and binds no texture at all; the pass that reads the
+   * picture is the second one. A rule written against `passes[0]` called both of
+   * them generators and refused to compile them, which cost a quarter of every
+   * Surprise Me press on both generators until it was found.
+   */
+  it("accepts a filter whose first pass only fills a scratch buffer", () => {
+    const setup: ComputePass = {
+      ...pass("row-displacement/slices"),
+      bindings: [
+        { role: "uniforms", binding: 5 },
+        {
+          role: "scratch",
+          binding: 6,
+          slot: "offsets",
+          access: "read-write",
+          size: { kind: "per-row", bytesPerRow: 4 },
+        },
+      ],
+      dispatch: { kind: "fixed", workgroups: [1, 1, 1] },
+      workgroupSize: [1, 1, 1],
+      access: "global",
+    };
+    expect(() =>
+      validateSourceDeclaration(
+        descriptor("row-displacement"),
+        effect("row-displacement", [setup, pass("row-displacement/apply")]),
       ),
     ).not.toThrow();
   });
@@ -272,12 +306,24 @@ describe("validateSourceDeclaration", () => {
     ).toThrow(/sits in the source slot/);
   });
 
-  it("refuses a filter whose first pass reads no picture", () => {
+  it("refuses a filter that reads no picture at all", () => {
     expect(() =>
       validateSourceDeclaration(
         descriptor("halftone"),
         effect("halftone", [generatorPass("halftone/main")]),
       ),
-    ).toThrow(/binds no input-color/);
+    ).toThrow(/binds input-color before the first pass that writes a frame/);
+  });
+
+  it("refuses a filter that only reads a frame it drew itself", () => {
+    // A generator wearing a filter's badge: the first pass writes a picture out
+    // of nothing and the second one filters it, so the node's own input is never
+    // read and everything above it in the stack is discarded in silence.
+    expect(() =>
+      validateSourceDeclaration(
+        descriptor("halftone"),
+        effect("halftone", [generatorPass("halftone/field"), pass("halftone/screen")]),
+      ),
+    ).toThrow(PassCompileError);
   });
 });

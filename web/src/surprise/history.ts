@@ -66,6 +66,12 @@ export interface SurpriseHistoryEntry {
    * something that happened, and inventing one — a grey square, a colour swatch
    * — would put a picture in the history that is not the surprise it is labelled
    * with. The strip shows the seed and the stack instead and says why.
+   *
+   * It is a picture of the frame `animation/plan.ts`'s `stillFrameFor` names,
+   * which is frame 0 for every document that loops and a frame inside the loop
+   * for one with a feedback node — a feedback node is the identity at frame 0, so
+   * a thumbnail taken there would show the document without the one thing that
+   * shape adds.
    */
   readonly thumbnail: string | null;
   /** Present when the thumbnail is null: the reason, ready to show. */

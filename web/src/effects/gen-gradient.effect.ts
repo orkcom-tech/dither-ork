@@ -394,6 +394,14 @@ export default defineEffect({
   execution: "gpu",
   params: GEN_GRADIENT_PARAMS,
   surpriseWeight: 0.6,
+  /**
+   * **Large-scale.** A ramp is structure at the scale of the frame by
+   * construction — one end of the picture is dark and the other is light,
+   * whatever the geometry, the repeats or the transfer curve do in between. Read
+   * as coverage it makes the masked node fade in across the picture, which is the
+   * most legible thing a mask can do. See {@link EffectDescriptor.coverage}.
+   */
+  coverage: "large-scale",
   producesIndexMap: false,
   requiresIndexMap: false,
 });

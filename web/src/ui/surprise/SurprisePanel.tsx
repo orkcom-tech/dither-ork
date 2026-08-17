@@ -24,17 +24,27 @@ import type { ModulatorSupport } from "./capability";
  *
  * ## The aspect rows say what they do
  *
- * Four aspects, one control each, three named states: reroll, keep, off. The
+ * Five aspects, one control each, three named states: reroll, keep, off. The
  * words are on the buttons rather than behind a padlock icon, the sentence for
  * whichever one you are pointing at is on the control itself, and the general
  * ideas — what keeping is, what leaving out is — are contextual help (F-UI-13)
  * read from `ui/help/concepts.ts`, which is the same mechanism every other panel
  * in the application uses. Nothing here writes its own prose about them.
  *
- * `off` appears only on animation. `modesFor` is what decides that, and
- * `SurpriseExcludes` in `surprise/generate.ts` is where the reason is written:
- * an aspect gets an `off` when the absence is a state a document can hold, and
- * animation is the only one of the four that qualifies.
+ * Not every aspect offers all three, and `modesFor` is the only thing that
+ * decides which — `SurpriseExcludes` in `surprise/generate.ts` is where the
+ * reason is written. Animation and graph shape have an `off`, because for both
+ * of them the absence is a state a document can hold. Graph shape has no
+ * `keep`, because setting the stack to keep already keeps the wiring.
+ *
+ * ## The document says whether it loops
+ *
+ * Beside the seed, and only when it does not. A feedback node reads the previous
+ * frame, so the document never returns to where it started and an animated
+ * export reports it rather than failing a seam check it was never going to pass
+ * (F-AN-03, narrowed by `docs/dither-ork-node-graph.md`). Somebody who is about
+ * to export a loop should learn that from the thing that made the document, not
+ * from the encoder, and the line points at the control that turns it off.
  *
  * ## The animation row disappears when the build cannot animate
  *
@@ -107,6 +117,17 @@ export function SurprisePanel({ store, modulators }: SurprisePanelProps): React.
         {currentEntry === null ? null : (
           <p className="sm__note">{describeStack(currentEntry.summary.effectNames)}</p>
         )}
+        {currentEntry === null ? null : (
+          <p className="sm__note">{currentEntry.summary.shape}</p>
+        )}
+        {currentEntry === null || currentEntry.summary.loops ? null : (
+          <p className="sm__note" data-testid="surprise-nonlooping">
+            This document does not loop: a feedback node reads the previous
+            frame, so the last frame is not the first one. An animated export
+            says so rather than failing a seam check. Set graph shape to off for
+            a document that closes.
+          </p>
+        )}
       </section>
 
       <section className="sm__section">
@@ -129,7 +150,9 @@ export function SurprisePanel({ store, modulators }: SurprisePanelProps): React.
         />
         <p className="sm__note">
           How many effects the stack gets, how far parameters move off their
-          defaults, and how likely a glitch is.
+          defaults, how likely a glitch is — and how likely the document is to be
+          more than a chain. At the tame end it is nearly always a chain, and it
+          always loops.
         </p>
       </section>
 
@@ -173,7 +196,7 @@ export function SurprisePanel({ store, modulators }: SurprisePanelProps): React.
         <p className="sm__note">
           Reroll makes a new one every press. Keep leaves that one exactly as it
           is. Off leaves it out of the document altogether — animation off means
-          nothing moves.
+          nothing moves, graph shape off means a plain chain over your image.
         </p>
         {modulators.renderable ? null : (
           <React.Fragment>

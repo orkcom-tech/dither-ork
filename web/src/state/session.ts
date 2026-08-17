@@ -79,6 +79,7 @@ import {
   type SourceLimits,
 } from "../io";
 import { RenderService, isAbandoned } from "../worker";
+import { documentAtFrame, planAnimation, stillFrameFor } from "../animation";
 // Type-only, and deliberately: `state/` must not import `ui/`. The palette
 // store is a value the application hands in, so the layer that owns the
 // document depends on the palette editor's *shape* and not on its module.
@@ -308,11 +309,62 @@ export async function createEditorSession(
     const mine = generation + 1;
     generation = mine;
 
+    // Which frame a *still* of this document is. Zero for everything that loops,
+    // which is every document without a feedback node in it — and a frame inside
+    // the loop for one that has, because a feedback node blends the previous
+    // frame at its own position and at frame 0 there is no previous frame. The
+    // viewport was therefore showing the picture *without* the trail: the one
+    // thing a feedback node adds, absent from every first view of it.
+    //
+    // `planAnimation` and not the raw document, for the same reason the thumbnail
+    // does it: the plan is what knows which nodes read their own history, and
+    // `documentAtFrame` is the only shape `buildRenderGraph` accepts. This pump
+    // only ever sees a document with no bindings — the block in `request` leaves
+    // animated ones to the timeline — so the plan resolves nothing and the
+    // document it returns is the document.
+    const plan = planAnimation(snapshot.document, options.registry);
+    const at = stillFrameFor(plan);
+
+    // Frame N of a feedback document is the product of frames 0..N: the worker's
+    // frame store serves the frame it holds and refuses any other rather than
+    // inventing a history, so the frames before `at` are rendered and discarded.
+    // `ui/timeline/preview.ts` does the same for a scrub and reports it the same
+    // way. For every looping document this loop does not run.
+    if (at > 0) {
+      viewport?.beginInteraction("feedback-still");
+      log.info("still replays a feedback document", {
+        reason,
+        frame: at,
+        frames: plan.clock.frames,
+        why: "a feedback node is the identity at frame 0",
+      });
+    }
+    try {
+      for (let index = 0; index < at; index += 1) {
+        if (mine !== generation || disposed) return;
+        const discarded = await render.render({
+          document: documentAtFrame(plan, index),
+          solo: snapshot.soloNodeId,
+          quality,
+          factor,
+          frame: index,
+          lane: "preview",
+          present: "bitmap",
+        });
+        // Never shown, and an `ImageBitmap` holds GPU memory the JS heap does not
+        // account for, so it is closed rather than dropped.
+        if (discarded.image.kind === "bitmap") discarded.image.bitmap.close();
+      }
+    } finally {
+      if (at > 0) viewport?.endInteraction("feedback-still");
+    }
+
     const result = await render.render({
-      document: snapshot.document,
+      document: documentAtFrame(plan, at),
       solo: snapshot.soloNodeId,
       quality,
       factor,
+      frame: at,
       lane: "preview",
       // The frame is composited in the worker and transferred; the viewport
       // draws it with one `drawImage` and never touches a pixel.

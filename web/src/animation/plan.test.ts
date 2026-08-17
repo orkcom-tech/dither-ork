@@ -22,13 +22,21 @@ import { AnimationError } from "./errors";
 import {
   binding,
   diffusionNode,
+  feedbackNode,
   patternNode,
   plainNode,
   seededNode,
   testDocument,
   testRegistry,
 } from "./fixture";
-import { documentAtFrame, planAnimation, planTime, stackAtFrame } from "./plan";
+import {
+  FEEDBACK_STILL_FRACTION,
+  documentAtFrame,
+  planAnimation,
+  planTime,
+  stackAtFrame,
+  stillFrameFor,
+} from "./plan";
 import { PATTERN_ROTATION, type TemporalVariation } from "./temporal";
 
 beforeAll(() => setLevel("error"));
@@ -306,5 +314,47 @@ describe("planTime", () => {
     expect(planTime(plan, 0)).toBe(0);
     expect(planTime(plan, 59)).toBeCloseTo(59 / 60, 15);
     expect(planTime(plan, 60)).toBe(0);
+  });
+});
+
+/**
+ * Which frame a still shows, and why it is not always zero.
+ *
+ * A feedback node blends the previous frame at its own position into this one, so
+ * at frame 0 — where there is no previous frame — it is the identity. Every still
+ * in the application was therefore showing a feedback document *without* its
+ * trail: the viewport's first view of a fresh surprise, and the history thumbnail
+ * beside it, were pictures the animation does not contain.
+ */
+describe("stillFrameFor", () => {
+  it("is zero for a document that loops", () => {
+    const plan = planAnimation(testDocument(stack()), registry);
+    expect(plan.feedbackNodes).toEqual([]);
+    // Not merely "some frame that looks the same": rendering any other frame of a
+    // looping document would cost a replay to show the same picture.
+    expect(stillFrameFor(plan)).toBe(0);
+  });
+
+  it("is a quarter of the way into the loop for a feedback document", () => {
+    const plan = planAnimation(
+      testDocument([plainNode(), feedbackNode()], [], { frames: 60, fps: 30 }),
+      registry,
+    );
+    expect(plan.feedbackNodes).toHaveLength(1);
+    expect(stillFrameFor(plan)).toBe(Math.round(60 * FEEDBACK_STILL_FRACTION));
+  });
+
+  it("never asks for a frame the clock does not have, and never asks for zero", () => {
+    // A two-frame clock rounds the quarter to zero, which would put the still back
+    // on the frame that has no history. One is the floor.
+    for (const frames of [1, 2, 3, 4, 7, 12, 240]) {
+      const plan = planAnimation(
+        testDocument([plainNode(), feedbackNode()], [], { frames, fps: 30 }),
+        registry,
+      );
+      const at = stillFrameFor(plan);
+      expect(at, `frames ${frames}`).toBeLessThanOrEqual(frames - 1);
+      if (frames > 1) expect(at, `frames ${frames}`).toBeGreaterThanOrEqual(1);
+    }
   });
 });

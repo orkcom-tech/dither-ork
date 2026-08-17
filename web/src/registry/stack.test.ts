@@ -46,6 +46,12 @@ interface DescriptorOverrides {
   readonly requiresIndexMap?: boolean;
   readonly excludes?: readonly string[];
   readonly resamples?: boolean;
+  /**
+   * Only meaningful on a source-slot fixture, and derived from the slot rather
+   * than read from here — the field is present so a caller can *state* it for
+   * readability, and the builder supplies it either way.
+   */
+  readonly coverage?: EffectDescriptor["coverage"];
 }
 
 function effect(id: string, overrides: DescriptorOverrides = {}): EffectDescriptor {
@@ -67,6 +73,10 @@ function effect(id: string, overrides: DescriptorOverrides = {}): EffectDescript
     requiresIndexMap: overrides.requiresIndexMap ?? false,
     ...(overrides.excludes === undefined ? {} : { excludes: overrides.excludes }),
     ...(overrides.resamples === undefined ? {} : { resamples: overrides.resamples }),
+    // The validator requires it of a source-slot effect and refuses it on every
+    // other, so it is derived from the slot rather than passed in: a fixture that
+    // is a generator is a generator that declares what its picture is like.
+    ...(slot === "source" ? { coverage: "large-scale" as const } : {}),
   };
 }
 
@@ -373,7 +383,7 @@ describe("the shipped catalogue", () => {
 // it. These tests are that rule.
 
 describe("analyseSources", () => {
-  const GEN = effect("gen", { slot: "source" });
+  const GEN = effect("gen", { slot: "source", coverage: "large-scale" });
   const BLUR = effect("blur", { slot: "preprocess" });
   const DITHER = effect("dither", { slot: "dither", producesIndexMap: true });
 

@@ -33,6 +33,10 @@ function summary(seed: string): SurpriseSummary {
     paletteEntries: 4,
     bindings: 0,
     chaos: 0.5,
+    shape: "chain",
+    loops: true,
+    branch: 0,
+    maskedNode: null,
   };
 }
 

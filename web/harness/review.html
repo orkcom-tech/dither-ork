@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Surprise Me — graph vs chain review</title>
+    <style>
+      body { margin: 0; background: #101014; color: #ddd; font: 12px/1.4 ui-monospace, monospace; }
+      #bar { padding: 8px 12px; display: flex; gap: 12px; align-items: center; }
+      #sheet { display: block; margin: 0 auto; image-rendering: pixelated; }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <input id="file" type="file" accept="image/*" />
+      <span id="status">choose the image to be surprised against</span>
+    </div>
+    <canvas id="sheet"></canvas>
+    <script type="module" src="./review.ts"></script>
+  </body>
+</html>

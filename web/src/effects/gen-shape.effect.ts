@@ -347,6 +347,14 @@ export default defineEffect({
   execution: "gpu",
   params: GEN_SHAPE_PARAMS,
   surpriseWeight: 0.6,
+  /**
+   * **Large-scale.** A figure evaluated from a signed distance field is one
+   * region against a ground, so coverage taken from it is "inside the shape" and
+   * "outside it" — the plainest structure there is. It measured the strongest of
+   * the three generators as a branch root, at a median difference of 0.145 mean
+   * absolute RGB over twelve branches. See {@link EffectDescriptor.coverage}.
+   */
+  coverage: "large-scale",
   producesIndexMap: false,
   requiresIndexMap: false,
 });

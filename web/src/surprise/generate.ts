@@ -3,9 +3,18 @@
  *
  * F-SM-01 ("a full random document against the current source"), F-SM-02 (one
  * 64-bit seed), F-SM-06 (locks) and F-SM-08 (per-node reroll) meet here. The
- * pieces are elsewhere and each is testable on its own: the stack grammar in
- * `grammar.ts`, the parameter draws in `params.ts`, the palette in `palette.ts`,
- * the bindings in `animation.ts`, the generator itself in `rng.ts`.
+ * pieces are elsewhere and each is testable on its own: the legal graph shapes
+ * in `shape.ts`, the grammar that composes one in `grammar.ts`, the parameter
+ * draws in `params.ts`, the palette in `palette.ts`, the bindings in
+ * `animation.ts`, the generator itself in `rng.ts`.
+ *
+ * # What this emits is a graph
+ *
+ * Nodes, **edges** and a named output — schema 2 — rather than a chain whose
+ * wiring is implied by array order. Most of them are still chains, because most
+ * good results are chains and `shape.ts` says why the tame end of the chaos
+ * slider stays there; the ones that are not carry a branch into some node's mask
+ * port, and that branch is the whole of what a node tool buys over a stack.
  *
  * **Pure and synchronous.** Nothing in this file reads a clock, an RNG that is
  * not derived from the seed, a device, a store or the DOM. It takes a seed, a
@@ -33,8 +42,8 @@
  * are answers to different questions about the same aspect, and asking both at
  * once is a contradiction rather than a precedence puzzle — so
  * {@link generateSurprise} refuses it rather than deciding which wins. See
- * {@link SurpriseExcludes} for why exactly one aspect has an exclude and the
- * other three do not.
+ * {@link SurpriseExcludes} for why two aspects have an exclude and the other
+ * two do not.
  *
  * # What a surprise does not touch
  *
@@ -53,16 +62,30 @@
  */
 
 import { logger } from "../lib/log";
-import type { Binding, DitherDocument, Palette, StackNode } from "../types/document";
+import type {
+  Binding,
+  DitherDocument,
+  GraphEdge,
+  NodeMask,
+  Palette,
+  StackNode,
+} from "../types/document";
 import { DOCUMENT_SCHEMA_VERSION } from "../types/document";
 import type { EffectRegistry } from "../registry";
-import { defaultParams, validateStack } from "../registry";
+import { defaultParams, validateGraph } from "../registry";
 // The leaf, not the `state` barrel: that barrel re-exports `session.ts`, which
 // reaches the render worker and the palette editor, and this module is pure.
-import { chainOf } from "../graph/edit";
+import { PRIMARY_INPUT_PORT } from "../types/registry";
 import { createStackNode } from "../state/document";
 import { retainBindings, sampleBindings } from "./animation";
-import { composeStack, type ComposedStack } from "./grammar";
+import { composeGraph, edgesOf, type ComposedGraph } from "./grammar";
+import {
+  PLAIN_CHAIN,
+  decideShape,
+  describeShape,
+  shapeLoops,
+  type GraphShape,
+} from "./shape";
 import { sampleNodeParams, sampleNodeSeed } from "./params";
 import { streamFor } from "./rng";
 import { formatSeed } from "./seed";
@@ -71,6 +94,16 @@ const log = logger("app");
 
 /** The stream the stack composition draws from. Written once. */
 const STACK_STREAM = "surprise/stack";
+
+/**
+ * The stream the *shape* is drawn from — which of the legal graph shapes this
+ * surprise is.
+ *
+ * Its own, and not the stack's, for the reason `params.ts` gives one stream per
+ * parameter: a change to the shape probabilities then moves which shape a seed
+ * produces without also re-rolling every effect and every parameter after it.
+ */
+const SHAPE_STREAM = "surprise/shape";
 
 export class SurpriseError extends Error {
   constructor(message: string) {
@@ -105,11 +138,13 @@ export const NO_LOCKS: SurpriseLocks = {
  * pins it **on**, which is the opposite of what somebody reaching for the only
  * animation control in the panel wants.
  *
- * # Why this has one field and `SurpriseLocks` has four
+ * # Why this has two fields and `SurpriseLocks` has four
  *
  * An exclude is only offerable where **the absence is a state a document can
- * hold**. That is a fact about `DitherDocument`, not a matter of taste, and it
- * is true of exactly one of the four aspects:
+ * hold**. That is a fact about `DitherDocument`, not a matter of taste. It is
+ * true of animation, it became true of graph shape when step 4 gave the
+ * generator shapes to leave out (see {@link SurpriseExcludes.shape}), and it is
+ * still false of the other three:
  *
  * - **animation** — `bindings: []` is an ordinary, complete document. It renders
  *   as a still picture, the timeline adopts no tracks from it, and it is what
@@ -145,10 +180,37 @@ export interface SurpriseExcludes {
    * rather than leaving the viewport to a timeline that is not pumping.
    */
   readonly animation: boolean;
+  /**
+   * No graph shape: a **plain chain over the document's own image**.
+   *
+   * The second aspect that passes the test in the block above — the absence is
+   * a state a document can hold, and not merely a state but *the* state: a
+   * chain is what every `.dork`, preset and share link written before schema 2
+   * is, and it is what this generator produced until step 4. So "off" here has
+   * something exact to mean, and what it means is the whole of what the graph
+   * added: no generator drawn in place of the picture, no branch driving a
+   * mask, and **no feedback node**.
+   *
+   * That last one is why this exists as a control rather than only as a chaos
+   * setting. A feedback node reads the previous frame, so a document containing
+   * one does not return to its first frame — `animation/plan.ts` marks it
+   * non-looping and `animation/seam.ts` skips the seam check it was never going
+   * to pass. Somebody who is about to export a loop needs to be able to say
+   * *not that* and be obeyed, and a probability that merely falls to zero at
+   * one end of a slider is not being obeyed, it is being lucky. With this set,
+   * {@link SurpriseSummary.loops} is true by construction.
+   *
+   * It clears the carried generator prefix as well (see {@link carriedPrefix}),
+   * so the sentence the panel prints is the whole truth rather than nearly it.
+   * On a blank canvas the picture is still not black: `decideShape` forces a
+   * generator there whatever this says, so one is *drawn* rather than carried.
+   */
+  readonly shape: boolean;
 }
 
 export const NO_EXCLUDES: SurpriseExcludes = {
   animation: false,
+  shape: false,
 };
 
 export interface SurpriseRequest {
@@ -193,6 +255,22 @@ export interface SurpriseRequest {
    * them — the second comes with the failing step's own words for why.
    */
   readonly animate: boolean;
+  /**
+   * True when the picture is a **blank canvas** rather than a photograph.
+   *
+   * `io/source.ts` gives one `format: "blank"`, and it is transparent black: a
+   * document with no generator in it renders nothing at all on one. So this
+   * forces a generator at the head of the chain — see
+   * {@link ShapeOptions.blankCanvas}, where the argument is written out — and
+   * `ui/surprise/engine.ts` is what reads the format and passes it.
+   *
+   * It is the answer this build can give to "a surprise with no image open".
+   * There is no *other* answer available: every extent in the pipeline is
+   * derived from the source's, so a document with no source has no size, and
+   * `state/render/renderer.ts` refuses a render with none. A blank canvas is
+   * that idea in the form the schema can hold.
+   */
+  readonly blankCanvas: boolean;
 }
 
 /** What the surprise did, for the history entry, the UI and the log. */
@@ -207,6 +285,20 @@ export interface SurpriseSummary {
   readonly paletteEntries: number;
   readonly bindings: number;
   readonly chaos: number;
+  /** A few words for the shape this document is — see `shape.ts`. */
+  readonly shape: string;
+  /**
+   * Whether this document returns to its first frame — F-AN-03.
+   *
+   * False exactly when the document contains a feedback node. Reported here
+   * rather than left for the export to discover, because the panel says it
+   * beside the seed: a person who is about to export a loop should be told by
+   * the thing that generated the document, not by the encoder.
+   */
+  readonly loops: boolean;
+  /** Nodes in the mask branch, and the node it masks. Zero and `null` on a chain. */
+  readonly branch: number;
+  readonly maskedNode: string | null;
 }
 
 export interface SurpriseResult {
@@ -223,60 +315,57 @@ function nodeIdAt(index: number): string {
 interface Composition {
   readonly effects: readonly string[];
   readonly ids: readonly string[];
+  readonly edges: readonly GraphEdge[];
+  readonly output: string | null;
+  /** Node id to mask, for the one node a branch masks. Empty on every other shape. */
+  readonly masks: ReadonlyMap<string, NodeMask>;
   /** Absent when the stack was locked and therefore not composed. */
-  readonly composed: ComposedStack | null;
+  readonly composed: ComposedGraph | null;
 }
 
 /**
- * The stack this surprise runs on: either the base document's composition, or a
- * fresh one from the grammar.
+ * The graph this surprise runs on: either the base document's, or a fresh one
+ * from the grammar.
  *
  * When the composition is locked the **node ids are kept too**, which is what
  * lets the parameter lock and the animation lock mean anything: a binding names
  * a node id, and a parameter lock that matched on position rather than on
  * identity would move values between nodes on a reorder.
+ *
+ * A locked stack now keeps its **wiring** as well — the edges, the output and
+ * every node's mask. It has to: before step 4 the wiring was implied by the list
+ * and re-deriving it was free, and re-deriving it now would silently unwire the
+ * branch of any graph document somebody locked, which is the one thing "keep
+ * this stack" promises not to do.
  */
-function compositionFor(request: SurpriseRequest): Composition {
+function compositionFor(request: SurpriseRequest, shape: GraphShape): Composition {
   if (request.locks.stack) {
+    const masks = new Map<string, NodeMask>();
+    for (const node of request.base.stack) {
+      if (node.mask !== undefined) masks.set(node.id, node.mask);
+    }
     return {
       effects: request.base.stack.map((node) => node.effect),
       ids: request.base.stack.map((node) => node.id),
+      edges: request.base.edges,
+      output: request.base.output,
+      masks,
       composed: null,
     };
   }
 
-  // The generator prefix survives a reroll.
-  //
-  // Surprise Me's grammar is a sentence about a photograph — preprocess, one
-  // dither, postprocess — and `poolFor` only ever draws from those three slots,
-  // so it composes no source node and never will until the graph grammar of
-  // step 4 exists. That is fine for a document with an image in it and wrong
-  // for one without: on a blank canvas, replacing a stack that *began with a
-  // generator* with one that does not leaves a black frame, and the feature the
-  // owner uses most would be the one that empties the picture.
-  //
-  // So the leading run of source nodes is carried across. Only the leading run:
-  // a source node further down is a composite over the picture rather than the
-  // thing making it, and it is rerolled away with everything else. The node ids
-  // come with it, which is what keeps the parameter lock and any binding
-  // pointing at the same node — and the effect ids come with it too, so the
-  // generator's own parameters are resampled like every other node's. The look
-  // rerolls; the fact that there is a picture at all does not.
-  const kept: string[] = [];
-  const keptIds: string[] = [];
-  for (const node of request.base.stack) {
-    const descriptor = request.registry.get(node.effect);
-    if (descriptor === undefined || descriptor.slot !== "source") break;
-    kept.push(node.effect);
-    keptIds.push(node.id);
-  }
+  // The generator prefix survives a reroll — **on a blank canvas, and there
+  // only**. See {@link carriedPrefix} for why the unconditional version was the
+  // worst defect in this file.
+  const { effects: kept, ids: keptIds } = carriedPrefix(request);
 
-  const composed = composeStack(streamFor(request.seed, STACK_STREAM), {
+  const composed = composeGraph(streamFor(request.seed, STACK_STREAM), {
     registry: request.registry,
     chaos: request.chaos,
+    shape,
   });
 
-  // Ids for the composed tail, skipping anything the prefix already holds. Both
+  // Ids for the composed part, skipping anything the prefix already holds. Both
   // generators mint `n<k>`, so a base document whose generator happens to be
   // `n2` would otherwise collide with the second composed node and produce a
   // stack with two nodes of one id — which `analyseGraph` refuses, correctly,
@@ -294,19 +383,172 @@ function compositionFor(request: SurpriseRequest): Composition {
     return id;
   };
 
+  const composedIds = composed.nodes.map(() => freshId());
+  const edges: GraphEdge[] = [];
+  // The carried prefix is a chain, and the first composed node reads the end of
+  // it. Only the first: every other composed root — a mask branch's — reads the
+  // decoded source, which is what an unwired `in` port already means.
+  for (let i = 1; i < keptIds.length; i += 1) {
+    const from = keptIds[i - 1];
+    const to = keptIds[i];
+    if (from !== undefined && to !== undefined) {
+      edges.push({ from, to, port: PRIMARY_INPUT_PORT });
+    }
+  }
+  const lastKept = keptIds[keptIds.length - 1];
+  const firstComposed = composedIds[0];
+  if (lastKept !== undefined && firstComposed !== undefined) {
+    edges.push({ from: lastKept, to: firstComposed, port: PRIMARY_INPUT_PORT });
+  }
+  edges.push(...edgesOf(composed, composedIds));
+
+  const masks = new Map<string, NodeMask>();
+  const maskedId = composed.maskAt === null ? undefined : composedIds[composed.maskAt];
+  if (maskedId !== undefined && composed.mask !== null) masks.set(maskedId, composed.mask);
+
   return {
-    effects: [...kept, ...composed.effects],
-    ids: [...keptIds, ...composed.effects.map(() => freshId())],
+    effects: [...kept, ...composed.nodes.map((node) => node.effect)],
+    ids: [...keptIds, ...composedIds],
+    edges,
+    output: composedIds[composed.outputIndex] ?? lastKept ?? null,
+    masks,
     composed,
   };
+}
+
+/**
+ * The leading run of source nodes in the document being rerolled — **only when
+ * the canvas is blank and only when graph shape is allowed**.
+ *
+ * # Why the carry exists
+ *
+ * `io/source.ts`'s blank canvas is transparent black. A document with no
+ * generator in it renders nothing at all on one, so replacing a stack that
+ * *began with* a generator with one that does not leaves a black frame, and the
+ * feature the owner uses most would be the one that empties the picture.
+ *
+ * # Why it is conditional, which it was not
+ *
+ * Unconditionally, this welded a leading source node onto **every subsequent
+ * press** once one had been drawn. The grammar draws a generator with
+ * probability 0.04 at chaos 0, so one press in twenty-five put a "Noise field"
+ * at the head — and from that press on, every reroll carried it, at every chaos
+ * setting, including 0 where the panel promises "a plain chain over your image".
+ * Measured in the real application: 29 of 29 consecutive presses kept it, and
+ * **the photograph never came back**. The only exit was deleting the node by
+ * hand, which nothing in the UI tells anybody to do.
+ *
+ * That is a ratchet, and the argument for the carry never covered it. The
+ * argument is about a canvas with no picture on it; the request already says
+ * which case that is, so this reads `blankCanvas` instead of assuming it. With
+ * a photograph open, a generator at the head is a *shape* — drawn by
+ * `shape.ts`, at the probability the chaos slider states, fresh on every press.
+ *
+ * `excludes.shape` clears it too, so the panel's sentence is true rather than
+ * nearly true. On a blank canvas that costs nothing: `decideShape` forces a
+ * generator there whatever the exclude says (a chain over a blank canvas with a
+ * generator at its head is still a chain), so the grammar draws one and the
+ * frame is not black — it is simply a freshly drawn generator rather than a
+ * carried one.
+ *
+ * Read twice — once to decide the shape, once to build the composition — so it
+ * is one function rather than two loops that could come to disagree about where
+ * the prefix ends.
+ */
+function carriedPrefix(request: SurpriseRequest): {
+  readonly effects: readonly string[];
+  readonly ids: readonly string[];
+} {
+  const none = { effects: [], ids: [] } as const;
+  if (!request.blankCanvas || request.excludes.shape) return none;
+
+  const effects: string[] = [];
+  const ids: string[] = [];
+  for (const node of request.base.stack) {
+    const descriptor = request.registry.get(node.effect);
+    if (descriptor === undefined || descriptor.slot !== "source") break;
+    effects.push(node.effect);
+    ids.push(node.id);
+  }
+  return { effects, ids };
+}
+
+/**
+ * Whether a node's mask reads a picture wired to its `mask` port.
+ *
+ * The one property that makes a document a graph rather than a chain in this
+ * generator's vocabulary: the other two mask kinds read the node's own input and
+ * need no second edge.
+ */
+function hasImageMask(node: StackNode): boolean {
+  return node.mask !== undefined && node.mask.source.kind === "image";
+}
+
+/**
+ * Why the document being kept is not a plain chain, in words, or `null` when it
+ * is one.
+ *
+ * Asked only when the stack is locked *and* graph shape is excluded, which is
+ * the one place those two settings can contradict each other. It reads the
+ * wiring rather than the list order, because a chain somebody reordered in the
+ * panel is still a chain and refusing it would be a refusal nobody could act on.
+ */
+function shapeOfDocument(request: SurpriseRequest): string | null {
+  const feedback = request.base.stack.find(
+    (node) => request.registry.get(node.effect)?.readsFeedback === true,
+  );
+  if (feedback !== undefined) {
+    return `contains a feedback node (${feedback.id}), which reads the previous frame and stops the document looping`;
+  }
+  if (request.base.stack.some(hasImageMask)) {
+    return "has a branch driving a mask, which is a graph rather than a chain";
+  }
+  if (request.base.edges.some((edge) => edge.port !== PRIMARY_INPUT_PORT)) {
+    return "has an edge into a second image input, which is a graph rather than a chain";
+  }
+  return null;
+}
+
+/**
+ * The shape a document already has, for the path where nothing was composed.
+ *
+ * Derived from the nodes rather than remembered, so a locked stack reports what
+ * it *is* — including a feedback node the user added by hand, which is exactly
+ * the case where "does this loop" is worth being told.
+ */
+function observedShape(request: SurpriseRequest, stack: readonly StackNode[]): GraphShape {
+  const generator = request.registry.get(stack[0]?.effect ?? "")?.slot === "source";
+  return {
+    generator,
+    newGenerator: false,
+    feedback: stack.some(
+      (node) => request.registry.get(node.effect)?.readsFeedback === true,
+    ),
+    branch: stack.some(hasImageMask),
+  };
+}
+
+/**
+ * The node with the composition's mask on it, or with no `mask` key at all.
+ *
+ * `mask: undefined` and no `mask` are the same value in TypeScript and different
+ * bytes to `JSON.stringify`, and `graph/edit.ts` makes the same point from the
+ * editor's side: removing the key keeps "not masked" byte-identical to "never
+ * masked", which is what stops two identical documents hashing differently.
+ */
+function withMask(node: StackNode, mask: NodeMask | null): StackNode {
+  if (mask !== null) return { ...node, mask };
+  if (node.mask === undefined) return node;
+  const { mask: _dropped, ...rest } = node;
+  return rest;
 }
 
 /**
  * Generate a document.
  *
  * @throws SurpriseError when the base document names an effect this build does
- * not have, when a locked stack is one the grammar rejects, or when an aspect is
- * both locked and excluded. All three are stated rather than worked around: the
+ * not have, when a locked stack is one the grammar rejects, or when two settings
+ * ask for opposite things. All of them are stated rather than worked around: the
  * first means the document came from a different build, the second means the
  * user locked a stack that cannot render, which they need told about rather than
  * silently un-locked, and the third is a caller that asked for two opposite
@@ -330,7 +572,33 @@ export function generateSurprise(request: SurpriseRequest): SurpriseResult {
     );
   }
 
-  const composition = compositionFor(request);
+  // Shape has no lock of its own — `locks.stack` keeps the wiring along with the
+  // effects, which is the same thing said once — so the contradiction is between
+  // two *different* aspects and is only real when the kept stack is actually a
+  // shape the exclude forbids. Checked against the document rather than assumed,
+  // so "keep this chain" plus "chains only" is the agreement it obviously is.
+  if (locks.stack && excludes.shape) {
+    const kept = shapeOfDocument(request);
+    if (kept !== null) {
+      throw new SurpriseError(
+        `the stack is set to keep and graph shape is set to off, and the stack being kept ${kept}. Set the stack back to reroll, or graph shape back on — leaving the shape out would mean rewiring the stack that was to be kept.`,
+      );
+    }
+  }
+
+  const carriedGenerator = carriedPrefix(request).ids.length > 0;
+  // A locked stack composes nothing, so there is no shape to ask for; the shape
+  // it *has* is read back off the document below.
+  const shape = locks.stack
+    ? PLAIN_CHAIN
+    : decideShape(streamFor(seed, SHAPE_STREAM), {
+        chaos,
+        graph: !excludes.shape,
+        carriedGenerator,
+        blankCanvas: request.blankCanvas,
+      });
+
+  const composition = compositionFor(request, shape);
   const previous = new Map(base.stack.map((node) => [node.id, node]));
 
   const stack: StackNode[] = composition.effects.map((effectId, index) => {
@@ -348,34 +616,53 @@ export function generateSurprise(request: SurpriseRequest): SurpriseResult {
     // Floyd-Steinberg would drop every key at `coerceParams` and warn once per
     // key on every render from then on.
     const keep = locks.params && carried !== undefined && carried.effect === effectId;
-    if (keep && carried !== undefined) return carried;
+    const node: StackNode =
+      keep && carried !== undefined
+        ? carried
+        : {
+            // `createStackNode` derives the seed from the node id, which would
+            // give every surprise of the same length the same seeds. A surprise
+            // draws its own, from its own stream.
+            ...createStackNode(
+              nodeId,
+              effectId,
+              locks.params
+                ? // Parameters are locked but this node is new, so there is
+                  // nothing to keep. The descriptor's defaults are what the
+                  // stack editor gives a freshly added node; it is the only
+                  // honest answer and the UI says so.
+                  defaultParams(descriptor)
+                : sampleNodeParams({ seed, nodeId, descriptor, chaos }),
+            ),
+            seed: sampleNodeSeed(seed, nodeId),
+          };
 
-    // `createStackNode` derives the seed from the node id, which would give
-    // every surprise of the same length the same seeds. A surprise draws its
-    // own, from its own stream.
-    return {
-      ...createStackNode(
-        nodeId,
-        effectId,
-        locks.params
-          ? // Parameters are locked but this node is new, so there is nothing to
-            // keep. The descriptor's defaults are what the stack editor gives a
-            // freshly added node; it is the only honest answer and the UI says so.
-            defaultParams(descriptor)
-          : sampleNodeParams({ seed, nodeId, descriptor, chaos }),
-      ),
-      seed: sampleNodeSeed(seed, nodeId),
-    };
+    // The mask comes from the composition and overrides whatever the node
+    // carried, in **both** directions. A mask is wiring, not a parameter: a node
+    // that kept a mask from a previous surprise while this composition wired no
+    // picture to its mask port is a document `graph/plan.ts` refuses, and the
+    // ids are re-used across rerolls, so that collision is ordinary rather than
+    // exotic.
+    return withMask(node, composition.masks.get(nodeId) ?? null);
   });
 
   // The self-check, run on every path rather than only on a freshly composed
-  // stack: a locked stack came from somewhere this file did not write, and a
+  // graph: a locked stack came from somewhere this file did not write, and a
   // document that cannot render should say so here rather than as an error
   // banner over the previous picture.
-  const verdict = validateStack(registry, stack);
+  //
+  // `validateGraph` and not `validateStack`: the latter builds the chain a list
+  // implies, which for a document with a branch in it is not this document's
+  // wiring at all — it would check a graph nobody is going to render and miss
+  // the one that is.
+  const verdict = validateGraph(registry, {
+    nodes: stack,
+    edges: composition.edges,
+    output: composition.output,
+  });
   if (!verdict.ok) {
     throw new SurpriseError(
-      `this stack is one the registry rejects: ${verdict.issues
+      `this graph is one the registry rejects: ${verdict.issues
         .map((issue) => issue.message)
         .join("; ")}`,
     );
@@ -384,23 +671,26 @@ export function generateSurprise(request: SurpriseRequest): SurpriseResult {
   const bindings = bindingsFor(request, stack);
   const palette = locks.palette ? base.palette : request.palette;
 
-  // Surprise Me's grammar is still a sentence about a line — preprocess, one
-  // dither, post — so what it generates is a chain. Generating a *graph* is
-  // step 4 of docs/dither-ork-node-graph.md and is deliberately not attempted
-  // here: a graph generator that produced mush would lose the best thing in the
-  // product, which is named as the sleeper risk in that note.
-  const chain = chainOf(stack);
   const document: DitherDocument = {
     schema: DOCUMENT_SCHEMA_VERSION,
     source: base.source,
     stack,
-    edges: chain.edges,
-    output: chain.output,
+    edges: composition.edges,
+    output: composition.output,
     palette,
     clock: base.clock,
     bindings,
     surpriseSeed: formatSeed(seed),
   };
+
+  // The shape as **built**, which is the composition's answer where there was
+  // one and the document's own where the stack was locked. Read off the nodes
+  // rather than off the request, so a requested branch the catalogue could not
+  // supply is not reported as one that exists.
+  const built: GraphShape = composition.composed?.shape ?? observedShape(request, stack);
+  const maskedNode =
+    stack.find((node) => node.mask !== undefined && node.mask.source.kind === "image")?.id ??
+    null;
 
   const summary: SurpriseSummary = {
     seed: formatSeed(seed),
@@ -414,6 +704,10 @@ export function generateSurprise(request: SurpriseRequest): SurpriseResult {
     paletteEntries: palette.colors.length / 3,
     bindings: bindings.length,
     chaos,
+    shape: describeShape(built),
+    loops: shapeLoops(built),
+    branch: composition.composed?.branch ?? 0,
+    maskedNode,
   };
 
   log.info("surprise generated", {
@@ -423,6 +717,13 @@ export function generateSurprise(request: SurpriseRequest): SurpriseResult {
     palette: `${palette.id} (${summary.paletteEntries})`,
     bindings: bindings.length,
     chaos,
+    shape: summary.shape,
+    // The one consequence of a shape that is not about how it looks. Logged on
+    // every surprise, not only the non-looping ones, so "why did my export say
+    // it does not loop" is answerable from the line for that document.
+    loops: summary.loops,
+    branch: summary.branch,
+    maskedNode: summary.maskedNode ?? "none",
     lockedPalette: locks.palette,
     lockedStack: locks.stack,
     lockedParams: locks.params,
@@ -431,6 +732,7 @@ export function generateSurprise(request: SurpriseRequest): SurpriseResult {
     // has no modulator, the user turned it off — and only this line separates
     // them for whoever reads the log after "why is nothing moving".
     excludedAnimation: excludes.animation,
+    excludedShape: excludes.shape,
     buildAnimates: request.animate,
   });
 

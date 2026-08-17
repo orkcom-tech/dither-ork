@@ -21,10 +21,17 @@
 import { describe, expect, it } from "vitest";
 
 import { discoverEffects } from "./discovery";
+import { loadGpuEffects } from "./gpu-effects";
 import { createEffectRegistry } from "./registry";
-import { EFFECT_CONCEPTS, validateRegistry } from "../types/registry";
+import { EFFECT_CONCEPTS, NO_GPU_BUILD_DATA, validateRegistry } from "../types/registry";
 import type { EffectFamily, ExecutionKind } from "../types/registry";
 import type { NodeSlot } from "../types/document";
+import { thresholdMatrix } from "../gpu/matrices";
+import {
+  validateFeedbackDeclaration,
+  validateResamplingDeclaration,
+  validateSourceDeclaration,
+} from "../gpu/compiler";
 
 /**
  * What the build is expected to contain, from docs/ARCHITECTURE.md.
@@ -99,6 +106,20 @@ const SHADER_IDS: ReadonlySet<string> = new Set(
     .map((path) => path.replace(/^.*\//, "").replace(/\.wgsl$/, ""))
     .filter((id) => !id.startsWith("_")),
 );
+
+/**
+ * A tile that is a valid permutation and a useless dither.
+ *
+ * Nothing in the shipped build fabricates a threshold matrix — the ranks come
+ * from `dither-core`. This is not the shipped build: the identity permutation
+ * exists so an effect that *needs* a tile can have its passes built and checked,
+ * and its ordering reaches no pixel and no assertion.
+ */
+function identityTile(id: string, size: number) {
+  const ranks = new Uint32Array(size * size);
+  for (let i = 0; i < ranks.length; i += 1) ranks[i] = i;
+  return thresholdMatrix(id, size, ranks);
+}
 
 describe("the shipped catalogue", () => {
   const discovered = discoverEffects();
@@ -267,5 +288,71 @@ describe("the shipped catalogue", () => {
       .filter((effect) => effect.requiresIndexMap && effect.slot !== "postprocess")
       .map((effect) => `${effect.id} (${effect.slot})`);
     expect(misplaced).toEqual([]);
+  });
+
+  /**
+   * The three pass-level declaration checks, over the effects that ship.
+   *
+   * **This is the test that was missing**, and its absence cost a quarter of
+   * every Surprise Me press. `gpu/compiler.ts` cross-checks `resamples`,
+   * `readsFeedback` and `slot: "source"` against what the passes actually bind,
+   * and every one of those checks is a `throw` inside `PassCompiler.compile` —
+   * which needs a `GPUDevice`, which no test in this suite has. So the only
+   * thing in the repository running them over the real catalogue was the GPU
+   * golden harness: a Docker image, a pinned Chrome, a WASM artifact, and a run
+   * that aborts at `init()` on the first offender and renders nothing after it.
+   *
+   * `row-displacement` and `column-displacement` failed `validateSourceDeclaration`
+   * from the moment it was written and rendered nothing in the application from
+   * that moment on. Nothing here noticed, because nothing here looked.
+   *
+   * The checks are pure functions of two declarations. They need no device, they
+   * run in milliseconds, and they belong in the fast suite beside the validator
+   * that gates startup.
+   */
+  it("passes the pass-level declaration checks that gate a render", () => {
+    const resolver = loadGpuEffects();
+    const failures: string[] = [];
+
+    for (const descriptor of effects.filter((effect) => effect.execution === "gpu")) {
+      const requirement = resolver.requirementOf(descriptor.id);
+      // The five ordered dithers cannot name their passes without a tile, and
+      // the tile comes from `dither-core`. The *ordering* of the ranks never
+      // reaches any of these three checks — they read bindings and extents — so
+      // an identity permutation is enough to get the passes built, and
+      // fabricating one here keeps this test free of the WASM core.
+      const data =
+        requirement.kind === "none"
+          ? NO_GPU_BUILD_DATA
+          : ({
+              kind: "threshold-matrix",
+              matrix: identityTile(descriptor.id, requirement.size),
+            } as const);
+
+      let gpu;
+      try {
+        gpu = resolver.resolve(descriptor.id, data);
+      } catch (error) {
+        failures.push(`${descriptor.id}: could not build passes — ${String(error)}`);
+        continue;
+      }
+      for (const check of [
+        validateResamplingDeclaration,
+        validateFeedbackDeclaration,
+        validateSourceDeclaration,
+      ]) {
+        try {
+          check(descriptor, gpu);
+        } catch (error) {
+          failures.push(
+            `${descriptor.id}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    }
+
+    // Listed individually: "expected 2, got 0" on a fifty-six-effect catalogue
+    // says an effect is broken without saying which one or how.
+    expect(failures).toEqual([]);
   });
 });

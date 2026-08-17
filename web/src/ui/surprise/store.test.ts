@@ -116,6 +116,7 @@ function harness(): Harness {
           palette: synthesizePalette(seededPcg32(seed), "triad", "oklab"),
           // The real engine passes its probe's answer, which is `true` here.
           animate: true,
+      blankCanvas: false,
         });
         documents.loadDocument(result.document, "Surprise");
         onApplied({
@@ -382,11 +383,15 @@ describe("chaos and the aspect modes", () => {
     expect(notifications).toBe(1);
   });
 
-  it("starts at the default with everything rerolling", () => {
+  it("starts at the default with everything rerolling except the graph shape", () => {
     const h = harness();
     expect(h.store.getSnapshot().chaos).toBe(DEFAULT_CHAOS);
     expect(h.store.getSnapshot().locks).toEqual(NO_LOCKS);
-    expect(h.store.getSnapshot().excludes).toEqual(NO_EXCLUDES);
+    // Shape alone starts off. Two reviews judged the rendered pictures and both
+    // put plain chains near 69% worth keeping against 28% for the graph shapes,
+    // so the default is the one that is better rather than the one that is more
+    // capable. Everything else rerolls.
+    expect(h.store.getSnapshot().excludes).toEqual({ ...NO_EXCLUDES, shape: true });
 
     h.store.setMode("palette", "keep");
     expect(h.store.getSnapshot().locks.palette).toBe(true);
@@ -437,7 +442,7 @@ describe("chaos and the aspect modes", () => {
       await h.settle();
       expect(h.documents.document.bindings).toEqual([]);
     }
-    expect(h.lastRequest()?.excludes).toEqual({ animation: true });
+    expect(h.lastRequest()?.excludes).toEqual({ animation: true, shape: true });
   });
 
   /**
@@ -457,7 +462,7 @@ describe("chaos and the aspect modes", () => {
     expect(h.store.getSnapshot().locks.stack).toBe(true);
     expect(h.lastRequest()).toEqual({
       locks: { ...NO_LOCKS, stack: true },
-      excludes: { animation: true },
+      excludes: { animation: true, shape: true },
     });
   });
 
@@ -531,5 +536,29 @@ describe("dispose", () => {
     const node = h.documents.document.stack[0];
     if (node !== undefined) h.documents.setNodeEnabled(node.id, false);
     expect(notifications).toBe(0);
+  });
+});
+
+describe("graph shapes are off until asked for", () => {
+  /**
+   * Two independent reviews rendered and judged the pictures, not the wiring,
+   * and both landed on the same number: plain chains are worth keeping about
+   * 69% of the time and the graph shapes about 28%. So the default is a chain.
+   * The shapes are one press away, not disabled — this pins the default, not
+   * the capability.
+   */
+  it("starts with the shape aspect off, so a first press is a plain chain", async () => {
+    const h = harness();
+    h.store.surprise();
+    await h.settle();
+    expect(h.lastRequest()?.excludes.shape).toBe(true);
+  });
+
+  it("still lets the shape aspect be turned on", async () => {
+    const h = harness();
+    h.store.setMode("shape", "reroll");
+    h.store.surprise();
+    await h.settle();
+    expect(h.lastRequest()?.excludes.shape).toBe(false);
   });
 });

@@ -75,6 +75,26 @@ export type PaletteDecision =
 export interface PaletteDecisionOptions {
   /** The hardware palettes, read from the core (F-CO-04). Must be non-empty. */
   readonly library: readonly BuiltinPalette[];
+  /**
+   * Whether there is anything in the picture to extract a palette *from*.
+   *
+   * `false` on a **blank canvas** (`io/source.ts`, `format: "blank"`), which is
+   * transparent black everywhere: k-means over it converges on black, and the
+   * document comes back with a palette of one colour and a picture that is that
+   * colour. The extraction runs, succeeds, and produces nothing — which is
+   * worse than an error, because nothing says why.
+   *
+   * This does not weaken the paragraph above about all three modes being
+   * available. That argument is about a mode drawn and then found *unavailable*,
+   * which would make one seed mean two palettes depending on timing. This is an
+   * input, like the chaos setting and like `SurpriseRequest.animate`: the same
+   * seed against the same source always produces the same palette, and a
+   * different source was always going to.
+   *
+   * Optional, defaulting to `true`, so every caller that has a photograph open
+   * reads exactly as it did before this existed.
+   */
+  readonly extractable?: boolean;
 }
 
 /**
@@ -157,7 +177,15 @@ export function decidePalette(
   }
 
   const rng = streamFor(seed, "surprise/palette");
-  const mode = weightedChoice(rng, MODE_WEIGHTS);
+  // Extraction is removed from the pool rather than drawn and then redirected:
+  // a redirect would make the mode depend on a draw that no longer means
+  // anything, and the weights of the other two would silently stop being their
+  // declared ratio.
+  const modes =
+    options.extractable === false
+      ? MODE_WEIGHTS.filter((entry) => entry.value !== "extract")
+      : MODE_WEIGHTS;
+  const mode = weightedChoice(rng, modes);
   const metric = weightedChoice(rng, METRIC_WEIGHTS);
 
   switch (mode) {

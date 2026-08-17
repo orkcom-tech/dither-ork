@@ -66,6 +66,29 @@ describe("decidePalette", () => {
   });
 
   /**
+   * A blank canvas is transparent black. Extraction over it converges on black
+   * and comes back with a palette of one colour — it succeeds, and produces
+   * nothing, which is worse than an error because nothing says why. So the mode
+   * is not in the pool when there is nothing to extract from.
+   */
+  it("draws no extraction when there is nothing to extract from", () => {
+    const modes = new Set<string>();
+    for (let i = 0; i < 400; i += 1) {
+      modes.add(
+        decidePalette(BigInt(i), { library: LIBRARY, extractable: false }).mode,
+      );
+    }
+    expect([...modes].sort()).toEqual(["library", "synthesized"]);
+  });
+
+  it("is still reproducible with extraction out of the pool", () => {
+    for (const seed of [0n, 1n, 0xfeed_face_dead_beefn]) {
+      const options = { library: LIBRARY, extractable: false } as const;
+      expect(decidePalette(seed, options)).toEqual(decidePalette(seed, options));
+    }
+  });
+
+  /**
    * A mode that is sometimes unavailable would have to fall back, and the same
    * seed would then mean two palettes depending on timing. The refusal is what
    * forces the caller to make all three available before offering the control —

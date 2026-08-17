@@ -20,6 +20,7 @@
 
 import { logger } from "../../lib/log";
 import type { DitherDocument, Palette } from "../../types/document";
+import { documentAtFrame, planAnimation, stillFrameFor } from "../../animation";
 import type { EffectRegistry } from "../../registry";
 import type { EditorSession } from "../../state";
 import { isAbandoned } from "../../worker";
@@ -94,6 +95,14 @@ export interface SurpriseEngine {
   /**
    * Render a PNG data URL of a document, for the history strip.
    *
+   * The document is **planned** before it is rendered, which is two fixes in one
+   * call. `buildRenderGraph` refuses a document carrying modulator bindings, and a
+   * surprise draws them whenever animation is on — so this used to fail for nearly
+   * every surprise the feature makes and the strip said "no preview". And the
+   * frame it renders is `stillFrameFor(plan)` rather than 0, because a feedback
+   * node is the identity at frame 0 and a thumbnail of one was a picture of the
+   * document without its trail.
+   *
    * Never rejects: a thumbnail is a nicety and a failure to make one is recorded
    * on the entry rather than surfaced as an error over the picture.
    */
@@ -156,7 +165,15 @@ export function createSurpriseEngine(options: SurpriseEngineOptions): SurpriseEn
     if (!verdict.ready) throw new Error(verdict.reason);
 
     const seed = mintSeed();
-    const decision = decidePalette(seed, { library: palette.getSnapshot().library });
+    // A blank canvas (F-INF-01's starting point) is transparent black, so there
+    // is nothing in it to extract a palette from and nothing for a chain of
+    // filters to work on. Both halves of the surprise are told, once, from the
+    // one fact that says so — the decoded source's own format.
+    const blankCanvas = store.getSnapshot().source?.format === "blank";
+    const decision = decidePalette(seed, {
+      library: palette.getSnapshot().library,
+      extractable: !blankCanvas,
+    });
     const resolved = await resolvePalette(decision);
 
     const result = generateSurprise({
@@ -170,6 +187,9 @@ export function createSurpriseEngine(options: SurpriseEngineOptions): SurpriseEn
       // What the build can do; `excludes.animation` is what the user asked for.
       // Two different facts, and the panel says two different things about them.
       animate: modulators.renderable,
+      // What the picture is. On a blank canvas the grammar must put a generator
+      // at the head or the surprise renders nothing — see `surprise/shape.ts`.
+      blankCanvas,
     });
 
     // One `loadDocument`, so the whole surprise is one undo step and the palette
@@ -265,11 +285,29 @@ export function createSurpriseEngine(options: SurpriseEngineOptions): SurpriseEn
       const factor = Math.min(1, THUMBNAIL_MAX_SIDE / Math.max(source.width, source.height));
 
       try {
-        const frame = await session.render.render({
-          document,
+        // Planned, not handed over as written, and this is the fix for a strip
+        // that said "no preview" against almost every entry.
+        //
+        // `buildRenderGraph` **refuses** a document carrying modulator bindings —
+        // a bound parameter has a value only for a particular frame — and a
+        // surprise draws bindings whenever animation is on, which is the default.
+        // So the thumbnail render was throwing a `DocumentError` for nearly every
+        // surprise this feature makes, and the entry recorded the reason and
+        // showed the seed instead of a picture.
+        const plan = planAnimation(document, registry);
+        // Frame 0 for a looping document, and a frame inside the loop for a
+        // feedback one — see `stillFrameFor`. A feedback node is the identity at
+        // frame 0, so the thumbnail was a picture of the document *without* its
+        // trail: the one shape a chain cannot make, shown as though it had done
+        // nothing.
+        const at = stillFrameFor(plan);
+
+        let frame = await session.render.render({
+          document: documentAtFrame(plan, 0),
           solo: null,
           quality: "preview",
           factor,
+          frame: 0,
           // The export lane, deliberately. A preview is superseded the moment a
           // newer one arrives, and a shortcut designed to be hammered produces
           // newer previews constantly — so a thumbnail in the preview lane would
@@ -280,6 +318,31 @@ export function createSurpriseEngine(options: SurpriseEngineOptions): SurpriseEn
           lane: "export",
           present: "bytes",
         });
+
+        // Frame N of a feedback document is the product of frames 0..N, and the
+        // worker's frame store serves the frame it holds and refuses any other
+        // rather than inventing a history — so the frames in between are
+        // rendered and thrown away, exactly as `ui/timeline/preview.ts` does for
+        // a scrub. `at` is 0 for every document that loops, so this loop does not
+        // run at all for them and a thumbnail costs what it always did.
+        if (at > 0) {
+          log.debug("thumbnail replays a feedback document", {
+            frame: at,
+            frames: plan.clock.frames,
+            why: "a feedback node is the identity at frame 0",
+          });
+        }
+        for (let index = 1; index <= at; index += 1) {
+          frame = await session.render.render({
+            document: documentAtFrame(plan, index),
+            solo: null,
+            quality: "preview",
+            factor,
+            frame: index,
+            lane: "export",
+            present: "bytes",
+          });
+        }
 
         if (frame.image.kind !== "bytes") {
           return { url: null, problem: "the thumbnail render came back as a bitmap" };

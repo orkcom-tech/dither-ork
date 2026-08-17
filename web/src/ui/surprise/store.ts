@@ -112,7 +112,22 @@ export function createSurpriseStore(options: SurpriseStoreOptions): SurpriseStor
 
   let chaos = DEFAULT_CHAOS;
   let locks: SurpriseLocks = NO_LOCKS;
-  let excludes: SurpriseExcludes = NO_EXCLUDES;
+  /**
+   * **Graph shapes start OFF, so a surprise is a plain chain until asked
+   * otherwise.** Not a hedge — two independent reviews rendered and judged the
+   * output rather than the wiring, and both said the same thing. On 150 samples
+   * against a real photograph: plain chains 69% worth keeping, the added shapes
+   * 28%. Defaulting them on would take the button the owner presses most from
+   * roughly two good results in three to roughly one in four.
+   *
+   * The shapes are not disabled and not hidden. `shape` is an ordinary aspect in
+   * the panel and one press turns it on, which is the right shape for a
+   * capability that is genuinely better at some things — a generated source and
+   * a feedback vortex are pictures no chain can make — and worse on average.
+   * More capable is not the same as better, and the default should be the one
+   * that is better.
+   */
+  let excludes: SurpriseExcludes = { ...NO_EXCLUDES, shape: true };
   let history: readonly SurpriseHistoryEntry[] = [];
   let current: string | null = null;
   let busy = false;

@@ -47,6 +47,7 @@ function stackFor(seed: bigint, chaos = 0.8): readonly StackNode[] {
     base: BASE,
     palette: PALETTE,
     animate: false,
+    blankCanvas: false,
   }).document.stack;
 }
 
@@ -256,6 +257,7 @@ describe("the generator's animate switch", () => {
         base: BASE,
         palette: PALETTE,
         animate: false,
+        blankCanvas: false,
       });
       expect(result.document.bindings).toEqual([]);
       expect(result.summary.bindings).toBe(0);
@@ -274,6 +276,7 @@ describe("the generator's animate switch", () => {
         base: BASE,
         palette: PALETTE,
         animate: true,
+        blankCanvas: false,
       }).document.bindings.length;
     }
     expect(total).toBeGreaterThan(0);
@@ -289,6 +292,7 @@ describe("the generator's animate switch", () => {
       base: BASE,
       palette: PALETTE,
       animate: true,
+      blankCanvas: false,
     }).document;
 
     const rerolled = generateSurprise({
@@ -300,6 +304,7 @@ describe("the generator's animate switch", () => {
       base: seeded,
       palette: PALETTE,
       animate: true,
+      blankCanvas: false,
     });
 
     const ids = new Set(rerolled.document.stack.map((node) => node.id));

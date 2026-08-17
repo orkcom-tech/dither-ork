@@ -570,11 +570,11 @@ describe("validateEffect rejects", () => {
     // kernels are transforms of a surface they are handed, so there is nothing
     // for one to be given and no shape for it to say this in.
     rejects(
-      validateEffect({ ...DIFFUSION, slot: "source" }),
+      validateEffect({ ...DIFFUSION, slot: "source", coverage: "fine" }),
       "source-must-run-on-gpu",
       "the serial backend has no such shape",
     );
-    accepts(withFields({ slot: "source" }));
+    accepts(withFields({ slot: "source", coverage: "fine" }));
   });
 
   it("a source effect that reads the index map", () => {
@@ -582,7 +582,9 @@ describe("validateEffect rejects", () => {
     // every quantizer *and* reads no image, so no map could reach it by either
     // route however the stack is ordered.
     rejects(
-      validateEffect(withFields({ slot: "source", requiresIndexMap: true })),
+      validateEffect(
+        withFields({ slot: "source", coverage: "fine", requiresIndexMap: true }),
+      ),
       "source-must-not-read-index-map",
       "no map can reach it however the stack is ordered",
     );
@@ -593,9 +595,34 @@ describe("validateEffect rejects", () => {
     // generator reads none — it writes the working extent it is given. The
     // compiler refuses the `input-color` binding such a rule would need.
     rejects(
-      validateEffect(withFields({ slot: "source", resamples: true })),
+      validateEffect(withFields({ slot: "source", coverage: "fine", resamples: true })),
       "source-must-not-resample",
       "a generator reads none",
+    );
+  });
+
+  it("a generator that does not say what scale its picture has structure at", () => {
+    // The reader is Surprise Me's grammar, which roots a mask branch only in a
+    // generator declaring large-scale structure — and which runs long after
+    // startup, where a missing field is not an error but an effect that silently
+    // never appears in a mask. So it is refused here, at the gate that stops the
+    // application starting.
+    rejects(
+      validateEffect(withFields({ slot: "source" })),
+      "source-must-declare-coverage",
+      "structure at the scale of the frame",
+    );
+    accepts(withFields({ slot: "source", coverage: "large-scale" }));
+  });
+
+  it("a filter that declares one anyway", () => {
+    // The field describes a picture made from parameters. A filter's structure is
+    // whatever it was handed, so the declaration would be a claim about somebody
+    // else's picture.
+    rejects(
+      validateEffect(withFields({ coverage: "large-scale" })),
+      "coverage-is-for-generators",
+      "a filter's structure is whatever it was handed",
     );
   });
 
@@ -1204,6 +1231,8 @@ const EVERY_FAILURE_MODE: Record<RegistryIssueCode, true> = {
   "source-must-run-on-gpu": true,
   "source-must-not-read-index-map": true,
   "source-must-not-resample": true,
+  "source-must-declare-coverage": true,
+  "coverage-is-for-generators": true,
   "missing-summary": true,
   "missing-description": true,
   "unhelpful-description": true,
