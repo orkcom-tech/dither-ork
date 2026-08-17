@@ -45,6 +45,34 @@
  * that extent. So the frame really is smaller, the viewport's badge is
  * describing something that happened, and the transport bar's reading agrees
  * with it.
+ *
+ * ## Feedback: frames are rendered in order, from zero (F-FB-01)
+ *
+ * A feedback node's output is the product of every frame before it, so frame 40
+ * only exists once frames 0..39 have been rendered. The worker's frame store
+ * enforces that by **refusing** a frame it cannot serve; this pump is what
+ * makes the refusal never happen, by replaying.
+ *
+ * A replay is needed whenever the next frame is not the one after the last one
+ * rendered — a scrub backwards, a jump forwards, the first frame after the
+ * plan changed — and also whenever the **preview scale changed**, because a
+ * trail accumulated at 68% of the document is not the trail at 100% and
+ * pretending otherwise would put a frame on screen that the export will not
+ * produce. Decision 3 of `docs/dither-ork-node-graph.md`, and the reason there
+ * is no "close enough" branch anywhere below.
+ *
+ * **The visible state reuses the adaptive-preview mechanism rather than adding
+ * a second one.** A replay declares an interaction on the viewport, exactly as
+ * playback does, so the existing degraded badge comes up and the replay runs at
+ * preview resolution — which is also what makes it quick. Alongside it
+ * {@link PreviewStatus.replay} carries "frame k of n" for the transport bar,
+ * which is the counter the same status object already carries for playback.
+ * Nothing new appears on screen; what is already there says what is happening.
+ *
+ * Every replayed frame is rendered through the ordinary path and then
+ * **discarded** — only the frame that was asked for is presented. That is not
+ * waste to be optimised away later: it is the work that makes frame 40 frame
+ * 40, and the alternative is showing something else.
  */
 
 import { logger } from "../../lib/log";
@@ -61,6 +89,19 @@ import {
 
 const log = logger("app");
 
+/**
+ * A replay in progress: frame `done` of `total` re-rendered to reach `target`.
+ *
+ * Present only while a feedback document is catching up, which is the only time
+ * a frame costs more than one render. Nulled the moment the target frame is on
+ * screen.
+ */
+export interface ReplayStatus {
+  readonly target: number;
+  readonly done: number;
+  readonly total: number;
+}
+
 /** What the transport bar and the panel read off the preview. */
 export interface PreviewStatus {
   /** Whether the timeline is the pump — true exactly while it has a track. */
@@ -74,6 +115,11 @@ export interface PreviewStatus {
   readonly playback: PlaybackReport;
   /** The last render failure, cleared the moment a frame arrives. */
   readonly error: string | null;
+  /**
+   * Non-null while frames are being re-rendered from zero to reach the one that
+   * was asked for — a feedback document being scrubbed. See the header.
+   */
+  readonly replay: ReplayStatus | null;
 }
 
 export const IDLE_PREVIEW_STATUS: PreviewStatus = {
@@ -84,6 +130,7 @@ export const IDLE_PREVIEW_STATUS: PreviewStatus = {
   quality: "full",
   playback: IDLE_REPORT,
   error: null,
+  replay: null,
 };
 
 export interface TimelinePreviewOptions {
@@ -122,6 +169,19 @@ export class TimelinePreview {
   #inFlight = false;
   #wanted: number | null = null;
   #generation = 0;
+
+  /**
+   * What the last successful render was, for documents whose frames must be
+   * rendered in order.
+   *
+   * The scale is part of it because a feedback chain is keyed per extent: a
+   * trail accumulated at 68% is not the trail at 100%, and the worker restarts
+   * the chain when the extent changes. Held as `null` until the first frame of
+   * a plan lands, which is what makes the first render of any plan a replay
+   * from zero rather than an assumption about a store this pump cannot see.
+   */
+  #chain: { readonly frame: number; readonly factor: number; readonly quality: FrameQuality } | null =
+    null;
 
   #playStartedAt = 0;
   #playStartFrame = 0;
@@ -181,6 +241,11 @@ export class TimelinePreview {
    */
   setPlan(plan: TimelinePlan | null): void {
     this.#plan = plan;
+    // A new plan is a new document, so whatever the worker's feedback store
+    // holds was accumulated for a stack that no longer exists. Forgetting it
+    // here is what makes the next frame replay from zero rather than continue
+    // a chain from a different picture.
+    this.#chain = null;
     this.#syncOwnership("plan");
     if (this.#owned) this.#request(this.#frame, "plan");
   }
@@ -227,7 +292,16 @@ export class TimelinePreview {
     if (this.#viewport === null || this.#disposed) return false;
     const plan = this.#plan;
     if (plan === null) return false;
-    return plan.animation.bindings.length > 0 || plan.keyframes.length > 0;
+    // A feedback node counts as a track. The session's own pump renders the
+    // document as written at frame 0 forever, which for a feedback document is
+    // a picture with no history in it — the one frame where the effect does
+    // nothing. Anything that makes the picture a function of the playhead has
+    // to bring the playhead's pump with it.
+    return (
+      plan.animation.bindings.length > 0 ||
+      plan.keyframes.length > 0 ||
+      plan.animation.feedbackNodes.length > 0
+    );
   }
 
   #syncOwnership(reason: string): void {
@@ -304,6 +378,90 @@ export class TimelinePreview {
     void this.#renderNow(frame, reason);
   }
 
+  /**
+   * How many frames have to be rendered before `frame` can be.
+   *
+   * Zero for every document without a feedback node, and for a feedback
+   * document that is simply advancing — which is the whole of playback, so
+   * playing a loop costs exactly one render per frame like it always did.
+   */
+  #replayFrom(frame: number): number | null {
+    const plan = this.#plan;
+    if (plan === null || plan.animation.feedbackNodes.length === 0) return null;
+
+    const chain = this.#chain;
+    if (chain === null) return 0;
+    // The extent is part of the chain's identity, so a change of preview scale
+    // invalidates it as surely as a scrub does.
+    if (chain.quality !== this.#quality || Math.abs(chain.factor - this.#factor) > 1e-6) return 0;
+    // The frame the store already holds, and the one after it, are both free.
+    if (frame === chain.frame || frame === chain.frame + 1) return null;
+    return 0;
+  }
+
+  /**
+   * Render every frame from `from` up to but not including `frame`, discarding
+   * each one.
+   *
+   * Rendered through the ordinary path with the ordinary parameters, because
+   * the point is that they are the frames the export would produce — a cheaper
+   * replay would leave the store holding a history the file will not have.
+   * Returns false when the replay was abandoned, so the caller does not go on
+   * to present a frame for a viewport it no longer drives.
+   */
+  async #replay(from: number, frame: number, mine: number): Promise<boolean> {
+    const plan = this.#plan;
+    const snapshot = this.#session.store.getSnapshot();
+    if (plan === null || snapshot.source === null) return false;
+
+    const total = frame - from;
+    const viewport = this.#viewport;
+    // The same adaptive-preview path playback uses. It puts the existing badge
+    // up rather than adding a second indicator, and it is also what makes the
+    // replay quick, since it runs at preview resolution.
+    viewport?.beginInteraction("replay");
+    log.info("feedback replay from zero", {
+      target: frame,
+      from,
+      frames: total,
+      why: "frame N is the product of frames 0..N",
+    });
+    const started = this.#now();
+    try {
+      for (let index = from; index < frame; index += 1) {
+        if (mine !== this.#generation || this.#disposed || !this.#owned) return false;
+        this.#status = {
+          ...this.#status,
+          replay: { target: frame, done: index - from, total },
+        };
+        this.#publish();
+        const discarded = await this.#session.render.render({
+          document: documentAtFrame(plan, index),
+          solo: snapshot.soloNodeId,
+          quality: this.#quality,
+          factor: this.#factor,
+          frame: index,
+          lane: "preview",
+          present: "bitmap",
+        });
+        // Never shown. An `ImageBitmap` holds GPU memory the JS heap does not
+        // account for, so it is closed rather than dropped.
+        if (discarded.image.kind === "bitmap") discarded.image.bitmap.close();
+        this.#chain = { frame: index, factor: this.#factor, quality: this.#quality };
+      }
+      log.info("feedback replay complete", {
+        target: frame,
+        frames: total,
+        ms: Math.round(this.#now() - started),
+      });
+      return true;
+    } finally {
+      viewport?.endInteraction("replay");
+      this.#status = { ...this.#status, replay: null };
+      this.#publish();
+    }
+  }
+
   async #renderNow(frame: number, reason: string): Promise<void> {
     const plan = this.#plan;
     if (plan === null || this.#viewport === null) return;
@@ -315,14 +473,33 @@ export class TimelinePreview {
     const mine = this.#generation;
 
     try {
+      const from = this.#replayFrom(frame);
+      if (from !== null) {
+        // Anything the store holds for this chain is for a different extent or
+        // a different position in the loop; the worker restarts it when frame 0
+        // arrives, and the replay is what gets there.
+        this.#chain = null;
+        const caught = await this.#replay(from, frame, mine);
+        if (!caught) {
+          log.debug("timeline replay abandoned", { frame, reason });
+          return;
+        }
+      }
+
       const result = await this.#session.render.render({
         document: documentAtFrame(plan, frame),
         solo: snapshot.soloNodeId,
         quality: this.#quality,
         factor: this.#factor,
+        // Which frame of the loop this is. Only feedback reads it, and for that
+        // node the worker refuses any frame but the one it can serve — so this
+        // is what turns "the pump must render in order" from a convention into
+        // something that cannot silently stop being true.
+        frame,
         lane: "preview",
         present: "bitmap",
       });
+      this.#chain = { frame, factor: this.#factor, quality: this.#quality };
 
       const image = result.image;
       if (image.kind !== "bitmap") {
@@ -362,6 +539,10 @@ export class TimelinePreview {
       } else {
         const wrapped = error instanceof Error ? error : new Error(String(error));
         log.error("timeline frame failed", { frame, reason, error: wrapped.message });
+        // The chain is only as good as the last frame that landed. Forgetting
+        // it here makes the next attempt replay from zero rather than assume a
+        // history the worker may not have.
+        this.#chain = null;
         this.#status = { ...this.#status, error: wrapped.message };
         this.#publish();
       }
@@ -453,8 +634,14 @@ export function samePreviewStatus(a: PreviewStatus, b: PreviewStatus): boolean {
     a.previewScale === b.previewScale &&
     a.quality === b.quality &&
     a.error === b.error &&
+    sameReplay(a.replay, b.replay) &&
     a.playback.presented === b.playback.presented &&
     a.playback.dropped === b.playback.dropped &&
     a.playback.behind === b.playback.behind
   );
+}
+
+function sameReplay(a: ReplayStatus | null, b: ReplayStatus | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.target === b.target && a.done === b.done && a.total === b.total;
 }

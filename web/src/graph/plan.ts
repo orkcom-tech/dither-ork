@@ -33,6 +33,8 @@ import type {
 import type { EffectDescriptor, ExecutionKind } from "../types/registry";
 import type { GraphTopology } from "./topology";
 import { PORT_ORDER, analyseGraph } from "./topology";
+import type { FeedbackAnalysis } from "./feedback";
+import { analyseFeedback } from "./feedback";
 import { ASSET_PARAM_KEY, PALETTE_PARAM_KEY, contentHash, paletteDigest } from "./hash";
 import type { NodeAssets } from "./assets";
 import { GraphError, expect } from "./errors";
@@ -86,6 +88,16 @@ export interface PlannedNode {
   /** In {@link PORT_ORDER}. `in` is always present; `mask` only when wired. */
   readonly inputs: readonly ResolvedInput[];
   readonly composite: CompositeOp | null;
+  /**
+   * True when this node's output may not enter the content-hash cache — it
+   * reads its own previous frame, or something upstream of it does.
+   *
+   * Carried on the planned node rather than looked up by the renderer so the
+   * decision is made once, in the one place that has the topology, and so a
+   * reader of a plan can see which part of it is re-rendering every frame. See
+   * `graph/feedback.ts`.
+   */
+  readonly cacheable: boolean;
 }
 
 /**
@@ -119,6 +131,15 @@ export interface RenderPlan {
   /** Disabled node ids, wired out of the graph (F-ST-02). */
   readonly passthrough: readonly string[];
   /**
+   * Executed nodes whose output will not be cached, in scheduling order.
+   *
+   * Empty for every document with no feedback node in it, which is every
+   * document the catalogue could express before this existed. When it is not
+   * empty the renderer logs it, because "the tail of this stack re-renders on
+   * every frame" is a cost that should be readable rather than mysterious.
+   */
+  readonly uncached: readonly string[];
+  /**
    * How many GPU/CPU crossings this shape implies at minimum: one readback
    * before each serial node fed by the GPU, one upload before each GPU batch
    * fed by the CPU. The renderer counts what actually happened; this is what
@@ -146,6 +167,16 @@ export interface PreparedGraph {
   readonly outputHash: ContentHash;
   readonly sourceHash: ContentHash;
   readonly palette: Palette;
+  /**
+   * Which nodes read their own previous frame, and which may therefore not be
+   * cached. See `graph/feedback.ts`.
+   *
+   * Computed here rather than at render time because an animated export
+   * prepares every frame up front, and the answer is a property of the graph's
+   * shape — the same on every frame — so deriving it per frame would be N
+   * copies of one fact.
+   */
+  readonly feedback: FeedbackAnalysis;
 }
 
 const SOURCE_ORIGIN: InputOrigin = { kind: "source" };
@@ -285,6 +316,7 @@ export function prepareGraph(
     outputHash: hashOf(outputOrigin),
     sourceHash,
     palette,
+    feedback: analyseFeedback(topology),
   };
 }
 
@@ -299,7 +331,19 @@ export function planRender(
   prepared: PreparedGraph,
   isCached: (hash: ContentHash) => boolean,
 ): RenderPlan {
-  const { topology, hashes, inputs, outputOrigin } = prepared;
+  const { topology, hashes, inputs, outputOrigin, feedback } = prepared;
+
+  /**
+   * Whether a node's output may come from, or go into, the cache.
+   *
+   * The one place the exclusion enters the backward walk, and it has to be
+   * here rather than only at the point of storage: a node downstream of
+   * feedback whose hash happened to be resident — from a render before the
+   * feedback node was added, or from a sibling branch — would end the walk and
+   * be served pixels from a different frame. Consulted before `isCached` so a
+   * stale entry cannot even be looked at.
+   */
+  const cacheable = (nodeId: string): boolean => !feedback.excluded.has(nodeId);
 
   // Backwards from the output. A node the cache already holds ends the walk:
   // its inputs cannot change what it produces, so nothing upstream re-runs.
@@ -320,7 +364,7 @@ export function planRender(
       `node ${nodeId} has no hash`,
       { nodeId },
     );
-    if (isCached(hash)) {
+    if (cacheable(nodeId) && isCached(hash)) {
       satisfied.add(nodeId);
       continue;
     }
@@ -390,6 +434,7 @@ export function planRender(
             : input.origin,
       })),
       composite: compositeOf(node, descriptor),
+      cacheable: cacheable(nodeId),
     };
   };
 
@@ -436,6 +481,7 @@ export function planRender(
     executedNodes: running.length,
     gpuBatches: steps.filter((step) => step.kind === "gpu-batch").length,
     passthrough,
+    uncached: running.filter((nodeId) => !cacheable(nodeId)),
     projectedCrossings: projectCrossings(steps),
   };
 }

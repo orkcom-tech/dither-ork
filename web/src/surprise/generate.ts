@@ -243,13 +243,59 @@ function compositionFor(request: SurpriseRequest): Composition {
       composed: null,
     };
   }
+
+  // The generator prefix survives a reroll.
+  //
+  // Surprise Me's grammar is a sentence about a photograph — preprocess, one
+  // dither, postprocess — and `poolFor` only ever draws from those three slots,
+  // so it composes no source node and never will until the graph grammar of
+  // step 4 exists. That is fine for a document with an image in it and wrong
+  // for one without: on a blank canvas, replacing a stack that *began with a
+  // generator* with one that does not leaves a black frame, and the feature the
+  // owner uses most would be the one that empties the picture.
+  //
+  // So the leading run of source nodes is carried across. Only the leading run:
+  // a source node further down is a composite over the picture rather than the
+  // thing making it, and it is rerolled away with everything else. The node ids
+  // come with it, which is what keeps the parameter lock and any binding
+  // pointing at the same node — and the effect ids come with it too, so the
+  // generator's own parameters are resampled like every other node's. The look
+  // rerolls; the fact that there is a picture at all does not.
+  const kept: string[] = [];
+  const keptIds: string[] = [];
+  for (const node of request.base.stack) {
+    const descriptor = request.registry.get(node.effect);
+    if (descriptor === undefined || descriptor.slot !== "source") break;
+    kept.push(node.effect);
+    keptIds.push(node.id);
+  }
+
   const composed = composeStack(streamFor(request.seed, STACK_STREAM), {
     registry: request.registry,
     chaos: request.chaos,
   });
+
+  // Ids for the composed tail, skipping anything the prefix already holds. Both
+  // generators mint `n<k>`, so a base document whose generator happens to be
+  // `n2` would otherwise collide with the second composed node and produce a
+  // stack with two nodes of one id — which `analyseGraph` refuses, correctly,
+  // as an ambiguous edge target.
+  const taken = new Set(keptIds);
+  let next = 0;
+  const freshId = (): string => {
+    let id = nodeIdAt(next);
+    while (taken.has(id)) {
+      next += 1;
+      id = nodeIdAt(next);
+    }
+    next += 1;
+    taken.add(id);
+    return id;
+  };
+
   return {
-    effects: composed.effects,
-    ids: composed.effects.map((_unused, index) => nodeIdAt(index)),
+    effects: [...kept, ...composed.effects],
+    ids: [...keptIds, ...composed.effects.map(() => freshId())],
     composed,
   };
 }

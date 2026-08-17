@@ -36,6 +36,30 @@
  * scale, and the tolerance below is nine orders of magnitude below anything
  * visible and several above any accumulated rounding.
  *
+ * ## A document that was never going to close
+ *
+ * A feedback node's output is the product of every frame before it, so frame N
+ * is not frame 0 and no arrangement of the controls makes it. Such a document
+ * is **marked non-looping by `planAnimation`** (`plan.loops === false`), and
+ * this validator's job changes shape for it rather than failing it:
+ *
+ * - The **hash comparison is not run**, and `hashes` comes back `null`. Running
+ *   it would be asking a question whose answer is already known, at the cost of
+ *   a second prepare, and reporting the mismatch as `frame-hash-mismatch` would
+ *   blame "something outside the modulators" for a property the document
+ *   declares about itself.
+ * - A `does-not-loop` issue is reported at **`info` severity**, which is
+ *   neither an error nor a warning. It does not clear `ok`, because there is
+ *   nothing wrong; it exists so that every surface reading a seam report —
+ *   the export dialog, the timeline — says the same sentence, drawn from the
+ *   same place, instead of three of them inventing wording.
+ * - **Every per-binding check still runs at full strength.** F-AN-03 narrows
+ *   for the document as a whole and not for its modulators: a cycles-per-loop
+ *   of 2.5 is still an error here, because "this document does not close" is
+ *   not a licence for a binding to be wrong as well.
+ *
+ * Decision 2 of `docs/dither-ork-node-graph.md`.
+ *
  * ## Warnings, which are not failures
  *
  * A loop can close and still look wrong at the seam, and those are reported as
@@ -74,9 +98,20 @@ import { temporalContinuity } from "./temporal";
  */
 export const SEAM_PHASE_TOLERANCE = 1e-9;
 
-export type SeamSeverity = "error" | "warning";
+/**
+ * `info` is neither a failure nor a caution.
+ *
+ * It exists for exactly one thing today: a document that contains a feedback
+ * node and therefore does not close. Nothing about it is wrong, nothing about
+ * it can be fixed, and it must be *said* — so it needs a level that does not
+ * clear `ok` and does not read as a complaint. A warning would tell the user to
+ * go and correct something that is a property of the effect they chose.
+ */
+export type SeamSeverity = "error" | "warning" | "info";
 
 export type SeamIssueCode =
+  /** The document contains a feedback node, so frame N is not frame 0. */
+  | "does-not-loop"
   /** A modulator's unwrapped phase at frame N is not its phase at frame 0 (F-AN-03). */
   | "phase-not-periodic"
   /** The output hash of frame N differs from frame 0's. The loop does not close. */
@@ -104,12 +139,27 @@ export interface SeamIssue {
 }
 
 export interface SeamReport {
-  /** True when nothing of `error` severity was found. Warnings do not clear it. */
+  /** True when nothing of `error` severity was found. Warnings and info do not clear it. */
   readonly ok: boolean;
   readonly frames: number;
   readonly issues: readonly SeamIssue[];
-  /** The two hashes, when a `hashForFrame` was supplied; `null` when it was not. */
+  /**
+   * The two hashes, when a `hashForFrame` was supplied; `null` when it was not,
+   * **and `null` for a non-looping document**, whose two hashes are known to
+   * differ and would only be a second prepare spent proving what the document
+   * already declares.
+   */
   readonly hashes: { readonly frame0: string; readonly frameN: string } | null;
+  /**
+   * Whether frame N is frame 0 for this document at all — `plan.loops`, carried
+   * onto the report so a caller that has a report does not also need the plan.
+   *
+   * A document that does not loop can still be exported: it renders 0..N-1 and
+   * the file simply does not join up at the ends. What must not happen is
+   * refusing it for failing a check it was never going to pass, or letting the
+   * user find out after 300 frames of encoding.
+   */
+  readonly loops: boolean;
 }
 
 export interface SeamOptions {
@@ -158,6 +208,28 @@ export function validateLoopSeam(
 ): SeamReport {
   const { clock } = plan;
   const issues: SeamIssue[] = [];
+
+  // First, so a reader of the issue list meets the fact about the whole
+  // document before the per-binding detail rather than after it.
+  if (!plan.loops) {
+    const named = plan.feedbackNodes.join(", ");
+    issues.push({
+      code: "does-not-loop",
+      severity: "info",
+      // Deliberately not attributed to one node: it is true of the document,
+      // and a single node id would read as "this one is the problem".
+      nodeId: "",
+      param: null,
+      source: "document",
+      message:
+        `This document does not loop. ${plan.feedbackNodes.length === 1 ? "Node" : "Nodes"} ${named} ` +
+        `read the previous frame, so frame ${clock.frames} is the product of every frame before it ` +
+        `and cannot be frame 0. That is a property of feedback rather than a fault in the ` +
+        `settings — the ${clock.frames} frames still render and export, they just do not join up ` +
+        `at the ends.`,
+      detail: { feedbackNodes: named, frames: clock.frames },
+    });
+  }
 
   for (const binding of plan.bindings) {
     const source = describeBinding(binding);
@@ -281,7 +353,12 @@ export function validateLoopSeam(
 
   let hashes: SeamReport["hashes"] = null;
   const hashForFrame = options.hashForFrame;
-  if (hashForFrame !== undefined) {
+  // Skipped for a non-looping document. The two hashes describe the graph's
+  // *parameters*, which a feedback node's history is not part of, so they would
+  // in fact agree — and reporting "the loop closes" for a document that does
+  // not would be the exact false reassurance F-AN-06 exists to prevent. The
+  // honest answer is the `does-not-loop` issue above, and it is already there.
+  if (hashForFrame !== undefined && plan.loops) {
     const frame0 = hashForFrame(0);
     const frameN = hashForFrame(clock.frames);
     hashes = { frame0, frameN };
@@ -308,11 +385,13 @@ export function validateLoopSeam(
   }
 
   const errors = issues.filter((issue) => issue.severity === "error");
+  const warnings = issues.filter((issue) => issue.severity === "warning");
   const report: SeamReport = {
     ok: errors.length === 0,
     frames: clock.frames,
     issues,
     hashes,
+    loops: plan.loops,
   };
 
   const summary = {
@@ -320,11 +399,16 @@ export function validateLoopSeam(
     bindings: plan.bindings.length,
     variations: plan.variations.length,
     errors: errors.length,
-    warnings: issues.length - errors.length,
+    warnings: warnings.length,
     hashed: hashes !== null,
+    loops: plan.loops,
   };
-  if (report.ok) log.info("loop seam validated", summary);
-  else log.warn("loop seam does not close", summary);
+  // Three outcomes rather than two, because "does not close, and was never
+  // going to" is not the same event as "should have closed and did not", and
+  // logging them the same way is how the second one stops being noticed.
+  if (!report.ok) log.warn("loop seam does not close", summary);
+  else if (!plan.loops) log.info("document does not loop; seam validation skipped", summary);
+  else log.info("loop seam validated", summary);
 
   return report;
 }

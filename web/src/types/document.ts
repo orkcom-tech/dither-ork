@@ -8,8 +8,30 @@
 
 export const DOCUMENT_SCHEMA_VERSION = 1 as const;
 
-/** Where a node may sit in the stack. Surprise Me's grammar reads this. */
-export type NodeSlot = "preprocess" | "dither" | "postprocess";
+/**
+ * Where a node may sit in the stack. Surprise Me's grammar reads this.
+ *
+ * `source` is the one that is not a filter. Every other node takes an image and
+ * returns one; a source node **produces an image from its parameters alone** —
+ * noise, a gradient, a shape — so a composition can exist without a photograph.
+ *
+ * It is a slot rather than a new {@link ExecutionKind} or a boolean because the
+ * fact being declared is *positional*: a node that ignores the picture handed
+ * to it belongs at the head, and everything live in front of it is discarded
+ * unless the node's own opacity and blend (F-ST-03) put it back. `slot` is
+ * already the vocabulary every positional reader consults — Surprise Me's
+ * grammar, the picker's filter, the row badge, the guide — so a second
+ * declaration beside it would be a second answer those readers could disagree
+ * about. `execution` still says `gpu`, because that is still true and still
+ * what it costs.
+ *
+ * The consequences are checked rather than assumed: `types/registry.ts` refuses
+ * a source node that reads an index map or resamples, and `gpu/compiler.ts`
+ * refuses a `source` effect whose pass binds `input-color` — and a pass that
+ * binds none on an effect that is not a source. See `registry/stack.ts` for
+ * what "discarded" means and how it is shown.
+ */
+export type NodeSlot = "source" | "preprocess" | "dither" | "postprocess";
 
 /**
  * How a node's output is combined with the node's own input (F-ST-03).

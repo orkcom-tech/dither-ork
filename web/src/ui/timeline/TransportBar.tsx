@@ -3,6 +3,7 @@ import React from "react";
 import { MAX_FPS, MAX_FRAMES, MAX_GLOBAL_SPEED } from "../../animation";
 import { FloatEntry, IntEntry } from "./fields";
 import { describePlayback, type PlaybackReport } from "./playback";
+import type { ReplayStatus } from "./preview";
 
 /**
  * The transport — F-AN-09's play/pause and frame step, F-AN-01's loop range and
@@ -26,6 +27,11 @@ export interface TransportBarProps {
   readonly playback: PlaybackReport;
   readonly previewScale: number;
   readonly engaged: boolean;
+  /**
+   * Non-null while frames are being re-rendered from zero to reach the
+   * playhead — a feedback document being scrubbed. See `preview.ts`.
+   */
+  readonly replay: ReplayStatus | null;
   readonly onPlaying: (playing: boolean) => void;
   readonly onStep: (delta: number) => void;
   readonly onFrames: (frames: number) => void;
@@ -128,6 +134,19 @@ export function TransportBar(props: TransportBarProps): React.ReactElement {
       </div>
 
       <span className="timeline__spacer" />
+
+      {props.replay === null ? null : (
+        // The counter half of the replay's visible state; the other half is the
+        // viewport's own degraded badge, which is up because a replay declares
+        // an interaction exactly as playback does. Two readings of one event,
+        // both already on screen, rather than a third indicator.
+        <span
+          className="timeline__state timeline__state--degraded"
+          title="This document contains a feedback node, so frame N is the product of every frame before it. The frames between are being rendered to reach the one you asked for; none of them is shown."
+        >
+          replaying {props.replay.done}/{props.replay.total} → frame {props.replay.target}
+        </span>
+      )}
 
       {state === "" ? null : (
         <span

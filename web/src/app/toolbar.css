@@ -32,6 +32,17 @@
   outline-offset: 1px;
 }
 
+/*
+ * The blank-canvas size. A native `<select>` wearing the button skin: the
+ * platform's own popup is keyboard- and screen-reader-correct for free, and a
+ * hand-built menu here would be a second one to keep correct for a control with
+ * five entries.
+ */
+.toolbar__size {
+  appearance: none;
+  padding-right: 6px;
+}
+
 .toolbar__notice {
   max-width: 46ch;
   overflow: hidden;

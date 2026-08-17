@@ -73,9 +73,13 @@ export {
   type ParamSetValidation,
 } from "./params";
 export {
+  analyseSources,
   validateStack,
+  type ShadowedNode,
+  type SourceAnalysis,
   type StackIssue,
   type StackIssueCode,
+  type StackNodeComposite,
   type StackNodeRef,
   type StackValidation,
 } from "./stack";

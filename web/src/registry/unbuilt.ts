@@ -100,7 +100,7 @@ export const UNBUILT_FEATURES: readonly UnbuiltFeature[] = [
     summary:
       "Waves emanating from a source that bend around the picture's subject, or are blocked by it and leave a shadow behind it.",
     reason:
-      "It has to know where the subject is as a shape — how far every pixel is from it and in which direction — which is a signed distance field, and that is shared infrastructure (F-INF-01) that does not exist yet. Concentric rings and spiral are the geometric screens that already ship; they are radial patterns that take no account of what is in the picture at all.",
+      "It has to know where the subject is as a shape — how far every pixel is from it and in which direction — which is a signed distance field (F-INF-01). Half of that infrastructure now exists: web/src/gpu/sdf.ts fixes what a field is and ships the analytic primitives the Shape source draws from. The half this needs does not — a field transformed out of the picture rather than described by parameters, which is a jump flood over a scratch texture the pass vocabulary has no role for. Concentric rings and spiral are the geometric screens that already ship; they are radial patterns that take no account of what is in the picture at all.",
     keywords: [
       "radio waves",
       "wave field",

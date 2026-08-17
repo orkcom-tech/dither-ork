@@ -68,6 +68,7 @@ import type { EffectRegistry } from "../registry";
 import type { FrameQuality, Viewport } from "../viewport";
 import {
   ImageLoadError,
+  blankSource,
   installClipboardPaste,
   installImageDrop,
   receiveImage,
@@ -121,6 +122,17 @@ export interface EditorSession {
    * `<input type="file">` in the document rather than a synthesised one.
    */
   openFile(file: File): Promise<void>;
+  /**
+   * Start from a blank canvas of this size, for a document that makes its own
+   * image (the `source` slot — see `types/document.ts`).
+   *
+   * It goes through the same intake as a dropped file, deliberately: a blank
+   * canvas is a real `SourceImage` and every layer downstream — the worker, the
+   * store, the palette, the compare reference — is given exactly what a
+   * photograph gives it. A second path here would be a second set of things to
+   * keep in step, and the first one to fall out of step would be export.
+   */
+  newCanvas(width: number, height: number): void;
   /**
    * The last thing that went wrong, for a banner — and `null` the moment a
    * render succeeds again.
@@ -514,6 +526,23 @@ export async function createEditorSession(
     },
 
     openFile: (file: File) => receiveImage(file, file.name, { intake, limits }),
+
+    newCanvas(width: number, height: number): void {
+      // The same ceiling a decoded file is held to: the working surface is a
+      // GPU texture either way, and a canvas the device cannot allocate is a
+      // failure at the first render rather than here.
+      if (width > limits.maxDimension || height > limits.maxDimension) {
+        report(
+          new Error(
+            `a ${width}x${height} canvas is larger than this device allows (${limits.maxDimension}px on a side)`,
+          ),
+        );
+        return;
+      }
+      const canvas = blankSource(width, height);
+      log.info("blank canvas opened", { width, height, name: canvas.name });
+      intake.onImage(canvas);
+    },
 
     onError: (listener) => {
       errorListeners.add(listener);

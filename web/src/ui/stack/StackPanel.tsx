@@ -16,7 +16,7 @@ import {
 } from "@dnd-kit/sortable";
 
 import { logger } from "../../lib/log";
-import { validateStack, type EffectRegistry } from "../../registry";
+import { analyseSources, validateStack, type EffectRegistry } from "../../registry";
 // `field__note` lives there and the stack's empty state uses it. Imported here
 // rather than left to the properties panel's own import, so that this panel
 // styles correctly whatever else happens to be registered.
@@ -79,6 +79,20 @@ export function StackPanel({ store, registry }: StackPanelProps): React.ReactEle
   const stack = snapshot.document.stack;
   const refs = React.useMemo(() => stackRefs(stack), [stack]);
   const insertAt = insertionIndex(stack, snapshot.selectedNodeId);
+
+  /**
+   * What a source node in this stack discards.
+   *
+   * Not part of `validateStack` and deliberately so: a source node is legal
+   * anywhere, because F-ST-03's opacity and blend make "a gradient over the
+   * photograph" a real thing to want. What is owed is visibility, not refusal —
+   * `registry/stack.ts` argues it at length. The rows read this to dim
+   * themselves and to say which node is throwing their work away.
+   */
+  const sources = React.useMemo(
+    () => analyseSources(registry, stack),
+    [registry, stack],
+  );
 
   const issues = React.useMemo(() => {
     const validation = validateStack(registry, refs);
@@ -266,6 +280,7 @@ export function StackPanel({ store, registry }: StackPanelProps): React.ReactEle
                     store.setNodeBlend(node.id, blend);
                   }}
                   excluded={isExcludedBySolo(stack, snapshot.soloNodeId, position)}
+                  shadowed={sources.shadowedById.get(node.id)?.message ?? null}
                   issue={issues.get(node.id) ?? null}
                   onSelect={() => store.selectNode(node.id)}
                   onToggleEnabled={() => {

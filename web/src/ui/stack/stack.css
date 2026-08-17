@@ -264,6 +264,22 @@
 }
 
 /*
+ * A row whose work a source node throws away.
+ *
+ * Deliberately quieter than `.node__issue`: nothing is wrong, the stack renders
+ * exactly as built, and the row is simply not in the picture. Painting it in
+ * the warning colour would say the document is broken, and the fix — move the
+ * node, or lower the generator's opacity — is a choice rather than a repair.
+ */
+.node__shadowed {
+  margin: 0;
+  padding: 0 8px 5px 6px;
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+/*
  * The `.picker__*` block that used to sit here is gone. The effect picker moved
  * to `ui/picker/` with a stylesheet and a class prefix of its own
  * (`.effect-picker__*`), and `AddNodePicker.tsx` is now a two-line re-export.

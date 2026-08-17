@@ -401,6 +401,21 @@ export function AnimatedExportPanel({
             </p>
             <SeamIssueList issues={errors} />
           </React.Fragment>
+        ) : seam !== null && !seam.loops ? (
+          // Stated here, before the button is pressed, rather than discovered
+          // after 300 frames of encoding. Not an error: a document with a
+          // feedback node in it was never going to close, and exporting it is
+          // the point of the effect rather than a mistake to prevent.
+          <React.Fragment>
+            <p className="xp__detail">
+              This document does not loop, and it will still be exported. Frame{" "}
+              {seam.frames} is the product of every frame before it, so the
+              animation will jump when it repeats.
+            </p>
+            <SeamIssueList
+              issues={seam.issues.filter((issue) => issue.code === "does-not-loop")}
+            />
+          </React.Fragment>
         ) : (
           <p className="xp__detail">
             The loop closes: frame {seam?.frames} is frame 0.

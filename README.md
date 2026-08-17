@@ -24,9 +24,13 @@ loop, or a vector file. Nothing is uploaded: there is no server.
 
 ## What it does
 
-- **67 effects** in a stack you can reorder — 15 error diffusion, 6 ordered, 8
-  pattern, 16 glitch, 16 special, 6 preprocess. Any effect, any number of times,
+- **71 effects** in a stack you can reorder — 15 error diffusion, 6 ordered, 11
+  pattern, 16 glitch, 17 special, 6 preprocess. Any effect, any number of times,
   each with its own opacity and blend mode.
+- **Sources** — three of those take no image at all: noise (value, Perlin,
+  simplex, Worley, fractal), gradients (linear, radial, conical) and shapes
+  (circle, rectangle, polygon, star, from a signed distance field). Press **new
+  canvas** and a document can start from nothing instead of from a photograph.
 - **Palettes** — extract one from the image, or use one of 15 built-in hardware
   palettes (Game Boy DMG and Pocket, six CGA modes, EGA, C64, ZX Spectrum,
   PICO-8, Teletext, 1-bit). Import your own at runtime.
@@ -118,12 +122,12 @@ build ships a `_headers` file; CI fails if either goes missing.
 | F-GL-06 JPEG glitch | Re-encode as JPEG at a chosen quality, corrupt the compressed bytes | Needs a JPEG encoder in the render path. Every node is a compute pass or a serial CPU kernel; this would be a third execution kind |
 | F-PP-08 Node masking | Limit any node to part of the picture, by luminance range, colour range or an uploaded mask | A mask is a second image edge, and the graph carries one image edge per node. A graph change, not an effect |
 | F-PT-09 Luminance-displaced line screen | Lines displaced by the picture's brightness — the *Unknown Pleasures* ridgeline | Nothing in the catalogue displaces by the picture itself, and it needs hidden-line removal to read as depth |
-| F-PT-10 Wave field with obstacle interaction | Waves that bend around the subject, or are blocked and leave a shadow | Needs a signed distance field, which is shared infrastructure four other things also want and should be built once |
+| F-PT-10 Wave field with obstacle interaction | Waves that bend around the subject, or are blocked and leave a shadow | Needs a distance field *transformed out of the picture*. The shared contract and the analytic primitives are built (`web/src/gpu/sdf.ts`, used by the Shape source); the transform — a jump flood over a scratch texture the pass vocabulary has no role for — is not |
 
 ## Tests
 
 ```bash
-docker compose exec -T web sh -c 'npm test -- --run'                                # 1872 tests, 119 files
+docker compose exec -T web sh -c 'npm test -- --run'                                # 1918 tests, 121 files
 docker compose run --rm --entrypoint bash wasm -c 'cd /app/core && cargo test --all' # 157 tests
 ```
 

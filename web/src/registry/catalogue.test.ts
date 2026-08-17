@@ -47,23 +47,42 @@ const EXPECTED_BY_FAMILY: Readonly<Record<EffectFamily, number>> = {
   preprocess: 6,
   "error-diffusion": 15,
   ordered: 6,
-  pattern: 8,
+  // Eight screens plus the three generators (F-GN-01..03). They are filed here
+  // rather than under `special` because a generator draws a figure from
+  // geometry, which is what this family already is; `family` is a filing
+  // decision and `slot` is the positional one.
+  pattern: 11,
   glitch: 16,
-  special: 16,
+  special: 17,
 };
 
 const EXPECTED_BY_EXECUTION: Readonly<Record<ExecutionKind, number>> = {
   wasm: 15,
-  gpu: 52,
+  gpu: 56,
 };
 
 const EXPECTED_BY_SLOT: Readonly<Record<NodeSlot, number>> = {
+  // The three generators. A source node produces its image from its parameters
+  // alone and therefore binds no `input-color`, which `gpu/compiler.ts` checks
+  // against this slot in both directions.
+  source: 3,
   preprocess: 18,
   dither: 29,
-  postprocess: 20,
+  postprocess: 21,
 };
 
-const EXPECTED_TOTAL = 67;
+/**
+ * 67 of these are the spec's. The other four are ids this build assigns:
+ * `feedback` (F-FB-01) and the three generators (F-GN-01 noise, F-GN-02
+ * gradient, F-GN-03 shape).
+ *
+ * They are counted here like every other effect on purpose. The requirements
+ * are ones this build assigns — the decisions are in
+ * `docs/dither-ork-node-graph.md`, not in the numbered spec — and a catalogue
+ * count that quietly excluded them would be the one place a reader could look
+ * and conclude the effects are not really there.
+ */
+const EXPECTED_TOTAL = 71;
 
 /**
  * Every WGSL file the build ships, keyed by the effect id it is named for.
@@ -72,7 +91,7 @@ const EXPECTED_TOTAL = 67;
  * has no id to be named for. There is one: `_composite.wgsl`, the per-node
  * opacity and blend program (F-ST-03), which belongs to the GPU layer rather
  * than to the catalogue. The prefix is the whole convention — it keeps the
- * "every shader is claimed" check below strict for the 52 that are effects
+ * "every shader is claimed" check below strict for the 53 that are effects
  * instead of turning it into a list of exceptions.
  */
 const SHADER_IDS: ReadonlySet<string> = new Set(

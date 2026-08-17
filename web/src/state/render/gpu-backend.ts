@@ -48,6 +48,28 @@
  *
  * The index map is carried across untouched. Why that is the only coherent
  * choice is argued in `gpu/composite.ts`.
+ *
+ * ## Feedback (F-FB-01)
+ *
+ * One node in the catalogue reads a surface this backend does not receive from
+ * the graph: its own output from the previous frame. That surface comes from
+ * `GpuLayer.feedback`, is bound as the pass's `feedback-color`, and is written
+ * back — as a copy — once the node's output exists.
+ *
+ * Three properties are worth stating here because this is where they are
+ * enforced rather than described:
+ *
+ * - **The history is read before the node runs and recorded after.** The store
+ *   holds a texture of its own, so nothing in a dispatch is both the history
+ *   and the output, and the frame the store keeps cannot be overwritten by the
+ *   next node in the batch.
+ * - **The recorded frame is the node's *composited* output**, the same buffer
+ *   the cache would have held. A node at 50% opacity therefore feeds back what
+ *   is on screen rather than what its shader wrote, which is what a person
+ *   dragging that slider means.
+ * - **`batch.frame` decides which history is served**, and the store refuses a
+ *   frame it cannot reach. Frame N is the product of frames 0..N, so this
+ *   backend never invents one.
  */
 
 import type { Palette } from "../../types/document";
@@ -197,6 +219,14 @@ export class GpuRenderBackend implements GpuBackend {
     const inputExtent = { width: input.width, height: input.height };
     const prepared = prepareNodePasses(effect, state, inputExtent);
 
+    // The previous frame at this node's position, or `null` for the 67 effects
+    // that do not read one. Taken before anything is encoded, because the store
+    // refuses a frame it cannot serve and a refusal must cost no texture.
+    const feedback = planned.descriptor.readsFeedback === true;
+    const history = feedback
+      ? this.#deps.layer.feedback.historyFor(nodeId, batch.frame, inputExtent)
+      : null;
+
     const inputColor = input.color.texture;
     const inputIndex =
       input.quantization.kind === "indexed" && input.quantization.indices.residency === "gpu"
@@ -224,7 +254,7 @@ export class GpuRenderBackend implements GpuBackend {
     try {
       const plan = planExecution([prepared.unit]);
       for (const passBatch of plan.batches) {
-        this.#deps.layer.executor.run(passBatch, { color, index, palette });
+        this.#deps.layer.executor.run(passBatch, { color, index, palette, feedback: history });
       }
       encoded = true;
 
@@ -264,6 +294,13 @@ export class GpuRenderBackend implements GpuBackend {
         input,
       );
 
+      // After the composite, so what feeds back is what is on screen. Encoded
+      // here rather than by the caller because this is the only scope holding
+      // both the finished texture and the extent it was written at.
+      if (feedback) {
+        this.#deps.layer.feedback.record(nodeId, batch.frame, outColor, color.extent);
+      }
+
       log.debug("node encoded", {
         nodeId,
         effect: planned.node.effect,
@@ -271,6 +308,7 @@ export class GpuRenderBackend implements GpuBackend {
         width: buffer.width,
         height: buffer.height,
         indexed: buffer.quantization.kind === "indexed",
+        ...(feedback ? { feedbackFrame: batch.frame } : {}),
       });
       return buffer;
     } finally {

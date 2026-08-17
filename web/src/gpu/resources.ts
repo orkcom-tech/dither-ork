@@ -61,7 +61,17 @@ function surfaceUsage(): GPUTextureUsageFlags {
     GPUTextureUsage.TEXTURE_BINDING |
     GPUTextureUsage.STORAGE_BINDING |
     GPUTextureUsage.COPY_SRC |
-    GPUTextureUsage.COPY_DST
+    GPUTextureUsage.COPY_DST |
+    // RENDER_ATTACHMENT is here for exactly one caller and it is worth naming:
+    // `gpu/feedback.ts` clears a feedback node's frame-0 buffer to transparent
+    // black through a render pass with `loadOp: "clear"`, which is the only way
+    // to fill a texture with a known value in WebGPU without a compute program
+    // and a pipeline of its own. Both working formats are renderable
+    // (`rgba16float` and `r32uint`), and the flag is added to the whole pool
+    // rather than to that one allocation for the reason above: a second usage
+    // set would fragment the pool into shapes that cannot be reused for each
+    // other, which costs more memory than the flag does.
+    GPUTextureUsage.RENDER_ATTACHMENT
   );
 }
 

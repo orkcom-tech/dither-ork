@@ -164,6 +164,16 @@ export interface BatchBindings {
   /** Present once anything in the stack has quantized. */
   readonly index: SurfaceChain | null;
   readonly palette: GpuPalette | null;
+  /**
+   * The previous frame at this node's position, from `gpu/feedback.ts`.
+   *
+   * `null` for every batch but one containing a feedback node — which is one
+   * node in the catalogue — and a pass that binds `feedback-color` with nothing
+   * here is refused rather than handed an empty texture. Not a `SurfaceChain`:
+   * a chain is a ping-pong the passes write into, and the history is read-only
+   * for the whole batch. Whoever supplies it also owns it.
+   */
+  readonly feedback?: GPUTexture | null;
 }
 
 export interface BatchStats {
@@ -329,6 +339,26 @@ export class BatchExecutor {
         binding: plan.inputColor,
         resource: bindings.color.current.createView(),
       });
+    }
+
+    if (plan.feedbackColor !== null) {
+      const history = bindings.feedback ?? null;
+      if (history === null) {
+        throw new ScheduleError(
+          `pass ${scheduled.pass.id} at node ${scheduled.nodeId}: binds feedback-color, but no previous-frame texture was supplied; the frame store is what makes this node's history a stated buffer rather than whatever was in that memory`,
+        );
+      }
+      const shape: Extent = { width: history.width, height: history.height };
+      if (!extentsEqual(shape, input)) {
+        // A trail accumulated at one extent is not the trail at another, so a
+        // mismatch here is a picture that is wrong rather than merely stale.
+        // `FeedbackStore` restarts a chain when the extent changes; this is the
+        // check that catches anyone who bypasses it.
+        throw new ScheduleError(
+          `pass ${scheduled.pass.id} at node ${scheduled.nodeId}: reads ${describeExtent(input)} but the previous frame is ${describeExtent(shape)}`,
+        );
+      }
+      entries.push({ binding: plan.feedbackColor, resource: history.createView() });
     }
 
     // Checked before anything is allocated, so a refusal costs no texture. The

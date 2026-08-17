@@ -128,6 +128,7 @@ export function TimelinePanel({ store, registry }: TimelinePanelProps): React.Re
         playback={preview.playback}
         previewScale={preview.previewScale}
         engaged={preview.engaged}
+        replay={preview.replay}
         binding={picking}
         onPlaying={(playing) => {
           log.info(playing ? "playback requested" : "pause requested", {

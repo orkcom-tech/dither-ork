@@ -25,6 +25,16 @@ export interface StackRowProps {
   readonly canMoveDown: boolean;
   /** Below the solo point, so it is not in the render. */
   readonly excluded: boolean;
+  /**
+   * Set when a source node later in the stack replaces the picture outright, so
+   * nothing this node produces reaches the frame. Carries the sentence to show,
+   * naming the node doing the discarding — see `registry/stack.ts`.
+   *
+   * Separate from {@link issue}: this is not a grammar error and the stack is
+   * not refused. It is a fact about what the render will do, and the row is the
+   * only honest place to put it.
+   */
+  readonly shadowed: string | null;
   /** A grammar issue this node is the subject of, ready to show. */
   readonly issue: string | null;
   readonly onSelect: () => void;
@@ -70,6 +80,7 @@ export function StackRow({
   canMoveUp,
   canMoveDown,
   excluded,
+  shadowed,
   issue,
   onSelect,
   onToggleEnabled,
@@ -98,6 +109,10 @@ export function StackRow({
     selected ? "node--selected" : "",
     node.enabled ? "" : "node--off",
     excluded ? "node--excluded" : "",
+    // The same dimming as below-the-solo-point, because it is the same fact:
+    // this row is not in the picture. The note below says which of the two it
+    // is, so the shared styling does not make them indistinguishable.
+    shadowed !== null ? "node--excluded" : "",
     isDragging ? "node--dragging" : "",
     issue !== null ? "node--issue" : "",
   ]
@@ -302,6 +317,7 @@ export function StackRow({
         </div>
       )}
 
+      {shadowed === null ? null : <p className="node__shadowed">{shadowed}</p>}
       {issue === null ? null : <p className="node__issue">{issue}</p>}
     </li>
   );

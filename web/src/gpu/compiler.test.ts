@@ -22,7 +22,12 @@ import { describe, expect, it } from "vitest";
 import type { ComputePass, GpuEffect, PassExtent, UniformLayout } from "../types/gpu";
 import type { EffectDescriptor } from "../types/registry";
 import { setLevel } from "../lib/log";
-import { PassCompileError, validateResamplingDeclaration } from "./compiler";
+import {
+  PassCompileError,
+  validateFeedbackDeclaration,
+  validateResamplingDeclaration,
+  validateSourceDeclaration,
+} from "./compiler";
 
 setLevel("error");
 
@@ -43,6 +48,18 @@ function pass(id: string, extent?: PassExtent): ComputePass {
     ],
     uniforms: UNIFORMS,
     ...(extent === undefined ? {} : { extent }),
+  };
+}
+
+/** The same pass with the previous frame bound at the conventional slot. */
+function feedbackPass(id: string): ComputePass {
+  return {
+    ...pass(id),
+    bindings: [
+      { role: "input-color", binding: 0 },
+      { role: "output-color", binding: 1 },
+      { role: "feedback-color", binding: 6 },
+    ],
   };
 }
 
@@ -131,5 +148,136 @@ describe("validateResamplingDeclaration", () => {
         effect("invert", [pass("invert/main")]),
       ),
     ).toThrow(/declares resamples: true/);
+  });
+});
+
+/**
+ * The same cross-check for feedback, and the stakes are higher.
+ *
+ * `resamples` drifting produces a *permission* — a stack the grammar accepts
+ * and the scheduler then refuses. `readsFeedback` drifting produces a wrong
+ * picture with nothing reporting it: the node cache would key a node whose
+ * output depends on every frame before it on a hash that cannot see any of
+ * them, hand back frame 3's pixels for frame 40, and log a hit while doing it.
+ */
+describe("validateFeedbackDeclaration", () => {
+  it("accepts an effect that declares nothing and binds nothing", () => {
+    expect(() =>
+      validateFeedbackDeclaration(descriptor("blur"), effect("blur", [pass("blur/main")])),
+    ).not.toThrow();
+  });
+
+  it("accepts a declared feedback effect whose pass binds the previous frame", () => {
+    expect(() =>
+      validateFeedbackDeclaration(
+        { ...descriptor("feedback"), readsFeedback: true },
+        effect("feedback", [feedbackPass("feedback/accumulate")]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses a declaration no pass backs up", () => {
+    // The node and everything downstream of it would be excluded from the cache
+    // — a permanent re-render of the tail of the stack — and the document would
+    // be marked non-looping, for a history nothing reads.
+    expect(() =>
+      validateFeedbackDeclaration(
+        { ...descriptor("feedback"), readsFeedback: true },
+        effect("feedback", [pass("feedback/accumulate")]),
+      ),
+    ).toThrow(PassCompileError);
+    expect(() =>
+      validateFeedbackDeclaration(
+        { ...descriptor("feedback"), readsFeedback: true },
+        effect("feedback", [pass("feedback/accumulate")]),
+      ),
+    ).toThrow(/declares readsFeedback: true/);
+  });
+
+  it("refuses a pass that binds the previous frame under an effect that did not declare it", () => {
+    expect(() =>
+      validateFeedbackDeclaration(
+        descriptor("ghost-echo"),
+        effect("ghost-echo", [feedbackPass("ghost-echo/gather")]),
+      ),
+    ).toThrow(/ghost-echo\/gather/);
+  });
+});
+
+/**
+ * The same cross-check for a generator, where the two directions of drift are
+ * two different failures.
+ *
+ * **Source that reads its input** is a filter wearing a generator's badge: the
+ * picker would offer it under "source", the stack panel would say it makes its
+ * own image, and on a blank canvas it would render black.
+ *
+ * **Filter that reads nothing** is a generator nobody declared: it would be
+ * offered anywhere in the stack, discard everything above it, and
+ * `registry/stack.ts` would have no grounds to mark the rows it killed — which
+ * is precisely the "silently discards" outcome the slot exists to prevent.
+ */
+describe("validateSourceDeclaration", () => {
+  /** A pass that reads nothing and writes a frame: the generator shape. */
+  const generatorPass = (id: string): ComputePass => ({
+    ...pass(id),
+    bindings: [{ role: "output-color", binding: 1 }],
+    access: "pointwise",
+  });
+
+  const sourceDescriptor = (id: string): EffectDescriptor => ({
+    ...descriptor(id),
+    slot: "source",
+  });
+
+  it("accepts an ordinary filter whose first pass reads the picture", () => {
+    expect(() =>
+      validateSourceDeclaration(descriptor("blur"), effect("blur", [pass("blur/main")])),
+    ).not.toThrow();
+  });
+
+  it("accepts a source whose first pass reads nothing", () => {
+    expect(() =>
+      validateSourceDeclaration(
+        sourceDescriptor("gen-noise"),
+        effect("gen-noise", [generatorPass("gen-noise/main")]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("accepts a source whose later pass reads what its first pass wrote", () => {
+    // The rule is about the *first* pass, because that is the one whose input
+    // is the node's input. A second pass reading the surface chain this node
+    // already wrote is how every multi-pass effect works.
+    expect(() =>
+      validateSourceDeclaration(
+        sourceDescriptor("gen-two-pass"),
+        effect("gen-two-pass", [generatorPass("gen-two-pass/field"), pass("gen-two-pass/blur")]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses a source whose first pass binds the picture it is defined not to read", () => {
+    expect(() =>
+      validateSourceDeclaration(
+        sourceDescriptor("gen-noise"),
+        effect("gen-noise", [pass("gen-noise/main")]),
+      ),
+    ).toThrow(PassCompileError);
+    expect(() =>
+      validateSourceDeclaration(
+        sourceDescriptor("gen-noise"),
+        effect("gen-noise", [pass("gen-noise/main")]),
+      ),
+    ).toThrow(/sits in the source slot/);
+  });
+
+  it("refuses a filter whose first pass reads no picture", () => {
+    expect(() =>
+      validateSourceDeclaration(
+        descriptor("halftone"),
+        effect("halftone", [generatorPass("halftone/main")]),
+      ),
+    ).toThrow(/binds no input-color/);
   });
 });

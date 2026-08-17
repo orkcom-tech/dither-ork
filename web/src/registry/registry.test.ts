@@ -386,6 +386,66 @@ describe("validateEffect rejects", () => {
     accepts(withFields({ resamples: true }));
   });
 
+  it("a serial effect that claims to read its own previous frame", () => {
+    // The previous frame arrives as a `feedback-color` binding on a compute
+    // pass; a serial kernel has no binding list, so nothing could honour the
+    // claim — while the cache would already have excluded the node and
+    // everything after it, and the document would already be marked
+    // non-looping, for a history nothing reads.
+    rejects(
+      validateEffect({ ...DIFFUSION, readsFeedback: true }),
+      "feedback-must-run-on-gpu",
+      "a serial kernel has none",
+    );
+    accepts(withFields({ readsFeedback: true }));
+  });
+
+  it("an effect that both reads feedback and resamples", () => {
+    // The frame store holds one texture per node at the extent that node
+    // writes. A node changing extent has no common pixel grid with its own
+    // history, and the extent would move on every frame it ran.
+    rejects(
+      validateEffect(withFields({ readsFeedback: true, resamples: true })),
+      "feedback-must-not-resample",
+      "no common pixel grid with its own history",
+    );
+  });
+
+  it("a serial effect placed in the source slot", () => {
+    // A generator writes a frame with no input surface, which is a compute pass
+    // declaring `output-color` and no `input-color`. The serial backend's
+    // kernels are transforms of a surface they are handed, so there is nothing
+    // for one to be given and no shape for it to say this in.
+    rejects(
+      validateEffect({ ...DIFFUSION, slot: "source" }),
+      "source-must-run-on-gpu",
+      "the serial backend has no such shape",
+    );
+    accepts(withFields({ slot: "source" }));
+  });
+
+  it("a source effect that reads the index map", () => {
+    // Stronger than the preprocess rule it echoes: a source node is in front of
+    // every quantizer *and* reads no image, so no map could reach it by either
+    // route however the stack is ordered.
+    rejects(
+      validateEffect(withFields({ slot: "source", requiresIndexMap: true })),
+      "source-must-not-read-index-map",
+      "no map can reach it however the stack is ordered",
+    );
+  });
+
+  it("a source effect that claims to resample", () => {
+    // A resampling rule is relative to the extent a pass *reads*, and a
+    // generator reads none — it writes the working extent it is given. The
+    // compiler refuses the `input-color` binding such a rule would need.
+    rejects(
+      validateEffect(withFields({ slot: "source", resamples: true })),
+      "source-must-not-resample",
+      "a generator reads none",
+    );
+  });
+
   it("an effect that excludes itself", () => {
     rejects(
       validateEffect(withFields({ excludes: ["bayer-4"] })),
@@ -981,6 +1041,11 @@ const EVERY_FAILURE_MODE: Record<RegistryIssueCode, true> = {
   "diffusion-must-run-serially": true,
   "index-map-consumer-in-preprocess": true,
   "resampler-must-run-on-gpu": true,
+  "feedback-must-run-on-gpu": true,
+  "feedback-must-not-resample": true,
+  "source-must-run-on-gpu": true,
+  "source-must-not-read-index-map": true,
+  "source-must-not-resample": true,
   "missing-summary": true,
   "missing-description": true,
   "unhelpful-description": true,

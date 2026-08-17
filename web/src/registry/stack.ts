@@ -261,3 +261,153 @@ export function validateStack(
 
   return { ok: issues.length === 0, issues };
 }
+
+// --- what a source node discards ----------------------------------------
+//
+// A source node (`slot: "source"`) produces its image from its parameters
+// alone, so the buffer the stack handed it goes nowhere. Everything live in
+// front of it computed a picture nothing reads.
+//
+// **This is not an error and is deliberately not one.** A node's output is
+// composited against its own input (F-ST-03), and that path already exists for
+// every node in the catalogue, so a gradient at 40% in `multiply` over a
+// photograph is a real and wanted thing. The discard is therefore not a
+// property of the node — it is a property of the node *at full opacity in
+// normal blend*, which is exactly the combination where `graph/plan.ts` makes
+// the composite `null` because it is the identity.
+//
+// So the rule the stack owes a user is not refusal, it is **visibility**: say
+// which rows are computing a picture that is thrown away, and name the node
+// throwing it. `validateStack` stays a pure error channel — Surprise Me uses
+// it as an accept/reject gate and a warning in there would reject stacks that
+// render perfectly — and this is a separate, purely descriptive analysis the
+// stack panel renders on the rows themselves.
+
+/** The part of a stack node this analysis cares about, beyond {@link StackNodeRef}. */
+export interface StackNodeComposite extends StackNodeRef {
+  /** F-ST-03 opacity, `[0, 1]`. */
+  readonly opacity: number;
+  /** F-ST-03 blend mode id. `"normal"` at opacity 1 is the identity composite. */
+  readonly blend: string;
+}
+
+export interface ShadowedNode {
+  /** The node whose work is discarded. */
+  readonly nodeId: string;
+  /** The source node that discards it. */
+  readonly bySourceId: string;
+  readonly bySourceEffect: string;
+  /** Written to be shown to a user as it stands. */
+  readonly message: string;
+}
+
+export interface SourceAnalysis {
+  /** Live source-slot node ids, in stack order. */
+  readonly sources: readonly string[];
+  /**
+   * The **last** live source node that replaces its input outright, or `null`.
+   *
+   * "Last" because a second one discards the first: only the final full-opacity
+   * source node's output survives into the rest of the stack.
+   */
+  readonly replacesFrom: string | null;
+  /** Live nodes whose output is discarded, in stack order. */
+  readonly shadowed: readonly ShadowedNode[];
+  /** Same set as a lookup, for a row deciding how to draw itself. */
+  readonly shadowedById: ReadonlyMap<string, ShadowedNode>;
+  /**
+   * True when the stack begins with a source node that replaces its input, so
+   * the document needs no photograph to produce a picture.
+   *
+   * Read by the UI to say "this document generates its own image" rather than
+   * leaving a blank canvas looking like a failure to load one.
+   */
+  readonly selfSourced: boolean;
+}
+
+const NO_SOURCES: SourceAnalysis = {
+  sources: [],
+  replacesFrom: null,
+  shadowed: [],
+  shadowedById: new Map(),
+  selfSourced: false,
+};
+
+/**
+ * Which live nodes a later source node discards, and which one discards them.
+ *
+ * Disabled nodes are skipped on both sides, for the reason every rule in this
+ * file skips them: a disabled node is not in the render, so it neither discards
+ * anything nor has anything of its own to lose.
+ */
+export function analyseSources(
+  registry: EffectRegistry,
+  stack: readonly StackNodeComposite[],
+): SourceAnalysis {
+  const live = stack.filter((node) => node.enabled);
+
+  const sources: string[] = [];
+  /** Index in `live` of the last source node that replaces its input outright. */
+  let replacingIndex = -1;
+  let replacingNode: StackNodeComposite | null = null;
+
+  for (let i = 0; i < live.length; i += 1) {
+    const node = live[i];
+    if (node === undefined) continue;
+    const descriptor = registry.get(node.effect);
+    if (descriptor === undefined || descriptor.slot !== "source") continue;
+    sources.push(node.id);
+    // The identity composite, and the only case where the input is genuinely
+    // gone. `graph/plan.ts` decides it the same way, and it has to be the same
+    // condition or the panel would mark rows the renderer still uses.
+    if (node.opacity === 1 && node.blend === "normal") {
+      replacingIndex = i;
+      replacingNode = node;
+    }
+  }
+
+  if (replacingNode === null || replacingIndex <= 0) {
+    return sources.length === 0
+      ? NO_SOURCES
+      : {
+          sources,
+          replacesFrom: replacingNode?.id ?? null,
+          shadowed: [],
+          shadowedById: new Map(),
+          // A replacing source node at index 0 needs no photograph, which is
+          // the whole point of the slot. Index -1 means every source node in
+          // this stack is composited over what came before, so the picture
+          // still starts from the image.
+          selfSourced: replacingIndex === 0,
+        };
+  }
+
+  const descriptor = registry.get(replacingNode.effect);
+  const name = descriptor?.name ?? replacingNode.effect;
+
+  const shadowed: ShadowedNode[] = [];
+  for (let i = 0; i < replacingIndex; i += 1) {
+    const node = live[i];
+    if (node === undefined) continue;
+    shadowed.push({
+      nodeId: node.id,
+      bySourceId: replacingNode.id,
+      bySourceEffect: replacingNode.effect,
+      message: `${name} (node ${replacingNode.id}) makes its own image and replaces this one outright, so nothing this node produces reaches the picture. Move it after ${name}, or lower ${name}'s opacity or change its blend so the two are combined.`,
+    });
+  }
+
+  log.info("a source node discards the stack in front of it", {
+    source: replacingNode.id,
+    effect: replacingNode.effect,
+    discarded: shadowed.length,
+  });
+
+  return {
+    sources,
+    replacesFrom: replacingNode.id,
+    shadowed,
+    shadowedById: new Map(shadowed.map((entry) => [entry.nodeId, entry])),
+    selfSourced: false,
+  };
+}

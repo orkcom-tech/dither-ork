@@ -158,6 +158,25 @@ export async function encodeAnimation(request: AnimatedJobRequest): Promise<Anim
     frames: timing.frames,
   });
   const seam = await request.source.validateLoop(request.signal);
+  if (!seam.loops) {
+    // Said before the render loop starts, not discovered after 300 frames of
+    // encoding. A document containing a feedback node cannot return to frame 0
+    // and was never going to: it is reported and the export proceeds, because
+    // refusing it would refuse the whole point of the effect. Decision 2 of
+    // docs/dither-ork-node-graph.md.
+    const note =
+      seam.issues.find((issue) => issue.code === "does-not-loop")?.message ??
+      "This document does not loop; frame N is not frame 0.";
+    log.info("animated export: the document does not loop", { frames: seam.frames });
+    listener?.({
+      stage: "validating",
+      completed: animatedProgress("validating", 1),
+      detail: "this document does not loop",
+      frame: 0,
+      frames: timing.frames,
+      nonLooping: note,
+    });
+  }
   if (!seam.ok) {
     log.warn("animated export refused: the loop does not close", {
       frames: seam.frames,
@@ -211,8 +230,11 @@ export async function encodeAnimation(request: AnimatedJobRequest): Promise<Anim
   // The warnings the seam check found are things a person should see beside the
   // file, not only while editing: a loop that closes and hitches is still a loop
   // that hitches, and the export is the last moment anyone looks.
+  // `info` is carried alongside them: a file that does not loop is the one
+  // thing about it a person needs to know when they come to use it, and the
+  // note travels with the result for the same reason the warnings do.
   const warnings = seam.issues
-    .filter((issue) => issue.severity === "warning")
+    .filter((issue) => issue.severity === "warning" || issue.severity === "info")
     .map((issue) => issue.message);
   const withSeam: AnimatedResult = {
     ...result,

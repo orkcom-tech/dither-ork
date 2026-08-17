@@ -13,6 +13,7 @@ import { StagingPool } from "./boundary";
 import { PassCompiler } from "./compiler";
 import { CompositeProgram } from "./composite";
 import { acquireGpuContext, type GpuContext, type GpuContextOptions } from "./device";
+import { FeedbackStore } from "./feedback";
 import { BufferCache, TexturePool } from "./resources";
 import { BatchExecutor } from "./scheduler";
 
@@ -34,6 +35,16 @@ export class GpuLayer {
    * — the one frame where the delay is most visible.
    */
   readonly composite: CompositeProgram;
+  /**
+   * The previous frame at each feedback node's position.
+   *
+   * On the layer rather than inside the GPU backend because two callers need
+   * it and neither owns the other: the backend reads and writes it while a node
+   * runs, and `DocumentRenderer` resets it when the source or the stack
+   * changes. Its textures come from this layer's pool, so it is destroyed with
+   * the layer for the same reason everything else here is.
+   */
+  readonly feedback: FeedbackStore;
 
   private constructor(
     context: GpuContext,
@@ -47,6 +58,7 @@ export class GpuLayer {
     this.compiler = new PassCompiler(context, this.buffers);
     this.executor = new BatchExecutor(context, this.compiler, this.buffers);
     this.composite = composite;
+    this.feedback = new FeedbackStore(context, this.textures);
   }
 
   static async create(options: GpuContextOptions): Promise<GpuLayer> {
@@ -67,18 +79,22 @@ export class GpuLayer {
     readonly textures: ReturnType<TexturePool["stats"]>;
     readonly pipelines: ReturnType<PassCompiler["stats"]>;
     readonly composites: ReturnType<CompositeProgram["stats"]>;
+    readonly feedback: ReturnType<FeedbackStore["stats"]>;
   } {
     return {
       textures: this.textures.stats(),
       pipelines: this.compiler.stats(),
       composites: this.composite.stats(),
+      feedback: this.feedback.stats(),
     };
   }
 
   destroy(): void {
     // Order matters: pipelines reference the layouts, everything references the
     // device, and destroying the device first would make the rest log errors on
-    // the way down.
+    // the way down. The frame store goes back to the texture pool before the
+    // pool is destroyed, so its surfaces are counted rather than orphaned.
+    this.feedback.destroy();
     this.compiler.clear();
     this.staging.destroy();
     this.buffers.destroy();

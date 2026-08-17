@@ -213,6 +213,9 @@ function render(id: number, params: RenderParams): Promise<RenderResult> {
         quality: params.quality,
         factor: params.factor,
         present: params.present,
+        // Absent means 0 — a still render — which is what every caller but the
+        // timeline and the animated export means.
+        ...(params.frame === undefined ? {} : { frame: params.frame }),
         signal,
       });
       return {

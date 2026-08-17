@@ -240,11 +240,49 @@ export const PLAIN_EFFECT: EffectDescriptor = {
   ],
 };
 
+/**
+ * A "feedback" effect: reads its own previous frame.
+ *
+ * Only its declaration matters here — no test in `animation/` renders anything
+ * — but that declaration is what makes a document non-looping, so the plan and
+ * the seam validator both need a stack that can contain one.
+ */
+export const FEEDBACK_EFFECT: EffectDescriptor = {
+  id: "test-feedback",
+  name: "Test feedback",
+  summary: "Fixture effect, constructed by a test rather than shipped in the catalogue.",
+  description:
+    "Not one of the sixty-eight. It declares that it reads its own previous frame, which is the one property the animation planner and the seam validator have to react to; nothing here renders it.",
+  keywords: ["fixture", "test", "feedback"],
+  requirement: "F-FB-01",
+  slot: "postprocess",
+  family: "special",
+  execution: "gpu",
+  surpriseWeight: 1,
+  producesIndexMap: false,
+  requiresIndexMap: false,
+  readsFeedback: true,
+  params: [
+    {
+      key: "decay",
+      label: "Decay",
+      description:
+        "Fixture control. It has a kind and a range so the test can exercise them; nothing renders it.",
+      type: "float",
+      animatable: true,
+      legal: [0, 1],
+      default: 0.9,
+      surprise: { range: [0.6, 0.96], distribution: { kind: "uniform" }, weight: 1 },
+    },
+  ],
+};
+
 export const TEST_EFFECTS: readonly EffectDescriptor[] = [
   PATTERN_EFFECT,
   SEEDED_EFFECT,
   DIFFUSION_EFFECT,
   PLAIN_EFFECT,
+  FEEDBACK_EFFECT,
 ];
 
 export function testRegistry(
@@ -290,6 +328,10 @@ export function diffusionNode(id = "diffusion", seed = 13): StackNode {
 
 export function plainNode(id = "plain", seed = 17): StackNode {
   return node(id, PLAIN_EFFECT.id, { gain: 1 }, seed);
+}
+
+export function feedbackNode(id = "feedback", seed = 19): StackNode {
+  return node(id, FEEDBACK_EFFECT.id, { decay: 0.9 }, seed);
 }
 
 export function binding(overrides: Partial<Binding> & Pick<Binding, "nodeId" | "param">): Binding {

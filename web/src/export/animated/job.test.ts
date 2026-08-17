@@ -43,7 +43,7 @@ function issue(overrides: Partial<SeamIssue> = {}): SeamIssue {
 }
 
 function report(overrides: Partial<SeamReport> = {}): SeamReport {
-  return { ok: true, frames: 12, issues: [], hashes: null, ...overrides };
+  return { ok: true, frames: 12, issues: [], hashes: null, loops: true, ...overrides };
 }
 
 interface FakeSourceOptions {

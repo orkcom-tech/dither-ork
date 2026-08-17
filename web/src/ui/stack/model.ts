@@ -43,10 +43,27 @@ export const FAMILY_ORDER = [
 ] as const satisfies readonly EffectFamily[];
 
 export const SLOT_LABEL: Record<NodeSlot, string> = {
+  // "src", not "gen": the badge sits beside `pre`, `dither` and `post`, which
+  // all name a *position*, and this one does too — a source node belongs at the
+  // head because it discards what is in front of it.
+  source: "src",
   preprocess: "pre",
   dither: "dither",
   postprocess: "post",
 };
+
+/**
+ * Slot order in the picker's filter chips and the guide's grouping.
+ *
+ * A list beside the record because a record cannot fix an order, and the order
+ * is the order a stack runs in.
+ */
+export const SLOT_ORDER = [
+  "source",
+  "preprocess",
+  "dither",
+  "postprocess",
+] as const satisfies readonly NodeSlot[];
 
 /**
  * Execution shown as what it costs rather than as what it is called: a `wasm`

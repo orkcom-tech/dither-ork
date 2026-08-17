@@ -6,15 +6,21 @@ pipeline, full colour with palette extraction, CMYK halftone, timeline animation
 with live playback, batch processing, and PNG / JPEG / SVG / GIF / MP4 export.
 
 **60 of those 61 are built and registered, plus 7 of the 8 preprocessing nodes
-(F-PP): 67 effects in the catalogue.** By family: 15 error diffusion, 6 ordered,
-8 pattern, 16 glitch, 16 special, 6 preprocess. By execution: 15 WASM, 52
-WebGPU. By slot: 18 preprocess, 29 dither, 20 postprocess. One of the 61 is
-absent on purpose and it is recorded where the decision was made — F-GL-06 JPEG
-glitch, which needs an encoder and therefore an execution kind that does not
-exist. The one remaining F-PP gap is F-PP-08, masking: it is a second image edge
-on the graph rather than a pass, and the graph carries one edge per node. The
-counts are asserted by `web/src/registry/catalogue.test.ts`, so an effect that
-silently stops being discovered fails the build rather than the eye.
+(F-PP), plus four the spec does not name at all: 71 effects in the catalogue.**
+By family: 15 error diffusion, 6 ordered, 11 pattern, 16 glitch, 17 special, 6
+preprocess. By execution: 15 WASM, 56 WebGPU. By slot: 3 source, 18 preprocess,
+29 dither, 21 postprocess. One of the 61 is absent on purpose and it is recorded
+where the decision was made — F-GL-06 JPEG glitch, which needs an encoder and
+therefore an execution kind that does not exist. The one remaining F-PP gap is
+F-PP-08, masking: it is a second image edge on the graph rather than a pass, and
+the graph carries one edge per node. The four that are not in the numbered spec
+all come from `docs/dither-ork-node-graph.md`: **`feedback` (F-FB-01)**, the only
+node in the catalogue that is not a pure function of its inputs — see "Feedback"
+below — and the three **generators** (`gen-noise` F-GN-01, `gen-gradient`
+F-GN-02, `gen-shape` F-GN-03), the only nodes that take no image at all. See
+"Source nodes" below. The counts are asserted by
+`web/src/registry/catalogue.test.ts`, so an effect that silently stops being
+discovered fails the build rather than the eye.
 
 **It is an application.** `web/src/app/main.tsx` boots it: capability gate,
 registry validation, editor session, panels, viewport. The proof page that used
@@ -40,7 +46,7 @@ for exactly that reason, and adding it is a decision about the execution model
 rather than one more shader.
 
 - **15 serial kernels** run on the CPU in WebAssembly, compiled from Rust.
-- **52 parallel effects** run on the GPU as WebGPU compute passes.
+- **53 parallel effects** run on the GPU as WebGPU compute passes.
 - **The boundary between them is the performance ceiling.** Each serial node
   costs a GPU readback plus an upload. Two mitigations, both also correct for
   the look: consecutive parallel nodes are coalesced into a single GPU pass, and
@@ -132,6 +138,155 @@ open-source project and it is the one that does not work.
 - **Animated export** walks `t` across the loop and re-evaluates only bound
   nodes. Unbound nodes render once and are reused for all `N` frames, which is
   why an `N`-frame export is far cheaper than `N` renders.
+
+## Feedback
+
+**One node reads the previous frame's output at its own position in the stack**
+— `feedback` (F-FB-01), the first step of `docs/dither-ork-node-graph.md`. It is
+where trails, decay, growth, smear, endless zoom and spirals come from, and it
+is the only thing in the catalogue that is not a pure function of its inputs.
+Everything below follows from that one sentence, and all three were decided in
+that note before any code was written.
+
+- **It is not a node graph.** Feedback is a node in the existing linear stack,
+  with the existing `.dork` schema and no node editor. What it needed from the
+  pass model is one new binding role, `feedback-color` (`web/src/types/gpu.ts`),
+  legal only on an effect declaring `readsFeedback`, checked in both directions
+  by `gpu/compiler.ts`.
+- **The buffer is a stated value at frame 0, not whatever the pool held.**
+  `gpu/feedback.ts` clears it to transparent black through a render pass, which
+  is why `RENDER_ATTACHMENT` is in the texture pool's usage set. With `screen`,
+  `add`, `lighten`, `difference` or `exclusion` that makes frame 0 the node's
+  input exactly.
+- **The store holds two slots per node, not one.** `history` is what frame `F`
+  reads and `pending` is what `F+1` will read, so **re-rendering the same frame
+  is idempotent** — which it has to be, because the viewport re-renders one
+  frame every time the preview scale changes. Chains are keyed per node *and*
+  per extent: a trail accumulated at 68% is not the trail at 100%.
+
+### The three consequences
+
+1. **The cache.** A feedback node and everything downstream of it are excluded
+   from the content-hash cache (`graph/feedback.ts`); the hash is the same on
+   every frame and the pixels are not, so a hit there would be a wrong picture
+   with a hit logged against it. Everything **upstream** caches exactly as it
+   did, which is most of the work in a real stack — measured in the browser on a
+   `blur → feedback` stack: frame 0 executes two nodes with no hits, and every
+   frame after it executes **one** node with **one** cache hit. The excluded set
+   is logged per render, because "the tail of this stack re-renders every frame"
+   is a cost that should be readable rather than mysterious. Buffers the cache
+   refuses are owned by the render itself and released by it; the one that
+   leaves is flagged `RenderOutcome.ownsBuffer`.
+2. **Loop closure.** A document containing an enabled feedback node is **marked
+   non-looping** (`AnimationPlan.loops`). F-AN-03 keeps its full strength
+   everywhere else — every per-binding phase check still runs, and a fractional
+   cycles-per-loop is still an error — but the frame-hash comparison is skipped
+   rather than reported as a failure the document was never going to pass, and
+   `validateLoopSeam` emits a `does-not-loop` issue at a third severity, `info`,
+   which does not clear `ok`. The animated export panel says it before the
+   button is pressed and the note travels with the finished file.
+3. **Determinism.** Frame N is the product of frames 0..N. The frame store
+   **refuses** a frame it cannot serve, naming the frame it can, rather than
+   inventing a history — so nothing anywhere can show a frame the export would
+   not produce. Rendering from zero is the caller's job, because only the caller
+   can resolve the document at each intermediate frame: `ui/timeline/preview.ts`
+   replays for the preview and `ui/export/animated.ts` for a sampled export.
+   The replay's visible state **reuses the adaptive-preview mechanism** — it
+   declares an interaction on the viewport, so the existing degraded badge comes
+   up — plus a "replaying k/n" counter on the transport bar beside the one
+   playback already had. Measured: replaying frames 0..2 after a scrub back from
+   frame 7 reproduces all three **byte-identically**.
+
+## Source nodes
+
+Every effect in the catalogue but three takes one image and returns one. A
+**source node** takes none: it produces its picture from its parameters alone,
+which is what lets a document exist without a photograph. `gen-noise` (F-GN-01),
+`gen-gradient` (F-GN-02) and `gen-shape` (F-GN-03) are the three, and they are
+also from `docs/dither-ork-node-graph.md` rather than from the numbered spec.
+
+**It is a `NodeSlot`, not a new kind and not an undeclared convention.** The
+fact being declared is positional — a node that ignores the picture handed to it
+belongs at the head — and `slot` is already the vocabulary every positional
+reader consults: Surprise Me's grammar, the picker's filter chips, the row
+badge, the guide. A boolean beside `slot` would be a second positional answer
+those readers could disagree about. `execution` still says `gpu`, because that
+is still true and still what it costs.
+
+Three declarations follow, and each is checked rather than trusted:
+
+- `types/registry.ts` refuses a source node that runs serially (the WASM backend
+  transforms a surface it is handed; there is no such surface), that reads the
+  index map (nothing quantizes in front of it and it reads no image), or that
+  resamples (a `PassExtent` is relative to an input it does not have).
+- `gpu/compiler.ts`'s `validateSourceDeclaration` refuses a `source` effect whose
+  **first** pass binds `input-color`, and a non-source effect whose first pass
+  binds none — the same two-way check `readsFeedback` gets, and for the same
+  reason: both directions of drift are silent. A later pass may bind
+  `input-color` freely; it is reading what the pass before it wrote into this
+  node's own surface chain.
+- `registry/stack.ts`'s `analyseSources` computes what a source node **discards**.
+
+### The discard is visible, not refused
+
+A source node is legal anywhere in the stack, and deliberately so. A node's
+output is composited against its own input (F-ST-03), so a gradient at 40% in
+`multiply` over a photograph is a real thing to want and the existing composite
+path already does it. The discard is therefore not a property of the node — it
+is a property of the node **at full opacity in normal blend**, which is exactly
+the case where `graph/plan.ts` makes the composite `null` because it is the
+identity.
+
+So the rule is visibility rather than refusal: `analyseSources` names the live
+nodes a later replacing source throws away and the node throwing them, and the
+stack panel dims those rows and prints the sentence. `validateStack` stays a
+pure error channel — Surprise Me uses it as an accept/reject gate, and a warning
+in there would make it discard every stack containing a generator.
+
+### A blank canvas is what gives a sourceless document its size
+
+A generator needs no photograph but the pipeline still needs an **extent**:
+every buffer size derives from the source's, the preview renders a fraction of
+it (F-UI-03), and export writes it. `io/source.ts`'s `blankSource` produces a
+real `SourceImage` — transparent black, a stated name, a hash over
+`blank:WxH` — and it goes through the ordinary intake, so no layer below has a
+branch on "is there a source". The toolbar's *new canvas* is the only thing that
+creates one; nothing substitutes it for a failed load.
+
+**It does not survive a reload.** `.dork` schema 1 records a source as a name
+and a size, with no way to say the pixels were generated rather than loaded, and
+inferring it from the name would be a guess. Autosave therefore restores the
+stack and not the canvas, exactly as it does for a document whose file is gone.
+Recording it is a schema change and belongs with the one the node editor needs.
+
+### Loop closure
+
+Unlike feedback, a generator has no reason to break it and does not. Every
+animatable parameter is an ordinary document value, `cyclesPerLoop` stays
+integral (F-AN-03), and no generator shader reads a clock or `normalized-time`.
+A noise field animated on `evolve` — the third coordinate of a 3D field, which
+is why the fields are 3D — passes F-AN-06's seam hash: *the loop closes, frame
+48 is frame 0*, measured in the browser.
+
+### F-INF-01, and which half of it exists
+
+`gpu/sdf.ts` is the shared signed-distance-field contract F-INF-01 asks for: one
+`f32` per pixel, **distance to the nearest boundary in working-resolution
+texels, negative inside**, plus the channel layout for carrying a field in the
+ordinary colour buffer and the canonical WGSL for the analytic primitives.
+`gen-shape` uses it, and `sdf.test.ts` diffs the fenced copy in every shader
+against the canonical text — which is the first time `CONVENTIONS.md`'s "so the
+copies can be diffed mechanically" is actually a check.
+
+**The analytic half is built; the transform half is not.** A field can come from
+parameters (closed form, exact, no extra passes) or from the picture (the
+distance to wherever the index map changes value, which needs a jump flood over
+a scratch *texture* — a role `ScratchSize` does not have). Outline (F-SP-10) and
+dilate/erode (F-SP-11) ship reading the index map directly and are exact for a
+one-texel neighbourhood; what they would gain from a field is a width in pixels
+rather than in taps, and what F-PT-10 needs is the transform and nothing less.
+Consumers are written against the value, not against where it came from, so the
+two producers are interchangeable when the second arrives.
 
 ## Data layout
 
@@ -616,7 +771,7 @@ of the page, not of the engine, and it is the page's next job.
 
 The list below is the strategy. What is built today: 157 Rust tests including
 golden images for all 15 registered diffusion kernels across four fixtures and
-two palettes, and the GIF encoder's own set; 1,610 TypeScript tests including the
+two palettes, and the GIF encoder's own set; 1,893 TypeScript tests including the
 catalogue test that runs the startup validator over the shipped descriptors and
 asserts the counts above, the `.dork` round trip, the document store and its
 history, the image intake, the animation core's clock, modulators, seam and

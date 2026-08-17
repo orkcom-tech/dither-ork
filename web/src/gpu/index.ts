@@ -41,8 +41,16 @@ export {
 } from "./uniforms";
 
 export {
+  FeedbackStore,
+  FeedbackStoreError,
+  type FeedbackStoreStats,
+} from "./feedback";
+
+export {
   dispatchCounts,
+  validateFeedbackDeclaration,
   validateResamplingDeclaration,
+  validateSourceDeclaration,
   PassCompileError,
   PassCompiler,
   type BindingPlan,

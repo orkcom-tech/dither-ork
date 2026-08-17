@@ -21,7 +21,12 @@ import { setLevel } from "../lib/log";
 import type { EffectDescriptor } from "../types/registry";
 import { discoverEffects } from "./discovery";
 import { createEffectRegistry, type EffectRegistry } from "./registry";
-import { validateStack, type StackNodeRef } from "./stack";
+import {
+  analyseSources,
+  validateStack,
+  type StackNodeComposite,
+  type StackNodeRef,
+} from "./stack";
 
 setLevel("error");
 
@@ -355,5 +360,139 @@ describe("the shipped catalogue", () => {
     const result = validateStack(registry, [node("n1", "blur"), node("n2", "outline")]);
     expect(result.ok).toBe(false);
     expect(result.issues[0]?.message).toContain("nothing in front of it quantizes");
+  });
+});
+
+// --- what a source node discards ----------------------------------------
+//
+// `analyseSources` is deliberately *not* part of `validateStack`. A source node
+// is legal anywhere, because a node's output is composited against its own
+// input (F-ST-03) and a gradient at 40% in multiply over a photograph is a real
+// thing to want. What the stack owes a user is not refusal but visibility: say
+// which rows compute a picture that is thrown away, and name the node throwing
+// it. These tests are that rule.
+
+describe("analyseSources", () => {
+  const GEN = effect("gen", { slot: "source" });
+  const BLUR = effect("blur", { slot: "preprocess" });
+  const DITHER = effect("dither", { slot: "dither", producesIndexMap: true });
+
+  /** A stack node with its F-ST-03 composite, which the analysis reads. */
+  function composited(
+    id: string,
+    effectId: string,
+    overrides: { enabled?: boolean; opacity?: number; blend?: string } = {},
+  ): StackNodeComposite {
+    return {
+      id,
+      effect: effectId,
+      enabled: overrides.enabled ?? true,
+      opacity: overrides.opacity ?? 1,
+      blend: overrides.blend ?? "normal",
+    };
+  }
+
+  it("finds nothing in a stack with no source node", () => {
+    const registry = registryOf(BLUR, DITHER);
+    const analysis = analyseSources(registry, [
+      composited("a", "blur"),
+      composited("b", "dither"),
+    ]);
+    expect(analysis.sources).toEqual([]);
+    expect(analysis.shadowed).toEqual([]);
+    expect(analysis.selfSourced).toBe(false);
+  });
+
+  it("calls a stack that begins with a full-opacity source self-sourced", () => {
+    // The whole point of the slot: this document needs no photograph, and the
+    // UI reads exactly this to say so rather than leaving a blank canvas
+    // looking like a failure to load one.
+    const registry = registryOf(GEN, DITHER);
+    const analysis = analyseSources(registry, [
+      composited("a", "gen"),
+      composited("b", "dither"),
+    ]);
+    expect(analysis.selfSourced).toBe(true);
+    expect(analysis.replacesFrom).toBe("a");
+    expect(analysis.shadowed).toEqual([]);
+  });
+
+  it("marks every live node in front of a replacing source", () => {
+    const registry = registryOf(GEN, BLUR, DITHER);
+    const analysis = analyseSources(registry, [
+      composited("a", "blur"),
+      composited("b", "dither"),
+      composited("c", "gen"),
+      composited("d", "blur"),
+    ]);
+    expect(analysis.shadowed.map((entry) => entry.nodeId)).toEqual(["a", "b"]);
+    expect(analysis.shadowedById.get("a")?.bySourceId).toBe("c");
+    // The row after it is untouched: it reads what the generator made.
+    expect(analysis.shadowedById.has("d")).toBe(false);
+    expect(analysis.selfSourced).toBe(false);
+  });
+
+  it("marks nothing when the source is composited rather than replacing", () => {
+    // The case refusal would have forbidden. At less than full opacity, or in
+    // any blend but normal, `graph/plan.ts` builds a real composite and the
+    // input genuinely reaches the picture.
+    const registry = registryOf(GEN, BLUR);
+    const faded = analyseSources(registry, [
+      composited("a", "blur"),
+      composited("b", "gen", { opacity: 0.4 }),
+    ]);
+    expect(faded.shadowed).toEqual([]);
+    expect(faded.sources).toEqual(["b"]);
+    expect(faded.replacesFrom).toBeNull();
+
+    const blended = analyseSources(registry, [
+      composited("a", "blur"),
+      composited("b", "gen", { blend: "multiply" }),
+    ]);
+    expect(blended.shadowed).toEqual([]);
+  });
+
+  it("blames the last replacing source, because it discards the first", () => {
+    const registry = registryOf(GEN, BLUR);
+    const analysis = analyseSources(registry, [
+      composited("a", "gen"),
+      composited("b", "blur"),
+      composited("c", "gen"),
+    ]);
+    expect(analysis.replacesFrom).toBe("c");
+    expect(analysis.shadowed.map((entry) => entry.nodeId)).toEqual(["a", "b"]);
+  });
+
+  it("skips disabled nodes on both sides", () => {
+    // A disabled node is not in the render (F-ST-02), so it neither discards
+    // anything nor has anything of its own to lose.
+    const registry = registryOf(GEN, BLUR);
+    const disabledSource = analyseSources(registry, [
+      composited("a", "blur"),
+      composited("b", "gen", { enabled: false }),
+    ]);
+    expect(disabledSource.sources).toEqual([]);
+    expect(disabledSource.shadowed).toEqual([]);
+
+    const disabledVictim = analyseSources(registry, [
+      composited("a", "blur", { enabled: false }),
+      composited("b", "blur"),
+      composited("c", "gen"),
+    ]);
+    expect(disabledVictim.shadowed.map((entry) => entry.nodeId)).toEqual(["b"]);
+  });
+
+  it("never refuses a stack containing a source node", () => {
+    // The rule this file's other blocks apply is refusal; this one is not.
+    // Asserted rather than assumed, because a warning added to `validateStack`
+    // later would make Surprise Me discard every stack containing a generator.
+    const registry = registryOf(GEN, BLUR, DITHER);
+    expect(
+      validateStack(registry, [
+        node("a", "blur"),
+        node("b", "dither"),
+        node("c", "gen"),
+      ]).ok,
+    ).toBe(true);
   });
 });

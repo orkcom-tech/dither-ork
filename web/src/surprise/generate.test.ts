@@ -601,3 +601,79 @@ describe("rerollNodeParams (F-SM-08)", () => {
     ).toThrow(SurpriseError);
   });
 });
+
+/**
+ * The generator prefix, which a reroll must not throw away.
+ *
+ * Surprise Me's grammar is a sentence about a photograph and composes no source
+ * node. On a document that has one — a blank canvas whose picture is made by a
+ * Noise or Gradient node — a reroll that dropped it would leave a black frame,
+ * and it would do so through the feature the owner uses most.
+ */
+describe("a stack that begins with a generator", () => {
+  const GENERATOR = "gen-noise";
+
+  function withGenerator(nodeId: string): DitherDocument {
+    return {
+      ...BASE,
+      source: { name: "Blank 1024×1024", width: 1024, height: 1024 },
+      stack: [
+        {
+          id: nodeId,
+          effect: GENERATOR,
+          enabled: true,
+          opacity: 1,
+          blend: "normal",
+          params: {},
+          seed: 1,
+        },
+      ],
+    };
+  }
+
+  it("keeps the generator at the head of the rerolled stack", () => {
+    const result = surprise(0x9e3779b97f4a7c15n, 0.5, { base: withGenerator("n1") });
+    expect(result.document.stack[0]?.effect).toBe(GENERATOR);
+    expect(result.document.stack[0]?.id).toBe("n1");
+    // And the rest is a real reroll rather than the generator alone.
+    expect(result.document.stack.length).toBeGreaterThan(1);
+  });
+
+  it("resamples the generator's own parameters, so the look still rerolls", () => {
+    const a = surprise(1n, 0.9, { base: withGenerator("n1") });
+    const b = surprise(2n, 0.9, { base: withGenerator("n1") });
+    expect(a.document.stack[0]?.params).not.toEqual(b.document.stack[0]?.params);
+  });
+
+  it("mints unique ids when the generator's own id is in the composed range", () => {
+    // Both id generators mint `n<k>`. A base document whose generator happens
+    // to be `n2` would collide with the second composed node, and a stack with
+    // two nodes of one id is one `analyseGraph` refuses as an ambiguous edge
+    // target — correctly, and far from here.
+    const result = surprise(7n, 0.8, { base: withGenerator("n2") });
+    const ids = result.document.stack.map((node) => node.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids[0]).toBe("n2");
+  });
+
+  it("does not keep a source node that is not at the head", () => {
+    // A generator further down is a composite over the picture rather than the
+    // thing making it, so it is rerolled away with everything else.
+    const base: DitherDocument = {
+      ...BASE,
+      stack: [
+        { id: "n1", effect: "invert", enabled: true, opacity: 1, blend: "normal", params: {}, seed: 1 },
+        { id: "n2", effect: GENERATOR, enabled: true, opacity: 0.5, blend: "normal", params: {}, seed: 2 },
+      ],
+    };
+    const result = surprise(11n, 0.5, { base });
+    expect(result.document.stack[0]?.effect).not.toBe(GENERATOR);
+  });
+
+  it("still produces a stack the registry accepts", () => {
+    for (let seed = 1n; seed <= 40n; seed += 1n) {
+      const result = surprise(seed, 0.7, { base: withGenerator("n1") });
+      expect(validateStack(registry, result.document.stack).ok).toBe(true);
+    }
+  });
+});

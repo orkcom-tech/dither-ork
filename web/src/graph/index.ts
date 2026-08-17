@@ -45,6 +45,13 @@ export type { NodeAsset, NodeAssetStoreOptions, NodeAssets } from "./assets";
 export { PORT_ORDER, analyseGraph, renderUpTo } from "./topology";
 export type { GraphTopology } from "./topology";
 
+export {
+  analyseFeedback,
+  readsFeedback,
+  stackReadsFeedback,
+} from "./feedback";
+export type { FeedbackAnalysis } from "./feedback";
+
 export { NodeCache, frameBufferBytes } from "./cache";
 export type { NodeCacheOptions, NodeCacheStats, SurfaceOwner } from "./cache";
 

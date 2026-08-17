@@ -120,6 +120,24 @@ export interface RenderParams {
   readonly factor: number;
   readonly lane: RenderLane;
   readonly present: PresentAs;
+  /**
+   * Which frame of the loop this is. Defaults to 0 when absent, which is every
+   * still render.
+   *
+   * Bound parameters are resolved to concrete numbers before a document is sent
+   * here, so for every effect but one this is a label the graph carries and
+   * nothing reads. The exception is feedback (F-FB-01), whose history is
+   * indexed by it: frame N is the product of frames 0..N, so the worker's frame
+   * store serves the frame it holds and **refuses** any other rather than
+   * inventing a history. The caller renders 0..N in order; see
+   * `ui/timeline/preview.ts` for the preview and `ui/export/animated.ts` for
+   * the export, which already did.
+   *
+   * Optional rather than required so that every existing caller — the session's
+   * still pump, the export dialog, the batch queue — keeps meaning exactly what
+   * it meant before this field existed.
+   */
+  readonly frame?: number;
 }
 
 export type RenderedImage =

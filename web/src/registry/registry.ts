@@ -189,6 +189,7 @@ export class EffectRegistryBuilder {
 
     log.info("node registry sealed", {
       effects: descriptors.length,
+      source: (bySlot.get("source") ?? []).length,
       preprocess: (bySlot.get("preprocess") ?? []).length,
       dither: (bySlot.get("dither") ?? []).length,
       postprocess: (bySlot.get("postprocess") ?? []).length,

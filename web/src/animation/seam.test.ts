@@ -19,7 +19,15 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { setLevel } from "../lib/log";
-import { binding, patternNode, plainNode, seededNode, testDocument, testRegistry } from "./fixture";
+import {
+  binding,
+  feedbackNode,
+  patternNode,
+  plainNode,
+  seededNode,
+  testDocument,
+  testRegistry,
+} from "./fixture";
 import type { CyclesPerLoop } from "./cycles";
 import { planAnimation } from "./plan";
 import { PATTERN_ROTATION } from "./temporal";
@@ -286,5 +294,90 @@ describe("the report never throws", () => {
     // refusing: a single-frame loop is a still, which is a legitimate document.
     expect(report.ok).toBe(true);
     expect(report.issues.some((i) => i.code === "sampled-below-nyquist")).toBe(true);
+  });
+});
+
+/**
+ * A document that was never going to close — decision 2 of
+ * `docs/dither-ork-node-graph.md`.
+ *
+ * The interesting assertions are the negative ones. It would be easy to make a
+ * feedback document *fail* the seam check, and that is precisely the outcome
+ * the decision rejects: F-AN-06 exists to stop an export that will visibly jump
+ * where the author expected it not to, and a document containing feedback is
+ * one where the author asked for exactly that. So the report has to say it,
+ * clearly, at a level that is not a failure — and the per-binding checks have
+ * to keep their teeth, because "this does not close" is not a licence for a
+ * modulator to be wrong as well.
+ */
+describe("a document containing a feedback node", () => {
+  function feedbackPlan(bindings: Parameters<typeof testDocument>[1] = []) {
+    return planAnimation(
+      testDocument([plainNode(), patternNode(), feedbackNode()], bindings),
+      registry,
+    );
+  }
+
+  it("is marked non-looping by the plan, naming the node", () => {
+    const plan = feedbackPlan();
+    expect(plan.loops).toBe(false);
+    expect(plan.feedbackNodes).toEqual(["feedback"]);
+  });
+
+  it("still loops when the feedback node is disabled", () => {
+    // A disabled node is wired out of the graph and never runs, so it reads no
+    // history. Narrowing the guarantee for it would cost the document its loop
+    // for nothing.
+    const document = testDocument([plainNode(), { ...feedbackNode(), enabled: false }]);
+    const plan = planAnimation(document, registry);
+    expect(plan.loops).toBe(true);
+    expect(plan.feedbackNodes).toEqual([]);
+  });
+
+  it("reports that it does not close, and does not fail for it", () => {
+    const report = validateLoopSeam(feedbackPlan());
+    expect(report.ok).toBe(true);
+    expect(report.loops).toBe(false);
+    const issue = report.issues.find((entry) => entry.code === "does-not-loop");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("info");
+    expect(issue?.message).toContain("does not loop");
+    expect(issue?.message).toContain("feedback");
+  });
+
+  it("does not run the hash comparison, and says so by leaving hashes null", () => {
+    // The two hashes cover the graph's parameters, which a history is not part
+    // of, so they would in fact agree — and reporting "the loop closes" for a
+    // document that does not is the exact false reassurance F-AN-06 exists to
+    // prevent. Asking the question at all costs a second prepare.
+    const asked: number[] = [];
+    const report = validateLoopSeam(feedbackPlan(), {
+      hashForFrame: (frame) => {
+        asked.push(frame);
+        return "h";
+      },
+    });
+    expect(asked).toEqual([]);
+    expect(report.hashes).toBeNull();
+    expect(report.issues.some((entry) => entry.code === "frame-hash-mismatch")).toBe(false);
+  });
+
+  it("keeps F-AN-03 at full strength for its bindings", () => {
+    // A non-integer cycle count is still an error. The guarantee narrows for
+    // the document as a whole and not for its modulators. Reached by a cast
+    // past the constructor, exactly as the non-feedback case above is, because
+    // that is the only route such a value could ever take.
+    const plan = feedbackPlan([binding({ nodeId: "pattern", param: "spread" })]);
+    const first = plan.bindings[0];
+    if (first === undefined) throw new Error("fixture produced no binding");
+    const report = validateLoopSeam({
+      ...plan,
+      bindings: [{ ...first, spec: { ...first.spec, cycles: 2.5 as CyclesPerLoop } }],
+    });
+    expect(report.ok).toBe(false);
+    expect(report.issues.some((entry) => entry.code === "phase-not-periodic")).toBe(true);
+    // And the non-looping note is still there beside it, because both facts
+    // are true and a reader needs both.
+    expect(report.issues.some((entry) => entry.code === "does-not-loop")).toBe(true);
   });
 });

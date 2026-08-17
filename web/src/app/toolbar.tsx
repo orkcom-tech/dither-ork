@@ -24,15 +24,21 @@ export function registerToolbar(session: EditorSession): void {
     component: () => <OpenImage session={session} />,
   });
   registerToolbarItem({
-    id: "history",
+    id: "new-canvas",
     side: "start",
     order: 1,
+    component: () => <NewCanvas session={session} />,
+  });
+  registerToolbarItem({
+    id: "history",
+    side: "start",
+    order: 2,
     component: () => <HistoryControls session={session} />,
   });
   registerToolbarItem({
     id: "view",
     side: "start",
-    order: 2,
+    order: 3,
     component: () => <ViewControls />,
   });
   registerToolbarItem({
@@ -87,6 +93,74 @@ function OpenImage({ session }: { readonly session: EditorSession }): React.Reac
       />
       {busy ? "opening…" : "open image"}
     </label>
+  );
+}
+
+/**
+ * Sizes offered for a blank canvas.
+ *
+ * A closed list rather than two number fields, because the toolbar is a row of
+ * buttons and a pair of spinners in it would be the widest control on screen
+ * for a value almost nobody types. The five here are the ones a generative
+ * document actually starts from: a square to work in, a square to export, a
+ * large square, and the two video frames. Anything else is reachable by opening
+ * an image of that size, which is what a person with a specific size in mind
+ * already has.
+ */
+const CANVAS_SIZES: readonly { readonly label: string; readonly width: number; readonly height: number }[] = [
+  { label: "512 × 512", width: 512, height: 512 },
+  { label: "1024 × 1024", width: 1024, height: 1024 },
+  { label: "2048 × 2048", width: 2048, height: 2048 },
+  { label: "1920 × 1080", width: 1920, height: 1080 },
+  { label: "1080 × 1920", width: 1080, height: 1920 },
+];
+
+/**
+ * Start from a blank canvas.
+ *
+ * The entry point for a document that has no photograph: a generator (the
+ * `source` slot) makes the picture, and this is what gives the document the one
+ * thing a generator cannot — a size. See `io/source.ts`'s `blankSource` for why
+ * the size has to live here rather than on the node.
+ *
+ * It sits beside "open image" because it is the same decision — what am I
+ * starting from — and putting it in a menu would make the generative half of
+ * the tool something you have to already know about.
+ */
+function NewCanvas({ session }: { readonly session: EditorSession }): React.ReactElement {
+  const [index, setIndex] = React.useState(1);
+  const size = CANVAS_SIZES[index] ?? CANVAS_SIZES[0];
+
+  return (
+    <React.Fragment>
+      <select
+        className="ui-button toolbar__size"
+        aria-label="Blank canvas size"
+        title="Size of the blank canvas"
+        value={index}
+        onChange={(event) => setIndex(Number(event.target.value))}
+        data-testid="canvas-size"
+      >
+        {CANVAS_SIZES.map((candidate, at) => (
+          <option key={candidate.label} value={at}>
+            {candidate.label}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="ui-button"
+        title="Start from an empty canvas — for a stack that begins with a Noise, Gradient or Shape source"
+        data-testid="new-canvas"
+        onClick={() => {
+          if (size === undefined) return;
+          log.info("blank canvas requested", { width: size.width, height: size.height });
+          session.newCanvas(size.width, size.height);
+        }}
+      >
+        new canvas
+      </button>
+    </React.Fragment>
   );
 }
 

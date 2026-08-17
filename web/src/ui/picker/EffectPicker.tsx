@@ -15,7 +15,7 @@ import { helpFor } from "../help";
 // styles correctly whatever else happens to be registered — the same reason
 // `StackPanel` imports it.
 import "../properties/properties.css";
-import { EXECUTION_LABEL, SLOT_LABEL } from "../stack/model";
+import { EXECUTION_LABEL, SLOT_LABEL, SLOT_ORDER } from "../stack/model";
 import type { MatchReason, Segment } from "./match";
 import {
   buildPicker,
@@ -29,12 +29,14 @@ import "./picker.css";
 
 const log = logger("app");
 
-const SLOT_FILTERS: readonly (NodeSlot | null)[] = [
-  null,
-  "preprocess",
-  "dither",
-  "postprocess",
-];
+/**
+ * The filter chips: "all", then the slots in the order a stack runs in.
+ *
+ * The order comes from `SLOT_ORDER` rather than being written out again here,
+ * so adding a slot cannot give the picker a different reading order than the
+ * badge and the guide have.
+ */
+const SLOT_FILTERS: readonly (NodeSlot | null)[] = [null, ...SLOT_ORDER];
 
 export interface EffectPickerProps {
   readonly registry: EffectRegistry;

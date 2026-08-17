@@ -304,16 +304,36 @@ export function animatedSourceFor(deps: AnimatedExportDeps): AnimatedFrameSource
       const wanted = request.only ?? Array.from({ length: total }, (_, index) => index);
       const started = performance.now();
 
-      for (const index of wanted) {
+      // A whole export asks for 0..N-1 in order and this changes nothing for
+      // it. A *sampled* one — the size estimate takes three frames — asks for
+      // 0, N/2, N-1, and for a document containing a feedback node frame N/2
+      // does not exist until frames 1..N/2-1 have been rendered. So the
+      // sampled case renders the run and delivers the sample: rendering fewer
+      // frames and calling the result frame N/2 would be a picture the file
+      // does not contain. Only the frames the caller asked for are handed over.
+      const deliver = new Set(wanted);
+      const ordered = timelinePlan.animation.loops
+        ? wanted
+        : Array.from({ length: Math.max(...wanted, -1) + 1 }, (_, index) => index);
+      if (ordered.length !== wanted.length) {
+        log.info("animated export renders from zero", {
+          asked: wanted.length,
+          rendering: ordered.length,
+          why: "this document contains a feedback node, so frame N is the product of frames 0..N",
+        });
+      }
+
+      for (const index of ordered) {
         if (aborted(request.signal)) {
           throw new DOMException("the animated export was cancelled", "AbortError");
         }
         const frame = await renderOne(session, timelinePlan, index, snapshot.soloNodeId, request.signal);
-        await request.onFrame(index, frame);
+        if (deliver.has(index)) await request.onFrame(index, frame);
       }
 
       log.info("animated frames rendered", {
         frames: wanted.length,
+        rendered: ordered.length,
         of: total,
         ms: Math.round(performance.now() - started),
       });
@@ -357,6 +377,11 @@ async function renderOne(
   const { id, frame } = session.render.renderCancellable({
     document: documentAtFrame(plan, index),
     solo,
+    // Which frame of the loop this is. Only one node reads it — feedback,
+    // whose history is indexed by it — and for that node the worker refuses
+    // any frame but the one it can serve, so an export that skipped a frame
+    // would fail here rather than write a file with a trail that jumped.
+    frame: index,
     // The document's own resolution, always. F-UI-03's reduction is a property
     // of the preview; a file rendered at 40% would be a different picture,
     // because a dither is a function of the pixel grid it ran on.

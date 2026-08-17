@@ -53,7 +53,14 @@ export {
   srgbBytesFromLinearSurface,
 } from "./linear";
 
-export { sourceFrameBuffer, sourceHash, sourceRefOf, type SourceImage } from "./source";
+export {
+  blankSource,
+  sourceFrameBuffer,
+  sourceHash,
+  sourceRefOf,
+  type SourceFormat,
+  type SourceImage,
+} from "./source";
 
 export { decodeImage, type DecodeImageOptions } from "./decode";
 

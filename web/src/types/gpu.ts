@@ -1,7 +1,7 @@
 /**
  * The WebGPU pass layer.
  *
- * Roughly 48 of the 63 effects are per-pixel independent and run as WebGPU
+ * Roughly 56 of the 71 effects are per-pixel independent and run as WebGPU
  * compute passes; the ~15 error-diffusion kernels are inherently serial and run
  * in WASM. This file is the contract between those parallel effects and the
  * pass compiler that schedules them.
@@ -268,6 +268,30 @@ export type PassBinding =
   | { readonly role: "input-color"; readonly binding: number }
   /** The linear-light RGBA output. */
   | { readonly role: "output-color"; readonly binding: number }
+  /**
+   * **The previous frame's output at this node's own position in the stack.**
+   *
+   * The one role that is not a function of the current frame, and the only
+   * thing in the pass vocabulary that makes a node impure. Legal only on a pass
+   * whose effect declares `readsFeedback`; the compiler refuses it otherwise
+   * rather than binding a texture full of whatever the allocator left there.
+   *
+   * `gpu/composite.ts` argues that a second colour input does not belong in
+   * this vocabulary, and that argument still holds for the composite: opacity
+   * and blend are a property of *every* node, so expressing them as a binding
+   * would put a role in the vocabulary that 52 effects have to be refused for.
+   * Feedback is the opposite shape. It is **one** effect that genuinely reads a
+   * second colour surface, that surface is not derivable from anything else in
+   * the batch, and a program of its own could not be reached through the
+   * registry at all — a `gpu` descriptor with no `GpuEffect` fails the
+   * catalogue. So it is a binding, declared by exactly one effect, and the
+   * compiler makes that "exactly one" a check rather than a convention.
+   *
+   * The texture is supplied by `gpu/feedback.ts`'s frame store, which owns it,
+   * clears it explicitly at frame 0, and is keyed per node instance. It is
+   * never the node's input or output texture, so nothing aliases.
+   */
+  | { readonly role: "feedback-color"; readonly binding: number }
   /**
    * The index map. Only legal on a pass whose effect declares
    * `requiresIndexMap`, and the compiler rejects it otherwise rather than

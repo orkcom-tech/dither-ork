@@ -5,6 +5,77 @@ What changed, for someone deciding whether they care. Newest first.
 Dates are the day the change reached <https://dither.orkcom-tech.cc>, which is
 also the day it landed on `main` — every push that passes CI deploys itself.
 
+## Unreleased
+
+### Added
+
+- **Generators — three effects that take no image, so a document can exist
+  without a photograph.** `Noise field`, `Gradient` and `Shape` sit in a new
+  `source` slot and make their picture from their parameters alone. **new
+  canvas** in the toolbar starts an empty document at a chosen size, and from
+  there the whole application works as it always did: the stack goes on top,
+  the palette applies, animation binds, export writes a file.
+
+  - **Noise field** — value, gradient (Perlin), simplex, Worley and Worley
+    edges, layered as fractional Brownian motion with octaves, octave step,
+    falloff and a ridge fold. Every field is three-dimensional, and the third
+    coordinate is `Evolve`: animate that and the texture boils in place instead
+    of sliding past, which is what a noise source is animated for.
+  - **Gradient** — linear, radial or conical, shaped by the same transfer curve
+    the Curves node uses, with repeats and mirroring for bands.
+  - **Shape** — circle, rectangle, polygon or star, drawn from a signed distance
+    field. One `Softness` control covers both looks it is reached for: around a
+    pixel it is a crisp antialiased figure, in the hundreds it is a soft haze of
+    that shape, because the tone fades across real distance rather than across a
+    boolean edge.
+
+  All three are greyscale on purpose — put `Gradient map` after one for colour,
+  which gives a real colour picker rather than six numbers pretending to be two
+  colours. All of them close their loops: unlike feedback, a generator has no
+  reason to stop a document looping, and a noise field animated on `Evolve`
+  passes the seam check.
+
+  **Where a generator sits is visible rather than refused.** At full opacity in
+  normal blend it replaces the picture outright, and the stack panel dims every
+  row above it and says which node is throwing their work away. At any other
+  opacity or blend it is composited over what came before — a gradient at 40% in
+  multiply over a photograph — which is why the position is not an error.
+
+- **A shared signed distance field (F-INF-01), the analytic half.**
+  `web/src/gpu/sdf.ts` fixes what a distance field *is* here — one value per
+  pixel, in working-resolution texels, negative inside — so that outline, glow,
+  dilate/erode and the wave field can later read one without each inventing its
+  own. The closed-form primitives ship and are diffed mechanically against every
+  shader that copies them. The other half — a distance transformed *out of the
+  picture*, which is what F-PT-10 needs — is not built, and `docs/ARCHITECTURE.md`
+  says exactly what it would take.
+
+- **Feedback — the 68th effect, and the first that reads the previous frame.**
+  A `Feedback` node composites its own output from the frame before back over
+  the current one, decayed and optionally drifting, zooming or spinning. That
+  one node is where trails, smear, endless zoom, spirals and most "living"
+  texture come from. Controls: decay, blend, trail opacity, drift X/Y, zoom,
+  spin. Its history buffer is cleared to transparent black at frame 0, so with
+  the default `screen` blend the first frame of a feedback document is its input
+  exactly.
+
+  Three things about it are true and are said out loud wherever they bite,
+  because each narrows something the application previously guaranteed:
+
+  - **This node and everything after it stop being cached.** A content hash
+    cannot describe a picture that depends on every frame before it. Everything
+    *upstream* caches exactly as it did — on a `blur → feedback` stack, every
+    frame after the first executes one node and takes one cache hit — and the
+    excluded nodes are named in the log per render.
+  - **A document containing it does not loop.** Animated export reports that
+    before you commit to encoding, and the note travels with the finished file,
+    rather than failing a seam check the document was never going to pass.
+    Every per-modulator check keeps its full strength.
+  - **Frames render in order.** Scrubbing backwards re-renders from frame 0,
+    with the existing preview badge up and a "replaying k/n" counter on the
+    transport bar. Nothing anywhere shows a frame the export would not produce:
+    a frame the store cannot serve is refused rather than faked.
+
 ## 2026-08-08
 
 ### Fixed

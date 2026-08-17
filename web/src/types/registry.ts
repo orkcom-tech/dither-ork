@@ -544,6 +544,33 @@ export interface EffectDescriptor {
    * time an effect is compiled.
    */
   readonly resamples?: boolean;
+  /**
+   * True when this node reads **the previous frame's output at its own position
+   * in the stack** — the feedback node, and nothing else in the catalogue.
+   *
+   * It is the one declaration that says a node is *not a pure function of its
+   * inputs*, and three layers that never see a pass read it:
+   *
+   * - `graph/feedback.ts` computes the cache exclusion from it. A node that
+   *   reads its own history, and everything downstream of one, cannot be keyed
+   *   on a content hash — the hash is the same on every frame and the pixels
+   *   are not — so those nodes are excluded from the node cache and the
+   *   feedback node keeps its own frame store instead. Upstream of it caches
+   *   normally, which is most of the win.
+   * - `animation/plan.ts` marks the document **non-looping** from it. F-AN-03
+   *   guarantees frame N equals frame 0 by construction; a decaying trail
+   *   cannot satisfy that, so the guarantee narrows honestly rather than
+   *   quietly becoming false.
+   * - `state/render/renderer.ts` requires frames to arrive in order, because
+   *   frame N is the product of frames 0..N.
+   *
+   * Absent means the ordinary case — a pure function of its inputs — exactly as
+   * an absent `resamples` means the same extent. The declaration cannot drift
+   * from the passes: `gpu/compiler.ts` refuses a `feedback-color` binding on an
+   * effect that does not declare this, and refuses this declaration on an
+   * effect whose passes bind no feedback.
+   */
+  readonly readsFeedback?: boolean;
 }
 
 /**
@@ -715,6 +742,11 @@ export type RegistryIssueCode =
   | "diffusion-must-run-serially"
   | "index-map-consumer-in-preprocess"
   | "resampler-must-run-on-gpu"
+  | "feedback-must-run-on-gpu"
+  | "feedback-must-not-resample"
+  | "source-must-run-on-gpu"
+  | "source-must-not-read-index-map"
+  | "source-must-not-resample"
   | "missing-summary"
   | "missing-description"
   | "unhelpful-description"
@@ -1463,6 +1495,55 @@ export function validateEffect(effect: EffectDescriptor): readonly RegistryIssue
     );
   }
 
+  // --- source nodes ------------------------------------------------------
+  //
+  // A source node produces an image from its parameters alone. All three rules
+  // below are the same sentence read three ways: it has no image input, so
+  // nothing about its input can be true of it.
+
+  // The serial backend's kernels are transforms of a surface it is handed —
+  // that is what a `WasmBackend` node *is*. A source has no such surface, so
+  // there is nothing for a serial kernel to be given and no way for one to say
+  // "write a frame from nothing". A compute pass says it by declaring an
+  // `output-color` binding and no `input-color`, which is exactly what
+  // `gpu/compiler.ts` checks.
+  if (effect.slot === "source" && effect.execution !== "gpu") {
+    issues.push(
+      issue(
+        id,
+        "source-must-run-on-gpu",
+        `sits in the source slot with execution "${effect.execution}"; a generator writes a frame with no input surface, which is a compute pass declaring output-color and no input-color, and the serial backend has no such shape`,
+      ),
+    );
+  }
+
+  // Same argument as `index-map-consumer-in-preprocess`, one slot earlier and
+  // stronger: a source node is in front of every quantizer *and* reads no
+  // image, so an index map could not reach it by either route.
+  if (effect.slot === "source" && effect.requiresIndexMap) {
+    issues.push(
+      issue(
+        id,
+        "source-must-not-read-index-map",
+        "sits in the source slot and reads the index map; a generator has no image input, so no map can reach it however the stack is ordered",
+      ),
+    );
+  }
+
+  // `resamples` declares that a node writes a different extent than the one it
+  // reads. A source reads none: its extent is the working extent it is asked
+  // for, and `PassExtent` is defined relative to an `input-color` binding the
+  // compiler will refuse it for having.
+  if (effect.slot === "source" && effect.resamples === true) {
+    issues.push(
+      issue(
+        id,
+        "source-must-not-resample",
+        "sits in the source slot and declares resamples: true; a resampling rule is relative to the extent a pass reads, and a generator reads none — it writes the working extent it is given",
+      ),
+    );
+  }
+
   // Resampling is expressed as a `PassExtent` on a compute pass, and a serial
   // kernel has none. A `wasm` effect claiming to resample is a declaration
   // nothing could honour: the WASM backend hands back a buffer at the extent it
@@ -1474,6 +1555,34 @@ export function validateEffect(effect: EffectDescriptor): readonly RegistryIssue
         id,
         "resampler-must-run-on-gpu",
         `declares resamples: true with execution "${effect.execution}"; a changed extent is a PassExtent on a compute pass and a serial kernel has none`,
+      ),
+    );
+  }
+
+  // Feedback is a second colour binding on a compute pass, so a serial kernel
+  // has no way to express it. Refused here rather than at compile time so a
+  // mislabelled descriptor fails the catalogue — which is terminal and lists
+  // every issue — instead of failing the first render that reaches the node.
+  if (effect.readsFeedback === true && effect.execution !== "gpu") {
+    issues.push(
+      issue(
+        id,
+        "feedback-must-run-on-gpu",
+        `declares readsFeedback: true with execution "${effect.execution}"; the previous frame arrives as a feedback-color binding on a compute pass and a serial kernel has none`,
+      ),
+    );
+  }
+
+  // The frame store holds one texture per node at the extent that node writes.
+  // A node that resampled would write a different shape than the history it
+  // just read, so frame N would read frame N-1 at the wrong grid — and the
+  // extent would keep changing on every frame it ran.
+  if (effect.readsFeedback === true && effect.resamples === true) {
+    issues.push(
+      issue(
+        id,
+        "feedback-must-not-resample",
+        "declares readsFeedback and resamples together; the frame store holds the previous frame at the extent this node writes, and a node that changes extent has no common pixel grid with its own history",
       ),
     );
   }

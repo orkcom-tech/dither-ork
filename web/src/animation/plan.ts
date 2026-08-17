@@ -41,6 +41,7 @@
 import type { DitherDocument, StackNode } from "../types/document";
 import type { EffectDescriptor } from "../types/registry";
 import type { EffectRegistry } from "../registry/registry";
+import { logger } from "../lib/log";
 import type { LoopClock } from "./clock";
 import { loopClock, loopFrame, loopTime } from "./clock";
 import type { GlobalTiming, ResolvedBinding } from "./binding";
@@ -74,7 +75,43 @@ export interface AnimationPlan {
    * source of movement without that file being told about it.
    */
   readonly animatedNodes: readonly string[];
+  /**
+   * Enabled nodes that read their own previous frame (F-FB-01), in stack order.
+   *
+   * Empty for every document that has none, which is every document this
+   * application could express before feedback existed. When it is not empty two
+   * things are true of the whole plan and both are stated rather than inferred:
+   * the document **does not loop** (see {@link loops}), and its frames must be
+   * rendered in order from zero.
+   */
+  readonly feedbackNodes: readonly string[];
+  /**
+   * Whether frame N is frame 0.
+   *
+   * True for every document without a feedback node in it, and that is not a
+   * hope — F-AN-03 makes cycles-per-loop an integer in the type system, so the
+   * modulators return to their starting phase by construction and F-AN-06
+   * hash-validates it before any animated export.
+   *
+   * **False the moment a feedback node is enabled anywhere in the stack**, and
+   * that is a fact about the document rather than a failure of it. A decaying
+   * trail is the product of every frame before it; nothing that accumulates can
+   * return to its own beginning after N frames, and no arrangement of the
+   * controls makes it. So the guarantee narrows honestly here — the loop-seam
+   * report says the document does not close *and why*, and animated export
+   * states it before the user commits to encoding — rather than staying
+   * absolute and quietly becoming false. Decision 2 of
+   * `docs/dither-ork-node-graph.md`.
+   *
+   * F-AN-03 keeps its full strength everywhere else: `validateLoopSeam` still
+   * checks every binding's phase, and a non-periodic modulator is still an
+   * error in a non-looping document, because "this document does not close" is
+   * not a licence for a binding to be wrong as well.
+   */
+  readonly loops: boolean;
 }
+
+const log = logger("graph");
 
 interface NodeContext {
   readonly node: StackNode;
@@ -158,6 +195,22 @@ export function planAnimation(
     if (variation.variation.mode !== "static") moving.add(variation.nodeId);
   }
 
+  // A **disabled** feedback node does not count. `prepareGraph` wires a
+  // disabled node out of the graph entirely, so it reads no history and cannot
+  // stop the document closing; marking a document non-looping because of a node
+  // that never runs would narrow the guarantee for nothing.
+  const feedbackNodes = document.stack
+    .filter((node) => node.enabled && contexts.get(node.id)?.descriptor.readsFeedback === true)
+    .map((node) => node.id);
+
+  if (feedbackNodes.length > 0) {
+    log.info("document does not loop", {
+      feedbackNodes: feedbackNodes.join(","),
+      frames: clock.frames,
+      why: "a feedback node's output is the product of every frame before it, so frame N is not frame 0 (F-AN-03 narrows; see docs/dither-ork-node-graph.md decision 2)",
+    });
+  }
+
   return {
     document,
     clock,
@@ -166,6 +219,8 @@ export function planAnimation(
     bindings,
     variations,
     animatedNodes: document.stack.filter((node) => moving.has(node.id)).map((node) => node.id),
+    feedbackNodes,
+    loops: feedbackNodes.length === 0,
   };
 }
 

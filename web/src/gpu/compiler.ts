@@ -43,6 +43,8 @@ export class PassCompileError extends Error {
 export interface BindingPlan {
   readonly inputColor: number | null;
   readonly outputColor: number | null;
+  /** The previous frame at this node's position. Only the feedback effect has one. */
+  readonly feedbackColor: number | null;
   readonly inputIndex: number | null;
   readonly outputIndex: number | null;
   readonly palette: number | null;
@@ -89,6 +91,7 @@ export interface CompiledEffect {
 interface MutablePlan {
   inputColor: number | null;
   outputColor: number | null;
+  feedbackColor: number | null;
   inputIndex: number | null;
   outputIndex: number | null;
   palette: number | null;
@@ -123,6 +126,7 @@ function planBindings(
   const plan: MutablePlan = {
     inputColor: null,
     outputColor: null,
+    feedbackColor: null,
     inputIndex: null,
     outputIndex: null,
     palette: null,
@@ -165,6 +169,29 @@ function planBindings(
           ...base,
           storageTexture: { access: "write-only", format: "rgba16float", viewDimension: "2d" },
         });
+        break;
+
+      case "feedback-color":
+        if (descriptor.readsFeedback !== true) {
+          // The whole point of the declaration. An effect that binds the
+          // previous frame without saying so would be cached on a content hash
+          // that cannot see the history, and would show frame 3's pixels for
+          // frame 40 with nothing anywhere reporting it.
+          throw new PassCompileError(
+            `pass ${pass.id}: binds feedback-color, but effect "${descriptor.id}" does not declare readsFeedback; a node that reads its own previous frame is not a pure function of its inputs and the node cache has to be told`,
+          );
+        }
+        plan.feedbackColor = claim(
+          plan.feedbackColor,
+          "feedback-color",
+          binding.binding,
+          pass.id,
+        );
+        // Sampled like the colour input, and read with `textureLoad` at integer
+        // coordinates for the same reason: the working format is linear-light
+        // `rgba16float` and no filtering is wanted. The transform of the
+        // fed-back frame does its own bilinear fetch in the shader.
+        entries.push({ ...base, texture: { sampleType: "float", viewDimension: "2d" } });
         break;
 
       case "input-index":
@@ -376,6 +403,86 @@ export function validateResamplingDeclaration(
 }
 
 /**
+ * `EffectDescriptor.readsFeedback` against what the passes actually bind.
+ *
+ * The mirror of {@link validateResamplingDeclaration}, and it matters more,
+ * because both directions of a drift here are silent:
+ *
+ * - **Declared and not bound** excludes the node and everything after it from
+ *   the cache for a history it never reads — a permanent re-render of the tail
+ *   of every stack containing it, and a document marked non-looping for no
+ *   reason.
+ * - **Bound and not declared** is caught by `planBindings` above, which refuses
+ *   the binding outright; this function is what makes the check symmetric so
+ *   the pair can be read as one rule.
+ */
+export function validateFeedbackDeclaration(
+  descriptor: EffectDescriptor,
+  gpu: GpuEffect,
+): void {
+  const reading = gpu.passes.filter((pass) =>
+    pass.bindings.some((binding) => binding.role === "feedback-color"),
+  );
+  const declared = descriptor.readsFeedback === true;
+
+  if (declared && reading.length === 0) {
+    throw new PassCompileError(
+      `effect "${descriptor.id}" declares readsFeedback: true, but none of its ${gpu.passes.length} pass(es) binds feedback-color; the node and everything downstream of it would be excluded from the cache for a previous frame nothing reads`,
+    );
+  }
+  if (!declared && reading.length > 0) {
+    throw new PassCompileError(
+      `effect "${descriptor.id}" does not declare readsFeedback: true, but pass(es) ${reading.map((pass) => pass.id).join(", ")} bind feedback-color`,
+    );
+  }
+}
+
+/**
+ * `EffectDescriptor.slot === "source"` against what the passes actually bind.
+ *
+ * The third of these paired checks, and the one that makes "a generator takes
+ * no image" a fact the machine holds rather than a sentence in a comment.
+ *
+ * The rule is about the **first** pass, because that is the one whose input is
+ * the node's input. A source effect's first pass must bind no `input-color`:
+ * the buffer it would be handed is whatever the stack produced above it, and a
+ * generator that read it would not be a generator. A later pass of the same
+ * effect may bind `input-color` freely — it is reading what the pass before it
+ * wrote into this node's own surface chain, which is how every multi-pass
+ * effect already works.
+ *
+ * Both directions are silent failures if they drift:
+ *
+ * - **Source that reads its input** is a filter wearing a generator's badge. It
+ *   would sit in the picker under "source", promise a document that needs no
+ *   photograph, and render black on a blank canvas.
+ * - **Filter that reads nothing** is a generator nobody declared. It would be
+ *   offered anywhere in the stack, would silently discard everything above it
+ *   with nothing in the UI saying so, and `registry/stack.ts` would have no
+ *   grounds to mark the rows it killed.
+ */
+export function validateSourceDeclaration(
+  descriptor: EffectDescriptor,
+  gpu: GpuEffect,
+): void {
+  const first = gpu.passes[0];
+  if (first === undefined) return; // `compile` already refused an effect with no passes.
+  const readsInput = first.bindings.some((binding) => binding.role === "input-color");
+  const isSource = descriptor.slot === "source";
+
+  if (isSource && readsInput) {
+    throw new PassCompileError(
+      `effect "${descriptor.id}" sits in the source slot, but its first pass ${first.id} binds input-color; a generator produces its image from parameters alone, and the buffer it would be handed is the one it is defined not to read`,
+    );
+  }
+  if (!isSource && !readsInput) {
+    throw new PassCompileError(
+      `effect "${descriptor.id}" is in the "${descriptor.slot}" slot, but its first pass ${first.id} binds no input-color; a pass that reads no image produces one from nothing, which is the source slot — declare it, or the node would discard everything above it in the stack with nothing able to say so`,
+    );
+  }
+}
+
+/**
  * How many workgroups to dispatch for a pass at a given resolution.
  *
  * `per-row` and `per-column` divide by the *whole* workgroup, not by its x
@@ -465,6 +572,8 @@ export class PassCompiler {
       throw new PassCompileError(`effect "${descriptor.id}" declares no passes`);
     }
     validateResamplingDeclaration(descriptor, gpu);
+    validateFeedbackDeclaration(descriptor, gpu);
+    validateSourceDeclaration(descriptor, gpu);
 
     const passes: CompiledPass[] = [];
     for (const pass of gpu.passes) {
@@ -586,6 +695,7 @@ export class PassCompiler {
       plan: {
         inputColor: plan.inputColor,
         outputColor: plan.outputColor,
+        feedbackColor: plan.feedbackColor,
         inputIndex: plan.inputIndex,
         outputIndex: plan.outputIndex,
         palette: plan.palette,

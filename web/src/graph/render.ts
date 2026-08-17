@@ -140,11 +140,24 @@ export interface RenderOutcome {
   /**
    * The rendered frame.
    *
-   * Owned by the cache, not by the caller: present it or copy it before the
-   * next render, which may evict it under budget pressure. Releasing it is a
-   * double free.
+   * Owned by the cache unless {@link ownsBuffer} says otherwise: present it or
+   * copy it before the next render, which may evict it under budget pressure.
+   * Releasing a cache-owned buffer is a double free.
    */
   readonly buffer: FrameBuffer;
+  /**
+   * True when {@link buffer} belongs to the **caller**, who must release it
+   * through the same `SurfaceOwner` the render used, once it has been presented
+   * or encoded.
+   *
+   * It is true exactly when the graph output is downstream of a feedback node,
+   * because such a buffer never entered the cache and nothing else will ever
+   * free it. Reported rather than left to be inferred from the plan: a leaked
+   * working surface per frame is a leak that only shows up as an eviction storm
+   * several minutes into a playing loop, which is the hardest kind of leak to
+   * attribute.
+   */
+  readonly ownsBuffer: boolean;
   readonly stats: RenderStats;
   readonly diagnostics: RenderDiagnostics;
   readonly plan: RenderPlan;
@@ -206,21 +219,49 @@ export async function renderPrepared(
     gpuBatches: plan.gpuBatches,
     projectedCrossings: plan.projectedCrossings,
     retain: retain.kind,
+    uncached: plan.uncached.length,
   });
   for (const nodeId of plan.passthrough) {
     log.debug("node disabled, input passes through", { nodeId });
   }
 
-  /** nodeId -> the buffer it produced. Every entry is cache-owned and pinned. */
+  // Decision 1 of docs/dither-ork-node-graph.md, made readable. A stack whose
+  // tail re-renders on every frame is a real and deliberate cost, and the one
+  // thing that would make it mysterious is it happening silently.
+  if (plan.uncached.length > 0) {
+    log.info("feedback: nodes excluded from the content-hash cache", {
+      feedbackNodes: prepared.feedback.feedbackNodes.join(","),
+      excluded: plan.uncached.join(","),
+      excludedCount: plan.uncached.length,
+      cachedCount: plan.executedNodes - plan.uncached.length,
+      why: "a node that reads its own previous frame is not a pure function of its inputs, and neither is anything downstream of one",
+    });
+  }
+
+  /**
+   * nodeId -> the buffer it produced.
+   *
+   * Cache-owned and pinned for a cacheable node; owned by **this render** for
+   * one excluded by the feedback analysis, and then released by `retire` when
+   * its last consumer has run. `owned` below is the second set.
+   */
   const produced = new Map<string, FrameBuffer>();
   /** nodeId -> hash, for the pins this render still holds. */
   const livePins = new Map<string, ContentHash>();
+  /**
+   * nodeId -> a produced buffer the cache refused to take, which this render
+   * therefore owns. Released on every path, including the error path, except
+   * for the one buffer handed back to the caller.
+   */
+  const owned = new Map<string, FrameBuffer>();
   /** `${key}:${side}` -> a copy this render made and therefore owns. */
   const converted = new Map<string, FrameBuffer>();
 
   let boundaryBytes = 0;
   let crossings = 0;
   let nodesExecuted = 0;
+  /** The one owned buffer that leaves this function, or `null` on every other path. */
+  let handedOut: FrameBuffer | null = null;
 
   const lastUse = computeLastUse(plan);
 
@@ -303,8 +344,22 @@ export async function renderPrepared(
     };
   };
 
-  /** Take ownership of a produced buffer: cache it, pin it, file it. */
+  /**
+   * Take ownership of a produced buffer: cache it, pin it, file it.
+   *
+   * A node the feedback analysis excluded never reaches the cache at all —
+   * offering it would file a buffer under a hash that does not describe it, and
+   * the next frame would be served these pixels and reported as a hit. It is
+   * kept by this render instead and released when nothing is left to read it,
+   * which is the same lifetime a cached buffer's *pin* has; only the storage
+   * differs.
+   */
   const adopt = (planned: PlannedNode, buffer: FrameBuffer): FrameBuffer => {
+    if (!planned.cacheable) {
+      owned.set(planned.node.id, buffer);
+      produced.set(planned.node.id, buffer);
+      return buffer;
+    }
     const transient = retain.kind === "only" && !retain.hashes.has(planned.hash);
     const stored = deps.cache.offer(planned.hash, buffer, transient);
     deps.cache.pin(planned.hash);
@@ -313,7 +368,7 @@ export async function renderPrepared(
     return stored;
   };
 
-  /** Drop the pins and copies for everything whose last consumer has now run. */
+  /** Drop the pins, copies and owned buffers for everything whose last consumer has now run. */
   const retire = (stepIndex: number): void => {
     for (const [nodeId, hash] of [...livePins]) {
       const last = lastUse.get(nodeId);
@@ -321,6 +376,14 @@ export async function renderPrepared(
       livePins.delete(nodeId);
       produced.delete(nodeId);
       deps.cache.unpin(hash);
+      releaseConverted(nodeId);
+    }
+    for (const [nodeId, buffer] of [...owned]) {
+      const last = lastUse.get(nodeId);
+      if (last !== undefined && last > stepIndex) continue;
+      owned.delete(nodeId);
+      produced.delete(nodeId);
+      deps.surfaces.release(buffer);
       releaseConverted(nodeId);
     }
   };
@@ -531,6 +594,15 @@ export async function renderPrepared(
       cacheHits: plan.seeded.length,
       boundaryBytes,
     };
+    // Set before the return so the `finally` can tell the one buffer that is
+    // leaving from every other buffer this render owns. `null` unless the graph
+    // output is itself a node the cache refused, which is exactly the case
+    // where nothing else would ever free it.
+    handedOut =
+      plan.outputOrigin.kind === "source"
+        ? null
+        : (owned.get(plan.outputOrigin.nodeId) ?? null);
+
     const cacheStats = deps.cache.stats();
     const diagnostics: RenderDiagnostics = {
       gpuBatches: plan.gpuBatches,
@@ -541,13 +613,25 @@ export async function renderPrepared(
       cacheEntries: cacheStats.entries,
     };
 
-    log.info("render complete", { ...stats, ...diagnostics });
-    return { buffer: output, stats, diagnostics, plan };
+    log.info("render complete", {
+      ...stats,
+      ...diagnostics,
+      ownsBuffer: handedOut !== null,
+    });
+    return { buffer: output, ownsBuffer: handedOut !== null, stats, diagnostics, plan };
   } finally {
     // Runs on the error path too, so a backend failure mid-stack leaves neither
     // a pinned cache nor a leaked transfer copy behind.
     for (const hash of livePins.values()) deps.cache.unpin(hash);
     livePins.clear();
+    // Every buffer the cache would not take, except the one being handed to the
+    // caller — which is `null` on the error path, so a failure releases that one
+    // too rather than leaking a working surface per failed frame.
+    for (const buffer of owned.values()) {
+      if (buffer === handedOut) continue;
+      deps.surfaces.release(buffer);
+    }
+    owned.clear();
     for (const copy of converted.values()) deps.surfaces.release(copy);
     converted.clear();
   }

@@ -78,6 +78,18 @@ export interface AnimatedProgress extends Omit<ExportProgress, "stage"> {
   readonly frame: number;
   /** Frames in the loop. Zero before the subject is known. */
   readonly frames: number;
+  /**
+   * Present once, during `validating`, when this document does **not** return
+   * to its own first frame — it contains a feedback node (F-FB-01), whose
+   * output is the product of every frame before it.
+   *
+   * It is a progress field rather than only a note on the result because the
+   * point is to say it *before* the user commits to encoding 300 frames. The
+   * export is not refused: a non-looping animation is a legitimate thing to
+   * make and refusing it would refuse the whole point of the effect. Decision 2
+   * of `docs/dither-ork-node-graph.md`.
+   */
+  readonly nonLooping?: string;
 }
 
 export type AnimatedProgressListener = (progress: AnimatedProgress) => void;

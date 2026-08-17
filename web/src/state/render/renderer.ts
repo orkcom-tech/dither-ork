@@ -103,6 +103,22 @@ export interface RendererOptions {
 export interface RenderOptions {
   /** Render up to and including this node (F-ST-02). */
   readonly solo?: string | null;
+  /**
+   * Which frame of the loop this is. Defaults to 0 — a still document.
+   *
+   * It mattered to nothing before feedback existed: bound parameters are
+   * resolved to concrete numbers upstream, so a graph carries the frame index
+   * only as a label. It matters now, because a feedback node's history is
+   * indexed by it, and rendering frame 40 with a store holding frame 3 would be
+   * a picture the export would not produce.
+   *
+   * The renderer does **not** replay from zero on its own. It cannot: replaying
+   * needs the document at each intermediate frame, and resolving that is
+   * `animation/plan.ts`'s job on the other side of the worker boundary. What it
+   * does is refuse, naming the frame it can serve, so the caller replays. See
+   * `ui/timeline/preview.ts`.
+   */
+  readonly frame?: number;
   /** Declared by the viewport; carried into the graph and onto the frame. */
   readonly quality?: RenderQuality;
   /** Fraction of document resolution to render at, in (0, 1] — F-UI-03. */
@@ -290,11 +306,12 @@ export class DocumentRenderer {
     const cpu = this.#sourceAt(extent, source);
     throwIfAbandoned(options.signal);
 
+    const frame = options.frame ?? 0;
     const graph = buildRenderGraph(document, {
       width: extent.width,
       height: extent.height,
       quality,
-      frame: 0,
+      frame,
       solo: options.solo ?? null,
     });
 
@@ -329,6 +346,12 @@ export class DocumentRenderer {
     const cache = this.#cache;
     if (cache === null) throw new Error("the renderer has a source but no cache");
 
+    // A feedback node deleted from the stack, or a document replaced by
+    // another, would otherwise leave its chain holding two working surfaces for
+    // a node that no longer exists. Done before the render rather than after,
+    // so the textures are back in the pool before this frame allocates.
+    this.#layer.feedback.retain(graph.nodes.map((node) => node.id));
+
     const outcome = await renderGraph(
       {
         graph,
@@ -349,7 +372,18 @@ export class DocumentRenderer {
       },
     );
 
-    const presented = await this.#present(outcome.buffer, cid, options.present ?? "bytes");
+    let presented;
+    try {
+      presented = await this.#present(outcome.buffer, cid, options.present ?? "bytes");
+    } finally {
+      // The graph output is the caller's to free exactly when it never entered
+      // the cache — which is when it is downstream of a feedback node. Released
+      // on the error path too: `#present` reads the buffer back and encodes it,
+      // and a failure in there would otherwise leak one working surface per
+      // frame of a playing loop, which surfaces minutes later as an eviction
+      // storm nobody can attribute.
+      if (outcome.ownsBuffer) this.#surfaces.release(outcome.buffer);
+    }
     const totalMs = round(performance.now() - startedAt);
     log.info("frame ready", {
       cid,
@@ -383,6 +417,10 @@ export class DocumentRenderer {
   #dropSource(): void {
     this.#cache?.clear();
     this.#cache = null;
+    // Every chain was accumulated over the previous image at the previous
+    // extent, so none of it can be read again and holding it would keep one or
+    // two full surfaces per feedback node alive against the texture pool.
+    this.#layer.feedback.reset();
     for (const buffer of this.#uploads.values()) this.#surfaces.release(buffer);
     this.#uploads.clear();
     this.#previewSource = null;
