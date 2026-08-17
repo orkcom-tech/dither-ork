@@ -47,6 +47,26 @@
  * `run.mjs` is told the width and height of each frame rather than assuming the
  * fixture's.
  *
+ * ## One node in the catalogue is not a pure function of its inputs
+ *
+ * Every other effect is: hand it the fixture and it produces its picture, and
+ * one render is the whole of what there is to store. A node whose descriptor
+ * declares `readsFeedback` reads **its own output from the previous frame**, so
+ * a single render has nothing to read, and the scheduler refuses it rather than
+ * binding whatever was in that memory.
+ *
+ * So such a node is rendered the way the application renders it: several frames,
+ * each one's output fed back as the next one's history through the **same
+ * `FeedbackStore`** `state/render/gpu-backend.ts` uses — the real clear at frame
+ * 0, the real two-slot advance, the real copy — and the last frame is what the
+ * reference stores. See {@link FEEDBACK_FRAMES} for why the last frame and not
+ * the first.
+ *
+ * Keyed off the declaration and not off an effect id, so the second stateful
+ * node in the catalogue is covered on the day it lands rather than the day
+ * somebody remembers this file. Everything else still renders exactly one frame,
+ * through code the loop does not otherwise touch.
+ *
  * ## What is pinned
  *
  * The fixture, the palette, the seed, the uploaded tile, and normalized time.
@@ -114,6 +134,42 @@ const PALETTE_ID = "cga-16";
  * reports as an unstable reference rather than one it hides behind a tolerance.
  */
 const NODE_SEED = 0x2f6a_1b3d;
+
+/**
+ * How many frames a node declaring `readsFeedback` is advanced before its last
+ * frame becomes the reference.
+ *
+ * **Not one.** At frame 0 the history buffer is transparent black by
+ * construction, so with the default `screen` blend — and with `add`, `lighten`,
+ * `difference` and `exclusion` — the pass is the identity and the output *is*
+ * the input. A one-frame reference for the most stateful node in the catalogue
+ * would pin the identity: the decay, the blend, the drift, the zoom and the spin
+ * could all be wrong and it would still pass forever. That is precisely the
+ * failure `vacuous()` in `run.mjs` exists to refuse, and it would refuse this.
+ *
+ * **Eight**, and the number is measured rather than picked. Rendering feedback
+ * for twenty-four frames at both variants and diffing each frame against the one
+ * before it, against frame 0, and against a run with `decay` lowered by 0.01:
+ *
+ * - The **surprise** variant — decay 0.6, `lighten`, 40% trail, drifting −6 px
+ *   both ways with a 1.02 zoom and a −0.01 turn — reaches a fixed point exactly
+ *   here. Frame 7 still differs from frame 6, and every frame from 8 to 23 is
+ *   byte-identical to frame 8. Eight is therefore the first frame at which the
+ *   trail is fully established rather than caught part-way up.
+ * - The **defaults** variant — decay 0.9, `screen`, no transform — has by then
+ *   moved 71.04% of its pixels, by up to 93 code values of 255, away from the
+ *   frame-0 identity. The reference records the accumulation, not the input.
+ * - **It moves when the loop changes.** Lowering decay by 0.01, a 1.1% change,
+ *   moves the frame-8 reference on 67.12% of pixels by up to 3/255 at defaults
+ *   and on 45.26% by up to 2/255 at surprise — both past the 1/255 tolerance the
+ *   set is compared at. The same perturbation on a frame-0 reference moves
+ *   nothing at all, because at frame 0 the history it scales is zero.
+ *
+ * Going further buys little: by frame 23 the defaults sensitivity has only
+ * reached 5/255, and the surprise variant has been stationary for fifteen
+ * frames. Sixteen extra dispatches over the whole run cost nothing measurable.
+ */
+const FEEDBACK_FRAMES = 8;
 
 /** Seed for the void-and-cluster tile, matching `web/src/main.ts`. */
 const BLUE_NOISE_SEED = 0x5eed_0d17n;
@@ -617,89 +673,144 @@ async function renderOne(index: number): Promise<RenderOutcome> {
   }
 
   const nodeId = `golden/${entry.effect}/${entry.variant}`;
-  const color = new SurfaceChain(
-    gpuLayer.textures,
-    "rgba16float",
-    source,
-    FIXTURE_WIDTH,
-    FIXTURE_HEIGHT,
-    `${nodeId}/color`,
-  );
-  const index_ = new SurfaceChain(
-    gpuLayer.textures,
-    "r32uint",
-    null,
-    FIXTURE_WIDTH,
-    FIXTURE_HEIGHT,
-    `${nodeId}/index`,
-  );
+  // The declaration, not a name. `readsFeedback` is what the frame store, the
+  // node cache and the seam validator all key off, and it is what makes this
+  // loop cover a stateful node nobody has written yet.
+  const stateful = descriptor.readsFeedback === true;
+  const frames = stateful ? FEEDBACK_FRAMES : 1;
+
+  /**
+   * One frame, rendered the way `state/render/gpu-backend.ts` renders one.
+   *
+   * The input is the fixture on **every** frame, which is what a still document
+   * hands a feedback node: everything upstream is a pure function of the
+   * document, so it produces the same picture each time and the only thing that
+   * moves between frames is the history. The output is handed to the store as
+   * the next frame's history and then released — the store took a copy, and one
+   * texture with two owners is the defect `FeedbackStore.record` is written to
+   * avoid.
+   *
+   * Only the frame the reference stores is read back. A readback is a GPU→CPU
+   * stall, and the frames before the last one exist to advance the trail rather
+   * than to be looked at; the queue orders the copy before the next dispatch, so
+   * skipping the sync changes nothing about what is rendered.
+   */
+  const renderFrame = async (frame: number, readBack: boolean): Promise<RenderOutcome | null> => {
+    const color = new SurfaceChain(
+      gpuLayer.textures,
+      "rgba16float",
+      source,
+      FIXTURE_WIDTH,
+      FIXTURE_HEIGHT,
+      `${nodeId}/color`,
+    );
+    const index_ = new SurfaceChain(
+      gpuLayer.textures,
+      "r32uint",
+      null,
+      FIXTURE_WIDTH,
+      FIXTURE_HEIGHT,
+      `${nodeId}/index`,
+    );
+
+    try {
+      const fixtureExtent: Extent = { width: FIXTURE_WIDTH, height: FIXTURE_HEIGHT };
+      // The extent the effect under test reads. Not the fixture's the moment
+      // anything upstream resamples — which nothing upstream here does, since the
+      // quantizer is pointwise, but taking it from the prepared node rather than
+      // assuming is what keeps that a fact instead of a coincidence.
+      let reads = fixtureExtent;
+
+      if (descriptor.requiresIndexMap) {
+        const upstreamNode = prepareNodePasses(
+          upstream.gpu,
+          renderState(
+            `${nodeId}/upstream`,
+            upstream.descriptor,
+            upstream.gpu,
+            defaultParams(upstream.descriptor),
+            gpuPalette.count,
+          ),
+          fixtureExtent,
+        );
+        for (const batch of planExecution([upstreamNode.unit]).batches) {
+          gpuLayer.executor.run(batch, { color, index: index_, palette: gpuPalette });
+        }
+        reads = upstreamNode.output;
+      }
+
+      // The previous frame at this node's position, from the store the product
+      // reads — not a texture this file cleared and kept, which would be a
+      // second, weaker frame store agreeing with the real one only where the
+      // real one is simple. `null` for the effects that bind no history; the
+      // scheduler only looks at it for a pass that binds `feedback-color`.
+      const history = stateful ? gpuLayer.feedback.historyFor(nodeId, frame, reads) : null;
+
+      const node = prepareNodePasses(
+        gpu,
+        renderState(nodeId, descriptor, gpu, values, gpuPalette.count),
+        reads,
+      );
+      for (const batch of planExecution([node.unit]).batches) {
+        gpuLayer.executor.run(batch, { color, index: index_, palette: gpuPalette, feedback: history });
+      }
+
+      // What the chain actually holds, not what the plan predicted. The two agree
+      // — `resolveScheduledOutput` refuses a pass where they do not — and reading
+      // the chain means a readback can never be asked for a shape the texture is
+      // not.
+      const wrote = color.extent;
+
+      // Recorded only while another frame will read it. The last frame's output
+      // is the reference, and a store entry nothing reads is a full working
+      // surface held for nothing.
+      if (stateful && frame + 1 < frames) {
+        gpuLayer.feedback.record(nodeId, frame, color.current, wrote);
+      }
+
+      if (!readBack) return null;
+      const readback = await readColorSurface(
+        gpuLayer.context,
+        gpuLayer.staging,
+        color.current,
+        wrote.width,
+        wrote.height,
+        nodeId,
+      );
+      return {
+        ok: true,
+        rgba: toBase64(encodeSrgb(readback.surface, wrote.width, wrote.height)),
+        width: wrote.width,
+        height: wrote.height,
+      };
+    } finally {
+      const produced = color.hasContent ? color.current : null;
+      const producedIndex = index_.hasContent ? index_.current : null;
+      color.release();
+      index_.release();
+      if (produced !== null && produced !== source) gpuLayer.textures.release(produced);
+      if (producedIndex !== null) gpuLayer.textures.release(producedIndex);
+    }
+  };
 
   try {
-    const fixtureExtent: Extent = { width: FIXTURE_WIDTH, height: FIXTURE_HEIGHT };
-    // The extent the effect under test reads. Not the fixture's the moment
-    // anything upstream resamples — which nothing upstream here does, since the
-    // quantizer is pointwise, but taking it from the prepared node rather than
-    // assuming is what keeps that a fact instead of a coincidence.
-    let reads = fixtureExtent;
-
-    if (descriptor.requiresIndexMap) {
-      const upstreamNode = prepareNodePasses(
-        upstream.gpu,
-        renderState(
-          `${nodeId}/upstream`,
-          upstream.descriptor,
-          upstream.gpu,
-          defaultParams(upstream.descriptor),
-          gpuPalette.count,
-        ),
-        fixtureExtent,
-      );
-      for (const batch of planExecution([upstreamNode.unit]).batches) {
-        gpuLayer.executor.run(batch, { color, index: index_, palette: gpuPalette });
-      }
-      reads = upstreamNode.output;
+    let last: RenderOutcome | null = null;
+    for (let frame = 0; frame < frames; frame += 1) {
+      last = await renderFrame(frame, frame + 1 === frames);
     }
-
-    const node = prepareNodePasses(
-      gpu,
-      renderState(nodeId, descriptor, gpu, values, gpuPalette.count),
-      reads,
-    );
-    for (const batch of planExecution([node.unit]).batches) {
-      gpuLayer.executor.run(batch, { color, index: index_, palette: gpuPalette });
+    if (last === null) {
+      throw new Error(`the last frame of ${nodeId} was not read back`);
     }
-
-    // What the chain actually holds, not what the plan predicted. The two agree
-    // — `resolveScheduledOutput` refuses a pass where they do not — and reading
-    // the chain means a readback can never be asked for a shape the texture is
-    // not.
-    const wrote = color.extent;
-    const readback = await readColorSurface(
-      gpuLayer.context,
-      gpuLayer.staging,
-      color.current,
-      wrote.width,
-      wrote.height,
-      nodeId,
-    );
-    return {
-      ok: true,
-      rgba: toBase64(encodeSrgb(readback.surface, wrote.width, wrote.height)),
-      width: wrote.width,
-      height: wrote.height,
-    };
+    return last;
   } catch (error) {
     // Collected rather than thrown past the driver: one effect that cannot run
     // must not hide the forty-three that can, exactly as the CPU harness
     // collects its comparison failures instead of asserting on the first.
     return { ok: false, error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) };
   } finally {
-    const produced = color.hasContent ? color.current : null;
-    const producedIndex = index_.hasContent ? index_.current : null;
-    color.release();
-    index_.release();
-    if (produced !== null && produced !== source) gpuLayer.textures.release(produced);
-    if (producedIndex !== null) gpuLayer.textures.release(producedIndex);
+    // The chain's two textures outlive the loop otherwise: nothing else ever
+    // asks for this node again, and `renderOne` is called 112 times.
+    if (stateful) gpuLayer.feedback.reset(nodeId);
   }
 }
 
