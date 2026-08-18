@@ -159,11 +159,48 @@ export async function chooseDestinationForType(
   }
 }
 
-/** Write the blob to the destination. */
+/**
+ * An export that produced no bytes. Refused rather than written.
+ *
+ * Named so a caller can tell it apart from a write that failed: nothing was
+ * touched, so there is nothing to clean up and nothing was overwritten.
+ */
+export class EmptyExportError extends Error {
+  constructor(name: string) {
+    super(
+      `this export produced no bytes, so "${name}" was not written. A file that ` +
+        `arrives and is empty is worse than an export that fails, because nothing ` +
+        `says anything went wrong — so it is refused here instead of handed over.`,
+    );
+    this.name = "EmptyExportError";
+  }
+}
+
+/**
+ * Write the blob to the destination.
+ *
+ * **An empty blob is refused, and refused before the destination is touched.**
+ * Every export in the application funnels through here — still, animated and
+ * batch — so this is the one place that can promise no zero-length file ever
+ * reaches a disk. The order matters as much as the check: on the File System
+ * Access path `createWritable()` truncates the file the person picked the
+ * moment it is called, so refusing after it would already have replaced
+ * whatever was there with the empty file this exists to prevent.
+ */
 export async function writeToDestination(
   destination: Destination,
   blob: Blob,
 ): Promise<void> {
+  if (blob.size === 0) {
+    const name =
+      destination.kind === "download" ? destination.name : destination.handle.name;
+    log.error("the export produced no bytes and was refused", {
+      name,
+      via: destination.kind,
+    });
+    throw new EmptyExportError(name);
+  }
+
   if (destination.kind === "file-system-access") {
     const writable = await destination.handle.createWritable();
     try {

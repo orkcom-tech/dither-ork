@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import { setLevel } from "../../lib/log";
 import type { ExportFrame } from "../types";
 import {
+  GifBytesLostError,
   GifPaletteError,
   MIN_GIF_DELAY,
   createGifEncoder,
@@ -235,6 +236,99 @@ describe("the GIF driver", () => {
       timing: { frames: 0, fps: 10 },
     });
     await expect(encoder.finish()).rejects.toThrow(/at least one frame/);
+  });
+});
+
+/**
+ * The file the encoder wrote has to be the file that goes in the Blob.
+ *
+ * The real core runs in the render worker and its buffer is **transferred**
+ * across `postMessage`, which detaches it at the sender. A detached
+ * `ArrayBuffer` reads as zero length and throws nothing at all, so a driver that
+ * reports the core's own `byteLength` while blobbing the array it was handed
+ * writes an empty file and calls it a success — which is precisely the failure
+ * a person sees as "it downloaded and it is zero bytes, and nothing said
+ * anything was wrong".
+ *
+ * The detach below is a real one, performed the way the worker performs it,
+ * rather than a description of one.
+ */
+function detach(bytes: Uint8Array): Uint8Array {
+  structuredClone(bytes.buffer, { transfer: [bytes.buffer as ArrayBuffer] });
+  return bytes;
+}
+
+/** A core whose file is lost on the way out, exactly as a transfer loses it. */
+function losingCore(byteLength: number): GifCore {
+  return {
+    createAnimation(width, height): GifCoreAnimation {
+      let frames = 0;
+      return {
+        pushFrame() {
+          frames += 1;
+        },
+        finish(paletteRgb, _delay, _loopForever, transparentIndex): GifCoreResult {
+          const file = new Uint8Array(byteLength);
+          file.set([0x47, 0x49, 0x46, 0x38, 0x39, 0x61].slice(0, byteLength));
+          return {
+            bytes: detach(file),
+            frames,
+            // The core measured the file it wrote. This number is right; the
+            // bytes are the thing that did not arrive.
+            byteLength,
+            paletteEntries: paletteRgb.length / 3,
+            tableEntries: 4,
+            minCodeSize: 2,
+            croppedFrames: 0,
+            pixelsWritten: width * height * frames,
+            transparent: transparentIndex >= 0,
+          };
+        },
+      };
+    },
+  };
+}
+
+describe("bytes that did not survive the trip out of the encoder", () => {
+  it("is refused, rather than blobbed as an empty file with the encoder's size on it", async () => {
+    const encoder = createGifEncoder({
+      core: losingCore(930_012),
+      settings: SETTINGS,
+      timing: { frames: 1, fps: 10 },
+    });
+    await encoder.addFrame(frameOf(2, 2, [[0, 0, 0, 255]]), 0);
+
+    await expect(encoder.finish()).rejects.toThrow(GifBytesLostError);
+  });
+
+  it("says both numbers, because the difference between them is the diagnosis", async () => {
+    const encoder = createGifEncoder({
+      core: losingCore(930_012),
+      settings: SETTINGS,
+      timing: { frames: 1, fps: 10 },
+    });
+    await encoder.addFrame(frameOf(2, 2, [[0, 0, 0, 255]]), 0);
+
+    const error = await encoder.finish().catch((reason: unknown) => reason);
+    expect((error as Error).message).toContain("930012");
+    expect((error as Error).message).toContain("0 arrived");
+  });
+
+  it("reports the file's own size, not the encoder's claim about it", async () => {
+    const { core } = recordingCore();
+    const encoder = createGifEncoder({
+      core,
+      settings: SETTINGS,
+      timing: { frames: 1, fps: 10 },
+    });
+    await encoder.addFrame(frameOf(2, 2, [[0, 0, 0, 255]]), 0);
+
+    const result = await encoder.finish();
+    // Measured from the artifact, so the number beside the button and the number
+    // on disk cannot disagree. Every other animated encoder here already does
+    // this, and so does the still path.
+    expect(result.bytes).toBe(result.blob.size);
+    expect(result.blob.size).toBeGreaterThan(0);
   });
 });
 

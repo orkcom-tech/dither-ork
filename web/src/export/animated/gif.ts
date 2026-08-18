@@ -114,6 +114,33 @@ export class GifPaletteError extends Error {
 }
 
 /**
+ * The encoder reported one size and handed over a different number of bytes.
+ *
+ * The two numbers come from different places on purpose — `byteLength` is the
+ * core's own measurement of the file it wrote, `bytes` is the array that
+ * arrived here — and they can only disagree if the file was lost on the way.
+ * The way that happens in this architecture is a **detached `ArrayBuffer`**: the
+ * encoder lives in the render worker and its buffer is *transferred* across the
+ * message boundary, and a transferred buffer reads as zero length at the sender
+ * with no error thrown anywhere. Blobbing that array while reporting the core's
+ * number is exactly how a zero-byte file reaches somebody's disk with a success
+ * message beside it.
+ */
+export class GifBytesLostError extends Error {
+  constructor(reported: number, received: number) {
+    super(
+      `the GIF encoder wrote ${reported} bytes and ${received} arrived here, so the ` +
+        `file was lost between the encoder and the export and nothing will be ` +
+        `written. The encoder runs in the render worker and its buffer is ` +
+        `transferred across that boundary; a transferred ArrayBuffer is detached at ` +
+        `the sender and reads as zero length without throwing, which is what a ` +
+        `received count of 0 means here.`,
+    );
+    this.name = "GifBytesLostError";
+  }
+}
+
+/**
  * The delay, in hundredths of a second, that comes closest to `fps`.
  *
  * Exported because the panel states the consequence before the export runs
@@ -216,6 +243,20 @@ class GifAnimationEncoder implements AnimatedEncoder {
     );
     throwIfCancelled(this.#options.signal);
 
+    // Before anything is reported, because everything reported below — the log
+    // line, the panel's "930 kB written", `AnimatedResult.bytes` — would
+    // otherwise be describing a file that is not the one about to be written.
+    // See {@link GifBytesLostError}.
+    const bytes = encoded.bytes as Bytes;
+    if (bytes.length !== encoded.byteLength) {
+      log.error("the GIF's bytes did not survive the trip out of the encoder", {
+        reported: encoded.byteLength,
+        received: bytes.length,
+        frames: encoded.frames,
+      });
+      throw new GifBytesLostError(encoded.byteLength, bytes.length);
+    }
+
     const playbackFps = gifPlaybackFps(delay);
     const notes: string[] = [];
 
@@ -268,16 +309,19 @@ class GifAnimationEncoder implements AnimatedEncoder {
 
     // Copied into the Blob rather than wrapped, so the encoder's buffer is
     // released with the job rather than pinned for the life of the file.
-    const bytes = encoded.bytes as Bytes;
+    const blob = new Blob([bytes], { type: "image/gif" });
     return {
-      blob: new Blob([bytes], { type: "image/gif" }),
+      blob,
       format: "gif",
       width: this.#width,
       height: this.#height,
       frames: encoded.frames,
       fps: this.#options.timing.fps,
       playbackFps,
-      bytes: encoded.byteLength,
+      // The file's own size, like every other encoder here and like the still
+      // path's `encoded.blob.size`. A number taken from the encoder's report
+      // instead would be a claim about a file rather than a measurement of it.
+      bytes: blob.size,
       indexed: true,
       paletteEntries: encoded.paletteEntries,
       flattened: this.#builder.flattened,

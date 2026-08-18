@@ -156,6 +156,7 @@ export {
 export { UNTITLED_BASE, baseName, exportFileName } from "./filename";
 
 export {
+  EmptyExportError,
   chooseDestination,
   chooseDestinationForType,
   deliveryCapability,

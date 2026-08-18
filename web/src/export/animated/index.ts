@@ -117,6 +117,7 @@ export {
 } from "./palette";
 
 export {
+  GifBytesLostError,
   GifPaletteError,
   MAX_GIF_FPS,
   MIN_GIF_DELAY,
